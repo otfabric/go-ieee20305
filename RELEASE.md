@@ -7,7 +7,7 @@ API.
 
 ## v0.3.0
 
-**Date:** unreleased  
+**Date:** 2026-10-22  
 **Previous release:** v0.2.0
 
 ### Summary
