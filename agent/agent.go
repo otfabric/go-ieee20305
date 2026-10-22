@@ -1,16 +1,5 @@
 // SPDX-License-Identifier: MIT
 
-// Package agent is the behaviour of an IEEE 2030.5 device on top of package
-// client: it finds the server's resources from DeviceCapability, keeps its
-// clock in step with the server's, registers its EndDevice and checks the
-// PIN of its Registration, and then polls its FunctionSetAssignments at the
-// server's pollRate, retrying with backoff when the server fails.
-//
-// Run does all of this until its context ends. The function sets an agent
-// takes part in plug into it as handlers: for DER, DRLC, messaging, pricing
-// and prepayment, the agent schedules the events of the device's programs
-// with randomization and primacy, passes their transitions to the handler
-// of the function set and posts the Responses they ask for.
 package agent
 
 import (

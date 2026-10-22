@@ -4,6 +4,15 @@
 // documents of package csipaus, the ConnectionPoint of each EndDevice, and
 // the site limits (dynamic operating envelopes) of DERControls and
 // DefaultDERControls.
+//
+//	srv, err := server.New(csipserver.Configure(server.Config{}))
+//	// The limits of a program when no control applies:
+//	err = csipserver.SetDefaultLimits(ctx, srv.Admin(), program,
+//		csipaus.Limits{Export: csipserver.Watts(5000)})
+//	// An envelope of 1.5 kW export for the next 30 minutes:
+//	env := csipserver.Envelope(mrid, time.Now(), 30*time.Minute,
+//		csipaus.Limits{Export: csipserver.Watts(1500)})
+//	_, err = srv.Admin().Create(ctx, program+"/derc", env, "")
 package csipserver
 
 import (

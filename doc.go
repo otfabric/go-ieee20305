@@ -25,12 +25,23 @@
 //
 // Entry points:
 //
-//   - package csipaus: the CSIP-AUS (Australia) profile.
-//   - package client: an IEEE 2030.5 client for a utility server.
-//   - package server: an IEEE 2030.5 server as an http.Handler.
-//   - package security: mutual TLS, LFDI/SFDI derivation, certificate
-//     chain validation.
-//   - package schedule: primacy-based event scheduling and the
-//     active/superseded/cancelled state machine.
-//   - package discovery: DNS-SD service discovery for IEEE 2030.5 servers.
+//   - package client: an IEEE 2030.5 client of one server, over mutual TLS.
+//   - package agent: the behaviour of a device on a client: registration,
+//     polling, events and their Responses, metering, subscriptions.
+//   - package server: an IEEE 2030.5 server as an http.Handler, with an
+//     Admin API to provision devices and publish programs and events.
+//   - package security: device identifiers (LFDI, SFDI), certificate
+//     verification and TLS configurations.
+//   - package schedule: event scheduling by primacy, supersession and
+//     randomization.
+//   - package discovery: DNS-SD discovery of servers.
+//   - package csipaus, with csipaus/csipserver and csipaus/csipclient: the
+//     CSIP-AUS (Australia) profile.
+//   - module github.com/otfabric/go-ieee20305/tlsccm: the cipher suite
+//     TLS_ECDHE_ECDSA_WITH_AES_128_CCM_8, which crypto/tls lacks.
+//
+// Errors match the sentinels of this package (ErrNotFound, ErrTimeout, ...;
+// see Retryable), and the client, server and agent take a Logger, a
+// RetryPolicy and metrics hooks. The examples directory of the repository
+// has runnable programs.
 package ieee20305

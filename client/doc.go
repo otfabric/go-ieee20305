@@ -17,6 +17,20 @@
 // Registration retrieves what the server registered, and CheckPIN checks the
 // PIN the device was given out of band.
 //
+//	c, err := client.New(client.Config{
+//		Server:     "https://utility.example:443/dcap",
+//		HTTPClient: client.NewHTTPClient(deviceCert, serverCAs),
+//	})
+//	dcap, err := c.DeviceCapability(ctx)
+//	ed, _, err := c.Register(ctx, dcap.EndDeviceListLink.Href, client.IdentityOf(deviceCert.Leaf))
+//	reg, err := c.Registration(ctx, ed)
+//	err = client.CheckPIN(reg, 111115)
+//
+// Iterate pages through a list and Walk through the resource tree.
+// Subscribe asks for notifications, which NewNotificationHandler receives.
+// Config.RetryPolicy, Logger and Metrics are the plug points of the module
+// (see OBSERVABILITY.md).
+//
 // Package agent builds the behaviour of a device on these calls: it
 // registers, checks the PIN and polls the device's resources.
 package client

@@ -1,4 +1,4 @@
-# go-ieee20305 — IEEE 2030.5 for Go
+# go-ieee20305 - IEEE 2030.5 Client and Server Library for Go
 
 [![Go Version](https://img.shields.io/badge/Go-1.23%2B-00ADD8?style=flat&logo=go)](https://go.dev/)
 [![Go Reference](https://pkg.go.dev/badge/github.com/otfabric/go-ieee20305.svg)](https://pkg.go.dev/github.com/otfabric/go-ieee20305)
@@ -6,17 +6,61 @@
 [![CI Status](https://github.com/otfabric/go-ieee20305/actions/workflows/ci.yml/badge.svg)](https://github.com/otfabric/go-ieee20305/actions/workflows/ci.yml)
 [![Interop](https://github.com/otfabric/go-ieee20305/actions/workflows/interop.yml/badge.svg)](https://github.com/otfabric/go-ieee20305/actions/workflows/interop.yml)
 [![Code Coverage](https://codecov.io/gh/otfabric/go-ieee20305/graph/badge.svg)](https://codecov.io/gh/otfabric/go-ieee20305)
+[![Latest Release](https://img.shields.io/github/v/release/otfabric/go-ieee20305?label=release)](https://github.com/otfabric/go-ieee20305/releases)
 
-A Go implementation of [IEEE 2030.5](https://standards.ieee.org/ieee/2030.5/5897/) (Smart Energy Profile 2.0), the smart-grid communication standard for utility-to-DER communication. It covers IEEE 2030.5-2018 and IEEE 2030.5-2023, with support for the CSIP (California) and CSIP-AUS (Australia) implementation profiles. It provides both sides of the HTTPS/XML API:
+A pure Go implementation of [IEEE 2030.5](https://standards.ieee.org/ieee/2030.5/5897/)
+(Smart Energy Profile 2.0), the protocol between utilities, aggregators and
+distributed energy resources (DER): inverters, batteries, EV chargers and
+meters. Editions 2018 and 2023, with the CSIP (California) and CSIP-AUS
+(Australia) profiles. No cgo, no dependencies outside the standard library.
 
-- **`client`**: an IEEE 2030.5 client: resources, lists, walks of the resource tree, registration, subscriptions and notifications;
-- **`agent`**: the behaviour of a device on the client: registration and PIN check, polling, the events of every function set (DER, DRLC, pricing, messaging, prepayment, flow reservation) with their Responses, metering mirrors and files;
-- **`server`**: an IEEE 2030.5 server as an embeddable `http.Handler`, for every resource of the WADL: device provisioning and in-band registration, aggregators and operators, event lifecycle, subscriptions with notifications, metering mirrors, flow reservations;
-- **`ieee20305`** (the module root): the resource model both share, generated from the official IEEE 2030.5-2023 schema;
-- **`csipaus`**: the CSIP-AUS v1.3 profile, generated from the official CSIP-AUS schemas;
-- **`security`**: mutual TLS, LFDI/SFDI derivation, certificate chain validation;
-- **`schedule`**: primacy-based event scheduling and the active/superseded/cancelled state machine;
-- **`discovery`**: DNS-SD service discovery for IEEE 2030.5 servers.
+The library provides:
+
+- A **client** of one server over mutual TLS: every resource and list, paging,
+  walks of the resource tree, registration with the PIN check, subscriptions
+  and a notification handler
+- A device **agent** on the client: registration, polling at the server's
+  pollRate, the events of every function set (DER, demand response, pricing,
+  messaging, prepayment, flow reservation) scheduled by primacy with
+  randomization, the Responses they ask for, default controls, metering
+  mirrors, files, log events and subscriptions
+- A **server** as an embeddable `http.Handler`, for every resource of the
+  IEEE 2030.5 WADL: device provisioning and in-band registration,
+  aggregators and operators, an event lifecycle that keeps the EventStatus
+  and the Active lists, Responses, subscriptions with retried and coalesced
+  notifications, metering mirrors and flow reservations, and an `Admin` API
+  to provision devices and publish programs, events and tariffs
+- The **resource model**, generated from the official IEEE 2030.5-2023 and
+  CSIP-AUS v1.3 schemas: every type with validation, schema defaults and a
+  codec that writes either edition
+- **Certificates and discovery**: LFDI and SFDI, verification of
+  certificates with a HardwareModuleName, DNS-SD, and the CCM_8 cipher suite
+  in the module `tlsccm`
+- What production use needs: `context.Context` everywhere, one taxonomy of
+  errors, retry policies, structured logging and metrics hooks, bounded lists
+  and queues
+- **Verified against third-party stacks**: every push runs the client
+  against the Envoy and GridAPPS-D servers, and the GridAPPS-D, py20305 and
+  EPRI clients against the server, for every operation each offers
+
+**Docs:** [API.md](API.md) (public API) · [ARCHITECTURE.md](ARCHITECTURE.md) (packages, server, agent, generator) · [INTEROPERABILITY.md](INTEROPERABILITY.md) (what is implemented, and the known deviations) · [docs/FEATURES.md](docs/FEATURES.md) (features against the tests and the other stacks) · [ERRORS.md](ERRORS.md) (error semantics) · [OBSERVABILITY.md](OBSERVABILITY.md) (logging, metrics, retries) · [SECURITY.md](SECURITY.md) · [RELEASE.md](RELEASE.md) (changelog) · [examples](examples/README.md)
+
+## Table of contents
+
+- [IEEE 2030.5 in five minutes](#ieee-20305-in-five-minutes)
+- [go-ieee20305 vs Envoy, GridAPPS-D, py20305 and EPRI](#go-ieee20305-vs-envoy-gridapps-d-py20305-and-epri)
+- [Install](#install)
+- [Project structure](#project-structure)
+- [Client quickstart](#client-quickstart)
+- [Server quickstart](#server-quickstart)
+- [Production features](#production-features)
+- [Error semantics](#error-semantics)
+- [Examples](#examples)
+- [Development](#development)
+- [Code generation](#code-generation)
+- [Interop tests](#interop-tests)
+- [Limitations](#limitations)
+- [License](#license)
 
 ## IEEE 2030.5 in five minutes
 
@@ -31,106 +75,231 @@ A Go implementation of [IEEE 2030.5](https://standards.ieee.org/ieee/2030.5/5897
 - **Metering.** Devices report readings by posting a **MirrorUsagePoint** and its **MirrorMeterReadings**, which the server exposes as UsagePoints and MeterReadings.
 - **Editions and profiles.** IEEE 2030.5-2018 and -2023 differ in optional elements and resources. Profiles constrain or extend the standard: **CSIP** (California) and **CSIP-AUS** (Australia, which adds site limits, the dynamic operating envelopes).
 
-## Package overview
+## go-ieee20305 vs Envoy, GridAPPS-D, py20305 and EPRI
 
-| Package | Description |
-|---|---|
-| `ieee20305` | Every type of IEEE 2030.5-2023 (`sep.xsd` 2.2) with XML tags, validation, schema defaults, document codec, and the WADL resource table. Generated. |
-| `csipaus` | CSIP-AUS v1.3: the redefined IEEE 2030.5 types and the CSIP-AUS namespace. Generated. |
-| `client` | IEEE 2030.5 client over HTTPS with mutual TLS. |
-| `agent` | Device behaviour on `client`: registration, polling, events, Responses, metering. |
-| `server` | IEEE 2030.5 server as an `http.Handler`, with `Admin` to provision and seed it. |
-| `csipaus/csipserver`, `csipaus/csipclient` | CSIP-AUS for the server (profile, ConnectionPoint, site limits) and the client. |
-| `security` | Certificate handling, LFDI/SFDI derivation, mTLS configuration. |
-| `schedule` | Event scheduling: primacy, overlap resolution, randomization. |
-| `discovery` | DNS-SD service discovery (`_smartenergy._tcp`). |
-| `internal/xml` | Document encoding and decoding shared by `ieee20305` and `csipaus`. |
-| `internal/gen` | The code generator, and the tooling that downloads and checks the upstream schemas. |
-| `tlsccm` (module) | The cipher suite TLS_ECDHE_ECDSA_WITH_AES_128_CCM_8, which `crypto/tls` lacks, through the TLS fork of GridAPPS-D. A module of its own, with dependencies. |
-| `interop` (module) | Tests of the client and the server against other implementations: the images of [ieee20305-interop](https://github.com/otfabric/ieee20305-interop). |
+go-ieee20305 is tested against four other implementations (see
+[Interop tests](#interop-tests)). All are useful projects; this table shows
+where they differ so you can pick the right one. The details, feature by
+feature and with what is tested, are in [docs/FEATURES.md](docs/FEATURES.md).
 
-[docs/FEATURES.md](docs/FEATURES.md) lists every feature with its tests, and
-how far Envoy, GridAPPS-D, py20305 and EPRI go with it.
-[ERRORS.md](ERRORS.md) and [OBSERVABILITY.md](OBSERVABILITY.md) describe the
-errors, logging, metrics and retries.
+| Capability | otfabric/go-ieee20305 | [Envoy](https://github.com/bsgip/envoy) | [GridAPPS-D](https://github.com/GRIDAPPSD/ieee-2030_5-server-go) | [py20305](https://github.com/DERSecurity/py20305) | [EPRI client](https://github.com/epri-dev/IEEE-2030.5-Client) |
+|---|:---:|:---:|:---:|:---:|:---:|
+| Language | Go | Python | Go | Python | C |
+| License | MIT | MIT | Battelle BSD | Apache-2.0 | BSD-3-Clause |
+| Client / device | ✅ library and agent | — | ✅ | ✅ | ✅ |
+| Server | ✅ embeddable `http.Handler` | ✅ service with a database | ✅ | — | — |
+| IEEE 2030.5-2018 / 2023 | ✅ / ✅ | ✅ / — | ✅ / ✅ | ✅ / ✅ | ✅ (SEP 2.0.4 draft) / — |
+| CSIP-AUS | ✅ | ✅ | — | ✅ | — |
+| Every function set of the WADL | ✅ | DER, pricing, metering ¹ | DER, messaging, flow reservation, metering ¹ | DER, pricing, metering ¹ | DER, partly DRLC, metering ¹ |
+| Subscriptions and notifications | ✅ both ends | aggregators only | ✅ | ✅ | — |
+| CCM_8 cipher suite | ✅ module `tlsccm` ² | ✅ | ✅ | ✅ | ✅ |
+| Dependencies | standard library only | PostgreSQL and more | Go modules | Python packages | OpenSSL |
 
-## Quick start
+1. As far as the interop images exercise them; see
+   [docs/FEATURES.md](docs/FEATURES.md).
+2. `crypto/tls` has no CCM_8: the core module uses the AES-GCM suites, and
+   the separate module `tlsccm` adds CCM_8 through the TLS fork of
+   GridAPPS-D.
+
+Choose **go-ieee20305** to embed a client, a device agent or a server in a Go
+program, with every function set and both editions. Choose **Envoy** for a
+CSIP-AUS utility server as a ready service with its database and admin API.
+Choose **GridAPPS-D** for a Go server and client within the GridAPPS-D
+platform. Choose **py20305** for a Python client with CSIP-AUS. Choose the
+**EPRI client** for a C client on constrained devices.
+
+## Install
+
+```sh
+go get github.com/otfabric/go-ieee20305@latest
+```
+
+Go 1.23 or later. The CCM_8 module needs Go 1.26.8:
+
+```sh
+go get github.com/otfabric/go-ieee20305/tlsccm@latest
+```
+
+## Project structure
+
+```
+go-ieee20305/
+├── *_gen.go, codec.go, …   the resource model, generated from sep.xsd 2.2 and the WADL
+├── csipaus/                CSIP-AUS v1.3 types (generated)
+│   ├── csipserver/         the CSIP-AUS profile of a server, envelopes, default limits
+│   └── csipclient/         the ConnectionPoint of a device
+├── client/                 IEEE 2030.5 client, walks, notifications
+├── agent/                  the behaviour of a device on a client
+├── server/                 IEEE 2030.5 server (http.Handler) and its Admin API
+├── security/               LFDI/SFDI, certificate verification, TLS configurations
+├── schedule/               event scheduling: primacy, supersession, randomization
+├── discovery/              DNS-SD browse and advertise
+├── tlsccm/                 module: the CCM_8 cipher suite
+├── interop/                module: tests against the ieee20305-interop images
+├── e2e/                    end-to-end, chaos and load tests
+├── examples/               runnable programs
+├── internal/gen/           the code generator and the schema tooling
+└── schemas/                the manifest of the pinned upstream schemas
+```
+
+## Client quickstart
+
+A device: a client with its certificate, and an agent that registers,
+checks the PIN, and applies the DER controls of its programs.
 
 ```go
 package main
 
 import (
-	"fmt"
+	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"log"
+	"os"
+	"os/signal"
 
-	ieee20305 "github.com/otfabric/go-ieee20305"
-	"github.com/otfabric/go-ieee20305/csipaus"
+	"github.com/otfabric/go-ieee20305/agent"
+	"github.com/otfabric/go-ieee20305/client"
+	"github.com/otfabric/go-ieee20305/schedule"
 )
 
 func main() {
-	// A CSIP-AUS dynamic operating envelope: a 5 kW export limit.
-	var ctl csipaus.DERControl
-	ctl.MRID = ieee20305.MRIDType{0x01, 0x02, 0x03, 0x04}
-	ctl.Interval = ieee20305.DateTimeInterval{Start: 1700000000, Duration: 1800}
-	ctl.DERControlBase.OpModExpLimW = &ieee20305.ActivePower{Multiplier: 3, Value: 5}
-	if err := ctl.Validate(); err != nil {
-		log.Fatal(err)
-	}
-	doc, err := csipaus.Marshal(&ctl)
-	if err != nil {
-		log.Fatal(err)
-	}
-	fmt.Println(string(doc))
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
 
-	// Decode any IEEE 2030.5 document.
-	v, err := ieee20305.Decode([]byte(`<Time xmlns="urn:ieee:std:2030.5:ns"><currentTime>1700000000</currentTime><dstEndTime>0</dstEndTime><dstOffset>0</dstOffset><dstStartTime>0</dstStartTime><quality>7</quality><tzOffset>0</tzOffset></Time>`))
+	device, err := tls.LoadX509KeyPair("device.crt", "device.key")
 	if err != nil {
 		log.Fatal(err)
 	}
-	fmt.Println(v.(*ieee20305.Time).CurrentTime)
+	device.Leaf, _ = x509.ParseCertificate(device.Certificate[0])
+	pem, err := os.ReadFile("ca.crt")
+	if err != nil {
+		log.Fatal(err)
+	}
+	roots := x509.NewCertPool()
+	roots.AppendCertsFromPEM(pem)
+
+	c, err := client.New(client.Config{
+		Server:     "https://utility.example/dcap",
+		HTTPClient: client.NewHTTPClient(device, roots),
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+	a, err := agent.New(agent.Config{
+		Client:    c,
+		Identity:  client.IdentityOf(device.Leaf),
+		PIN:       111115, // given to the device out of band
+		VerifyPIN: true,
+		OnDERControl: func(ctx context.Context, t schedule.Transition) error {
+			log.Printf("control %s: %v", t.Event.MRID, t.To) // apply or release it
+			return nil
+		},
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer a.Close()
+	if err := a.Run(ctx); err != nil && ctx.Err() == nil {
+		log.Fatal(err)
+	}
 }
 ```
 
-## Design principles
+Without the agent, `client.Client` reads and writes any resource:
+`DeviceCapability`, `Register`, `Get`, `Iterate`, `Walk`, `Post`, `Put`,
+`Subscribe`. For CSIP-AUS, set `Codec: csipaus.Codec{}` and read the site
+limits with `csipaus.LimitsOf`.
 
-- **Zero external dependencies.** The module depends only on the Go standard library. `make nodeps` (part of `make check`) enforces this. The nested modules `tlsccm` and `interop` have dependencies of their own.
-- **The specification is the source of truth.** The resource types are generated from the official IEEE 2030.5 and CSIP-AUS schemas by the generator in `internal/gen`; nothing in the model is maintained by hand. See [Code generation](#code-generation).
-- **Certificate-based identity.** Device identity is derived from the device certificate (LFDI = SHA-256 fingerprint, SFDI = truncated fingerprint). No passwords, no tokens.
-- **Standard Go conventions.** `gofmt`, `go vet`, the race detector, and fuzz testing.
-- **Tested end to end and against others.** `e2e` runs agents against the server over mutual TLS, with every function set, under injected faults (lost, replayed and truncated requests, 503s, aborted responses, connection resets during the TLS handshake, clock skew) and with 500 agents at once; `interop` runs the client against the Envoy and GridAPPS-D servers and the GridAPPS-D, py20305 and EPRI clients against the server. Statement coverage is gated at 90%.
+## Server quickstart
+
+A server: provision a device with its PIN, give it a DER program, and serve
+over mutual TLS. `Admin` is the operator's API; devices see the standard
+resources.
+
+```go
+srv, err := server.New(server.Config{
+	OnResponse: func(ctx context.Context, href string, r any) { /* a device answered */ },
+})
+if err != nil {
+	log.Fatal(err)
+}
+defer srv.Close()
+a := srv.Admin()
+_ = a.Root(ctx, "DERProgramList", "/derp", a.Document("DERProgramList"))
+
+lfdi := security.CertificateLFDI(deviceCert)
+_, err = a.ProvisionDevice(ctx, server.DeviceSpec{LFDI: lfdi, Register: true, PIN: 111115})
+fsa, err := a.AssignFSA(ctx, lfdi, &ieee20305.FunctionSetAssignments{MRID: ieee20305.MRIDType{1}})
+err = a.NewList(ctx, "DERProgramList", fsa+"/derp", fsa, "DERProgramListLink", lfdi.String())
+program, err := a.Create(ctx, "/derp", &ieee20305.DERProgram{Primacy: 1}, "")
+err = a.AddMember(ctx, fsa+"/derp", program)
+_, err = a.Create(ctx, program+"/derc", control, "") // a *ieee20305.DERControl
+
+hs := &http.Server{Addr: ":8443", Handler: srv, TLSConfig: security.ServerTLSConfig(serverCert, deviceCAs)}
+log.Fatal(hs.ListenAndServeTLS("", ""))
+```
+
+The server keeps the EventStatus of the control as it starts and ends,
+computes the ActiveDERControlList, and stores the Responses the device
+posts. `go run ./examples/quickstart` runs both sides in one process.
+
+## Production features
+
+| Feature | How | Notes |
+|---------|-----|-------|
+| Cancellation | `context.Context` on every call of the client, agent and Admin | `Agent.Close` cancels what the agent has in flight |
+| Retries | `ieee20305.RetryPolicy`: `client.Config.RetryPolicy`, `agent.Config.Backoff`, `server.Config.NotificationRetry` | `ExponentialBackoff` with full jitter honours `Retry-After`; the client does not repeat a POST unless `RetryPOST` is set; 4xx are never retried |
+| Structured logging | `ieee20305.NewSlogLogger`, `NewStdLogger`, or any `ieee20305.Logger` | A `component` field per package; silent by default |
+| Metrics hooks | `client.Metrics`, `server.Metrics`, `agent.Metrics`, and the optional `AttemptMetrics`, `NotificationMetrics`, `EventMetrics` | Synchronous, no dependencies; a Prometheus adapter is a few lines ([OBSERVABILITY.md](OBSERVABILITY.md)) |
+| Subscriptions | `client.Subscribe`, `client.NewNotificationHandler`; `agent.Config.NotificationURI`; `server.Config.NotificationClient` | Notifications are coalesced, retried with backoff and cancelled after `NotificationCancelAfter`; `NotificationURIAllowed` guards the URIs devices choose |
+| Bounded resources | `server.Config.MaxListItems`, `EventRetention`; `client.Config.MaxListItems`; capped agent queues | Lists that devices post to keep their newest items; ended events are pruned |
+| Persistence | `server.Config.Store` | In memory by default; a `Store` keeps the resources elsewhere |
+| CCM_8 | module `tlsccm`: `NewHTTPClient`, `NewListener` | Interoperates with GridAPPS-D and EPRI, which offer nothing else |
+
+## Error semantics
+
+| Situation | How it is reported |
+|-----------|--------------------|
+| The server answered 4xx or 5xx | `*ieee20305.StatusError` with the Error document, matching `ErrNotFound`, `ErrForbidden`, `ErrBadRequest`, `ErrConflict`, `ErrServer`, `ErrUnavailable` |
+| No answer in time | `ieee20305.ErrTimeout` |
+| Refused or reset connection, DNS failure | `ieee20305.ErrUnavailable` |
+| Certificate rejected, by either end | `ieee20305.ErrCertificate` |
+| A document that breaks the schema or the protocol | `ieee20305.ErrProtocol`, `*ieee20305.ValidationError` |
+| A value or configuration the library refuses | `ieee20305.ErrInvalid`, `ieee20305.ErrConfiguration` |
+| Used after `Close` | `ieee20305.ErrClosed` |
+| Worth trying again | `ieee20305.Retryable(err)`, `ieee20305.RetryAfter(err)` |
+
+Full guide: **[ERRORS.md](ERRORS.md)**.
+
+## Examples
+
+```sh
+go run ./examples/quickstart      # a server and a device agent in one process
+go run ./examples/server -pki /tmp/pki   # a server on 127.0.0.1:8443, with a test PKI
+go run ./examples/client -pki /tmp/pki   # a device: register, check the PIN, walk
+go run ./examples/csipaus         # CSIP-AUS envelopes, default limits, connection point
+go run ./examples/observability   # logging, metrics and retries
+```
+
+See [examples/README.md](examples/README.md) for what each prints.
 
 ## Development
 
 ```sh
-# Run all checks (format, lint, vet, vulnerability scan, tests, coverage)
-make check
-
-# Run the library tests with the race detector
-make test
-
-# Build the examples into ./bin
-make build
-
-# Run the end-to-end tests
-make e2e
-
-# Run the tests shuffled, twice, with the race detector
-make stress
-
-# Run every fuzz target (FUZZTIME=30s each by default)
-make fuzz
-
-# Test the CCM_8 module (Go 1.26.8)
-make test-tlsccm
-
-# Run the client and the server against the ieee20305-interop images (needs Docker)
-make interop
-
-# Check docs/FEATURES.md against the e2e and interop tests
-make features
+make check        # format, lint, vet, vulnerability scan, tests, coverage gate (90%), tlsccm
+make test         # the library tests with the race detector
+make e2e          # the end-to-end tests
+make stress       # the tests shuffled, twice, with the race detector
+make fuzz         # every fuzz target (FUZZTIME=30s each by default)
+make test-tlsccm  # the CCM_8 module (Go 1.26.8)
+make interop      # against the ieee20305-interop images (needs Docker)
+make features     # docs/FEATURES.md against the e2e and interop tests
+make build        # the examples into ./bin
 ```
 
-Run `make` (or `make help`) for the full list of targets.
+Run `make` (or `make help`) for the full list of targets. See
+[CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Code generation
 
@@ -150,6 +319,66 @@ in the manifest, and regenerate. CI regenerates on every push and fails on any
 difference, validates encoded documents against the official schemas, and
 checks weekly for upstream updates. See [`schemas/README.md`](schemas/README.md).
 
+## Interop tests
+
+The `interop` module tests go-ieee20305 against four independent
+implementations, packaged as container images by
+[otfabric/ieee20305-interop](https://github.com/otfabric/ieee20305-interop):
+[ANU Envoy](https://github.com/bsgip/envoy),
+[GridAPPS-D](https://github.com/GRIDAPPSD/ieee-2030_5-server-go) (server and
+client), [DER Security py20305](https://github.com/DERSecurity/py20305) and
+the [EPRI IEEE 2030.5 client](https://github.com/epri-dev/IEEE-2030.5-Client).
+
+```sh
+make interop    # needs Docker; about two minutes
+```
+
+| Direction | What is checked |
+|-----------|-----------------|
+| go-ieee20305 client → Envoy, GridAPPS-D | For each edition and fixture the server is seeded with (baseline, csip, csip-aus), over CCM_8 and GCM: time, registration and PIN, programs with their default controls and controls, the agent scheduling the active control, metering mirrors, Responses, log events, DER resources, tariffs with their intervals and prices, flow reservations, the CSIP-AUS connection point, and notifications from GridAPPS-D to our `NotificationHandler`; refusal of an unprovisioned device and of a device of another CA |
+| GridAPPS-D, py20305, EPRI clients → go-ieee20305 server | Every operation each client declares, for every edition and fixture it handles: register, discover, poll-controls, poll-pricing, report, respond, log-event, put-der, flow-reservation and subscribe (our notifier delivering to the client's listener); the effect of each is checked on the server through `Admin` |
+
+The images are the only thing shared with ieee20305-interop; nothing of it is
+cloned or built here. Fixtures come from the images; the scenarios and
+assertions live in this repository.
+
+This version is qualified against
+[ieee20305-interop v0.2.0](https://github.com/otfabric/ieee20305-interop/releases/tag/v0.2.0)
+(container contract 0.3: Envoy v2.5.0, GridAPPS-D server v0.18.0 and client
+v0.1.0, py20305 v0.16.0, EPRI client v0.2.11). The images are pinned by
+digest in `interop/images.go` and the Interop workflow, which runs on every
+push and pull request. To test another build, set
+`IEEE20305_INTEROP_ENVOY_IMAGE`, `IEEE20305_INTEROP_GRIDAPPSD_IMAGE`,
+`IEEE20305_INTEROP_PY20305_IMAGE` or `IEEE20305_INTEROP_EPRI_IMAGE`;
+`IEEE20305_INTEROP_TRACE=1` logs every request and answer.
+
+The suite asks each image what it declares (`print-capabilities`) and skips
+what it lacks. Known upstream bugs (`interop/known_test.go`) skip while they
+reproduce and fail once they no longer do:
+
+| Stack | Bug | Effect |
+|-------|-----|--------|
+| EPRI client | Writes documents in the namespace of the draft sep.xsd 2.0.4 | Its `report` and `respond` get 400 from a server of IEEE 2030.5 |
+| py20305 | Does not model the `RateComponentLink` CSIP-AUS 1.3 requires in a TimeTariffInterval | Finds no interval of a CSIP-AUS tariff |
+
+## Limitations
+
+- **CCM_8 needs the module `tlsccm`**, on a fork of the Go TLS stack; the
+  core module, on `crypto/tls`, offers the ECDHE-ECDSA AES-GCM suites.
+- **DNS-SD is not exercised across stacks**: the containers run on Docker
+  networks without multicast, so interop reaches servers by URL.
+  `discovery` is tested against an in-memory network and our own peer.
+- **The server keeps its resources in memory** unless a `Store` is given;
+  there is no database adapter in this module.
+- **Prepayment, billing and files** are implemented and tested end to end
+  here, but no other stack implements them, so they are not verified across
+  implementations.
+- **Verified against four third-party stacks**, not against certified test
+  equipment (such as the SunSpec or UL test harnesses) or field devices.
+
+Details in [INTEROPERABILITY.md](INTEROPERABILITY.md).
+
 ## License
 
-[MIT](LICENSE)
+[MIT](LICENSE). The generated code derives from the IEEE 2030.5 schemas,
+which are not part of this repository; see [schemas/README.md](schemas/README.md).

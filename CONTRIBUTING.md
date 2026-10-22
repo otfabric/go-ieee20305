@@ -26,23 +26,29 @@ Thank you for your interest in contributing to `go-ieee20305`! This document cov
 ### Build & Test
 
 ```sh
-# Run all checks (format, lint, vet, vulnerability scan, tests, coverage)
-make check
-
-# Run the library tests with the race detector
-make test
-
-# Build the examples into ./bin
-make build
-
-# Run the end-to-end tests
-make e2e
-
-# Run the interop suite against reference implementations (needs Docker)
-make interop
+make check        # format, lint, vet, vulnerability scan, tests, coverage gate (90%), tlsccm
+make test         # the library tests with the race detector
+make e2e          # the end-to-end tests
+make stress       # the tests shuffled, twice, with the race detector
+make fuzz         # every fuzz target (FUZZTIME=30s each by default)
+make test-tlsccm  # the CCM_8 module (Go 1.26.8)
+make interop      # against the ieee20305-interop images (needs Docker)
+make features     # docs/FEATURES.md against the e2e and interop tests
+make build        # the examples into ./bin
+make download     # the pinned upstream schemas, for make generate and the schema tests
+make generate     # regenerate the *_gen.go files
 ```
 
 Run `make` (or `make help`) for the full list of targets.
+
+### Documentation
+
+A change of the public API updates its godoc, [API.md](API.md), and the
+README or the guide it touches ([ERRORS.md](ERRORS.md),
+[OBSERVABILITY.md](OBSERVABILITY.md)). A new feature gets a row in
+[docs/FEATURES.md](docs/FEATURES.md) that names its e2e test, and `make
+features` checks it. The programs in [examples](examples) must build and
+run (`make build`).
 
 ## Making Changes
 

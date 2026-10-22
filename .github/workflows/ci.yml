@@ -48,6 +48,11 @@ jobs:
         run: go test -count=1 -race . ./csipaus ./internal/...
       - name: Check docs/FEATURES.md against the tests
         run: make features
+      - name: Run the examples that need no peer
+        run: |
+          go run ./examples/quickstart
+          go run ./examples/csipaus
+          go run ./examples/observability
 
   # Statement coverage of the library packages, with the race detector: the
   # gate is COVER_MIN in the Makefile.

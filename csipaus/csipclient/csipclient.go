@@ -4,6 +4,10 @@
 // (with csipaus.Codec as its codec) and package agent: the ConnectionPoint
 // of its EndDevice. The site limits of the controls it receives are
 // csipaus.LimitsOf them.
+//
+//	ed, err := csipclient.EndDevice(ctx, c, edHref) // c has csipaus.Codec
+//	err = csipclient.SetConnectionPoint(ctx, c, ed, "4407123456")
+//	limits, ok := csipaus.LimitsOf(control) // from agent.Active(agent.DER)
 package csipclient
 
 import (
