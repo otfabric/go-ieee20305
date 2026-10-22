@@ -6,8 +6,7 @@ run-name: "Interop (${{ github.event_name }}) on ${{ github.ref_name }} by @${{ 
 # Envoy and GridAPPS-D servers, and the GridAPPS-D, py20305 and EPRI clients
 # against our server, for every operation and fixture each declares, over
 # CCM_8 (the tlsccm module) and GCM where both ends have it. The images are
-# consumed as published, pinned by digest in interop/images.go: nothing of
-# ieee20305-interop is cloned or built here.
+# consumed as published: nothing of ieee20305-interop is cloned or built here.
 
 on:
   push:
@@ -17,16 +16,16 @@ on:
   workflow_dispatch:
     inputs:
       envoy_image:
-        description: "Envoy image (default: the pin of interop/images.go)"
+        description: "Envoy reference image (default: the pinned release)"
         required: false
       gridappsd_image:
-        description: "GridAPPS-D image (default: the pin of interop/images.go)"
+        description: "GridAPPS-D reference image (default: the pinned release)"
         required: false
       py20305_image:
-        description: "py20305 image (default: the pin of interop/images.go)"
+        description: "py20305 reference image (default: the pinned release)"
         required: false
       epri_image:
-        description: "EPRI image (default: the pin of interop/images.go)"
+        description: "EPRI reference image (default: the pinned release)"
         required: false
 
 permissions:
@@ -34,50 +33,50 @@ permissions:
   packages: read
 
 env:
+  # otfabric/ieee20305-interop v0.2.0 (container contract 0.3): Envoy v2.5.0,
+  # GridAPPS-D server v0.18.0 and client v0.1.0, py20305 v0.16.0, EPRI client
+  # v0.2.11. Pinned by the multi-arch index digests of its release manifest.
+  # Keep in step with interop/images.go.
+  IEEE20305_INTEROP_ENVOY_IMAGE: ${{ inputs.envoy_image || 'ghcr.io/otfabric/ieee20305-interop-envoy@sha256:2dd3587071de81d7b96a7dbf65bf414a06a643a32f5d785b42ba7ebb0cb04d2d' }}
+  IEEE20305_INTEROP_GRIDAPPSD_IMAGE: ${{ inputs.gridappsd_image || 'ghcr.io/otfabric/ieee20305-interop-gridappsd@sha256:7b04e6c482df6536d15ba06e17e4c317a68031cabeed54cc03bc5b395f5b8d68' }}
+  IEEE20305_INTEROP_PY20305_IMAGE: ${{ inputs.py20305_image || 'ghcr.io/otfabric/ieee20305-interop-py20305@sha256:de29e6bd5da56d33199e5e73bc11aa2bd48e4c05c2bacc5c42796e81940045f2' }}
+  IEEE20305_INTEROP_EPRI_IMAGE: ${{ inputs.epri_image || 'ghcr.io/otfabric/ieee20305-interop-epri@sha256:f11a38feee6d971d0027bc9b24ca1b3bc4373018c168fa29c3b902b9c322188f' }}
   GOWORK: "off"
-  # Empty means the pin of interop/images.go.
-  IEEE20305_INTEROP_ENVOY_IMAGE: ${{ inputs.envoy_image }}
-  IEEE20305_INTEROP_GRIDAPPSD_IMAGE: ${{ inputs.gridappsd_image }}
-  IEEE20305_INTEROP_PY20305_IMAGE: ${{ inputs.py20305_image }}
-  IEEE20305_INTEROP_EPRI_IMAGE: ${{ inputs.epri_image }}
 
 jobs:
   interop:
     name: Envoy + GridAPPS-D + py20305 + EPRI, client and server
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
         with:
           go-version-file: interop/go.mod
+          cache: true
           cache-dependency-path: interop/go.sum
+
       - name: Install linters
         run: |
           go install honnef.co/go/tools/cmd/staticcheck@2026.2.2
           curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/v2.15.0/install.sh | sh -s -- -b "$(go env GOPATH)/bin" v2.15.0
 
-      - name: Pull the images
+      - name: Pull reference images
         run: |
-          images=()
-          for name in ENVOY GRIDAPPSD PY20305 EPRI; do
-            var="IEEE20305_INTEROP_${name}_IMAGE"
-            image="${!var}"
-            if [[ -z "${image}" ]]; then
-              image=$(grep -o "ghcr.io/otfabric/ieee20305-interop-${name,,}@sha256:[0-9a-f]*" interop/images.go)
-            fi
-            images+=("${image}")
-          done
+          images=("${IEEE20305_INTEROP_ENVOY_IMAGE}" "${IEEE20305_INTEROP_GRIDAPPSD_IMAGE}" "${IEEE20305_INTEROP_PY20305_IMAGE}" "${IEEE20305_INTEROP_EPRI_IMAGE}")
           # GHCR is occasionally slow or rate limiting: try each pull a few times.
           for image in "${images[@]}"; do
             for attempt in 1 2 3 4 5; do
-              docker pull --quiet "${image}" && break
+              docker pull "${image}" && break
               [[ "${attempt}" == 5 ]] && { echo "::error::cannot pull ${image}"; exit 1; }
               sleep $((attempt * 15))
             done
           done
           {
-            echo "| Stack | Image | Upstream | Contract |"
+            echo "| Reference | Image | Upstream | Contract |"
             echo "|---|---|---|---|"
             for image in "${images[@]}"; do
               docker run --rm "${image}" print-capabilities \
@@ -89,18 +88,25 @@ jobs:
         run: |
           set -o pipefail
           mkdir -p artifacts
-          make test-interop INTEROP_TESTFLAGS=-v 2>&1 | tee artifacts/interop.log
+          make interop INTEROP_TESTFLAGS=-v 2>&1 | tee artifacts/interop.log
           {
             echo
-            echo "Known upstream bugs (skipped while they reproduce):"
+            echo "Known upstream bugs, skipped while they reproduce:"
             echo
-            grep -o 'KNOWN_BUG [^(]*' artifacts/interop.log | sort -u | sed 's/^/- /' || echo "- none"
+            grep -o 'KNOWN_BUG [^(]*' artifacts/interop.log | sort -u | sed 's/^KNOWN_BUG /- /' || echo "- none"
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Upload the log on failure
+      - name: Collect Docker diagnostics on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        run: |
+          mkdir -p artifacts
+          docker ps -a > artifacts/docker-ps.txt || true
+          docker images --digests > artifacts/docker-images.txt || true
+
+      - name: Upload failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v7
         with:
-          name: interop-log
+          name: interop-logs
           path: artifacts/
           if-no-files-found: ignore
