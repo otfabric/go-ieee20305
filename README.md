@@ -49,6 +49,11 @@ A Go implementation of [IEEE 2030.5](https://standards.ieee.org/ieee/2030.5/5897
 | `tlsccm` (module) | The cipher suite TLS_ECDHE_ECDSA_WITH_AES_128_CCM_8, which `crypto/tls` lacks, through the TLS fork of GridAPPS-D. A module of its own, with dependencies. |
 | `interop` (module) | Tests of the client and the server against other implementations: the images of [ieee20305-interop](https://github.com/otfabric/ieee20305-interop). |
 
+[docs/FEATURES.md](docs/FEATURES.md) lists every feature with its tests, and
+how far Envoy, GridAPPS-D, py20305 and EPRI go with it.
+[ERRORS.md](ERRORS.md) and [OBSERVABILITY.md](OBSERVABILITY.md) describe the
+errors, logging, metrics and retries.
+
 ## Quick start
 
 ```go
@@ -120,6 +125,9 @@ make test-tlsccm
 
 # Run the client and the server against the ieee20305-interop images (needs Docker)
 make interop
+
+# Check docs/FEATURES.md against the e2e and interop tests
+make features
 ```
 
 Run `make` (or `make help`) for the full list of targets.

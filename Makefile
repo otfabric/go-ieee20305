@@ -4,7 +4,7 @@
 
 .DEFAULT_GOAL := help
 
-.PHONY: help all build fmt fmt-check lint lint-ci vet vuln test stress coverage cover fuzz check clean interop test-interop test-tlsccm e2e nodeps download schemas generate generate-verify generate-check check-updates
+.PHONY: help all build fmt fmt-check lint lint-ci vet vuln test stress coverage cover fuzz check clean interop test-interop test-tlsccm e2e features nodeps download schemas generate generate-verify generate-check check-updates
 help: ## This help
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z0-9_-]+:.*?## / {printf "\033[36m%-30s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
@@ -78,6 +78,9 @@ e2e: ## Run the end-to-end tests of this module's client against this module's s
 	@echo "Running end-to-end tests"
 	@go test -count=1 -race ./e2e/...
 
+features: ## Check docs/FEATURES.md against the e2e and interop tests
+	@go run scripts/features.go
+
 nodeps: ## Fail if the module requires anything outside the standard library
 	@echo "Checking that the module has no dependencies"
 	@deps="$$(go list -m all | tail -n +2)"; \
@@ -132,7 +135,7 @@ test-tlsccm: ## Vet, lint and test the tlsccm module (CCM_8, Go 1.26.8 and depen
 	@echo "Testing the tlsccm module"
 	@cd tlsccm && go vet ./... && staticcheck ./... && golangci-lint run ./... && govulncheck ./... && go test -count=1 -race ./...
 
-check: fmt fmt-check nodeps generate-verify lint lint-ci vet vuln test coverage-gate test-tlsccm ## Run format + generated-code check + lint + vet + vuln + test + coverage gate + the tlsccm module
+check: fmt fmt-check nodeps features generate-verify lint lint-ci vet vuln test coverage-gate test-tlsccm ## Run format + generated-code check + lint + vet + vuln + test + coverage gate + the tlsccm module
 
 # ── Code generation ──────────────────────────────────────────────────────────
 

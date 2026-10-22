@@ -46,6 +46,8 @@ jobs:
         run: make generate-check
       - name: Test against the official examples and schemas
         run: go test -count=1 -race . ./csipaus ./internal/...
+      - name: Check docs/FEATURES.md against the tests
+        run: make features
 
   # Statement coverage of the library packages, with the race detector: the
   # gate is COVER_MIN in the Makefile.
