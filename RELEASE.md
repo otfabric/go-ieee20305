@@ -1,15 +1,16 @@
 # go-ieee20305 Releases
 
 Releases are cut with the `Release` workflow (semantic versioning, annotated
-tag, GitHub release); the section of the version below is the release's
-notes. Before v1.0.0 a minor release may change the API.
+tag, GitHub release). The section of the version below, up to the `---` that
+ends it, is the release's notes. Before v1.0.0 a minor release may change the
+API.
 
 ## v0.2.0
 
-**Date:** 2026-10-22
+**Date:** 2026-10-22  
 **Previous release:** v0.1.0
 
-## Summary
+### Summary
 
 A first IEEE 2030.5 client: it reads and writes the resources of a server
 over HTTPS with mutual TLS.
@@ -18,8 +19,6 @@ over HTTPS with mutual TLS.
 
 - `StatusError` has a new field, `Document`. Code that builds it with unkeyed
   fields has to be adjusted.
-
-## Changes
 
 ### Added
 
@@ -39,12 +38,14 @@ over HTTPS with mutual TLS.
 - **`StatusError.Document`** — the Error document of a failed response, with
   its reason code in the error text.
 
+---
+
 ## v0.1.0
 
-**Date:** 2026-10-22
+**Date:** 2026-10-22  
 **Previous release:** none
 
-## Summary
+### Summary
 
 The IEEE 2030.5 resource model, generated from the official specifications:
 every type of the IEEE 2030.5-2023 schema, the CSIP-AUS v1.3 profile, and the
@@ -53,8 +54,6 @@ and certificate identities. The protocol packages (client, server, schedule,
 discovery) are placeholders.
 
 **Upgrade notes:** first release.
-
-## Changes
 
 ### Added
 
@@ -92,7 +91,7 @@ discovery) are placeholders.
   with `xmllint` against the official IEEE 2030.5 and CSIP-AUS schemas. A weekly
   workflow opens an issue when upstream content changes or a release appears.
 
-## Verification
+### Verification
 
 - All 80 examples of the IEEE 2030.5-2023 supplemental material decode,
   re-encode to equal values and, where the example itself is valid, validate
@@ -101,3 +100,5 @@ discovery) are placeholders.
   connection point, ConnectionPoint, DERSettings, DERCapability) validate
   against the official CSIP-AUS v1.3 schemas.
 - The SFDI matches the worked example of IEEE 2030.5 (`167261211391`).
+
+---
