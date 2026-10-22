@@ -16,12 +16,33 @@ Standards Association and cannot be redistributed without explicit permission.
 The CSIP-AUS XSD is available from the Australian National University (ANU)
 and ARENA's DER integration program.
 
-## Verification
+## Running code generation
 
-The generator verifies each XSD file against the SHA-256 checksums in
-`manifest.yaml` before running. Update the checksums in the manifest after
-obtaining the files:
+Once the schema files are in place, generate all Go types:
 
 ```bash
-shasum -a 256 schemas/sep.xsd
+make generate          # runs all three generators (base, csipaus, wadl)
+# or equivalently:
+go generate ./...
 ```
+
+The generated `*_gen.go` files carry a `// Code generated ... DO NOT EDIT.`
+header with the source schema's SHA-256 checksum. **Do not edit them by hand.**
+If the output is wrong, fix the generator in `internal/gen/` instead.
+
+Generated files are committed to the repository so that downstream consumers
+(and CI) do not need the proprietary XSD to build.
+
+## Verification
+
+The `make generate-verify` target checks that every committed `*_gen.go`
+header checksum matches `manifest.yaml` — it does not need the XSD files,
+only the manifest. CI runs this on every push.
+
+After obtaining or updating the schema files, record their checksums:
+
+```bash
+shasum -a 256 schemas/sep.xsd schemas/csipaus.xsd schemas/sep.wadl
+```
+
+Then update the corresponding `sha256:` fields in `manifest.yaml`.

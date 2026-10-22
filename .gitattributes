@@ -1,0 +1,6 @@
+# Generated files: collapsed in GitHub diffs and excluded from language stats.
+*_gen.go linguist-generated=true
+csipaus/*_gen.go linguist-generated=true
+
+# Golden test files are generator output snapshots.
+internal/gen/emit/testdata/*.golden linguist-generated=true
