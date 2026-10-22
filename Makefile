@@ -127,15 +127,18 @@ generate-wadl: ## Generate resource table from sep.wadl
 
 generate-verify: ## Verify that *_gen.go headers match schemas/manifest.yaml checksums
 	@echo "Verifying generated code checksums..."
-	@for f in *_gen.go; do \
-		[ -f "$$f" ] || { echo "No generated files found."; exit 1; }; \
+	@found=0; \
+	for f in *_gen.go csipaus/*_gen.go; do \
+		[ -f "$$f" ] || continue; \
+		found=1; \
 		hash="$$(sed -nE 's/.*SHA-256: ([0-9a-f]+).*/\1/p' "$$f" | head -n1)"; \
 		[ -n "$$hash" ] || { echo "$$f: no SHA-256 in header"; exit 1; }; \
 		if ! grep -q "$$hash" schemas/manifest.yaml; then \
 			echo "$$f: SHA-256 $$hash not found in schemas/manifest.yaml"; exit 1; \
 		fi; \
 		echo "$$f: ok ($$hash)"; \
-	done
+	done; \
+	[ "$$found" = "1" ] || { echo "No generated files found."; exit 1; }
 
 clean: ## Remove generated binaries and coverage artifacts
 	@echo "Cleaning up"
