@@ -1,18 +1,23 @@
 // SPDX-License-Identifier: MIT
 
-//go:build interop
-
-// Package interop holds tests that run this module's client against
-// IEEE 2030.5 servers implemented by others: the container images of
-// github.com/otfabric/ieee20305-interop, pinned by digest in images.go. The
-// tests generate the TLS material with the security package, start each
-// server with Docker, seeded with the baseline fixture it carries, and check
-// what the client reads and writes against that fixture.
+// Package interop holds tests of the client and the server of go-ieee20305
+// against IEEE 2030.5 implementations of others: the container images of
+// github.com/otfabric/ieee20305-interop, pinned by digest in images.go.
 //
-// They are excluded from ordinary builds by the "interop" build tag:
+//   - Our client against each server image (Envoy, GridAPPS-D): the tests
+//     start the server seeded with the baseline fixture it carries, and
+//     check what the client reads and writes against that fixture.
+//   - Our server against each client image (GridAPPS-D, py20305, EPRI): the
+//     tests seed the server from the fixture of the client image, serve it
+//     on the host, and run the client's operations against it.
+//
+// A pairing runs over the cipher suites both ends have: the client of this
+// module speaks TLS_ECDHE_ECDSA_WITH_AES_128_CCM_8 through the tlsccm module,
+// and AES-128-GCM through crypto/tls. The images declare theirs
+// (print-capabilities); a pairing or operation an image does not declare is
+// skipped.
+//
+// It is a module of its own, as it depends on tlsccm, and needs Docker:
 //
 //	make test-interop
-//
-// Today the suite runs against Envoy. The GridAPPS-D server offers only
-// TLS_ECDHE_ECDSA_WITH_AES_128_CCM_8, which crypto/tls does not implement.
 package interop

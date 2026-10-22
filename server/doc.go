@@ -35,4 +35,10 @@
 // MeterReadings, ReadingTypes, ReadingSets and Readings, one per mRID. A
 // FlowReservationRequest is answered by Config.FlowPolicy with a
 // FlowReservationResponse event of the device.
+//
+// A document the server sends has its href, its ListLinks the number of
+// items the client reads (the all attribute), and no link to a resource of
+// the server that does not exist yet (such as the DefaultDERControl of a
+// program without one); a link to a resource the client creates with PUT
+// stays.
 package server

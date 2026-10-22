@@ -20,11 +20,12 @@ GOFMT_CI = $(shell GOTOOLCHAIN=go$(GO_MOD_VERSION).0 go env GOROOT)/bin/gofmt
 # Output directory for generated binaries
 BIN_DIR := bin
 # Library packages: tests and coverage (exclude examples and test helpers)
-TEST_PKGS := $(shell go list ./... | grep -v '/examples' | grep -v '/interop$$' | grep -v '/interop/')
+TEST_PKGS := $(shell go list ./... | grep -v '/examples')
 # Coverage is measured over the library packages, whichever package's tests
 # exercise them: not the example builders and programs (/examples), the
-# generator's command (internal/gen), or the test-only e2e and interop suites.
-COVER_PKGS := $(shell go list ./... | grep -v '/examples' | grep -v '/internal/gen$$' | grep -v '/e2e$$' | grep -v '/interop$$' | grep -v '/interop/' | paste -sd, -)
+# generator's command (internal/gen), or the test-only e2e suite. The nested
+# modules tlsccm and interop are not part of ./... .
+COVER_PKGS := $(shell go list ./... | grep -v '/examples' | grep -v '/internal/gen$$' | grep -v '/e2e$$' | paste -sd, -)
 # The statement coverage make coverage-gate (and CI) requires, in percent.
 COVER_MIN ?= 90
 
@@ -57,9 +58,9 @@ fmt-check: ## Fail if the go.mod-version gofmt or the local gofmt would change a
 		exit 1; \
 	fi
 
-lint: ## Run staticcheck (includes -tags=interop for ./interop)
+lint: ## Run staticcheck
 	@echo "Running staticcheck"
-	@staticcheck -tags=interop ./...
+	@staticcheck ./...
 
 lint-ci: ## Run golangci-lint (see .golangci.yml)
 	@echo "Running golangci-lint"
@@ -67,7 +68,7 @@ lint-ci: ## Run golangci-lint (see .golangci.yml)
 
 vet: ## Run go vet
 	@echo "Running go vet"
-	@go vet -tags=interop ./...
+	@go vet ./...
 
 vuln: ## Run govulncheck
 	@echo "Running govulncheck"
@@ -116,9 +117,9 @@ fuzz: ## Run the fuzz targets for FUZZTIME each (default 30s)
 		go test -run '^$$' -fuzz "^$$name$$" -fuzztime $(FUZZTIME) "$$pkg" || exit 1; \
 	done
 
-test-interop: ## Run the client against the ieee20305-interop server images, pinned in interop/images.go (needs Docker)
+test-interop: ## Run the client and the server against the ieee20305-interop images, pinned in interop/images.go (the interop module; needs Docker)
 	@echo "Running interop tests"
-	@go test -tags=interop -count=1 -timeout=20m ./interop/...
+	@cd interop && go vet ./... && staticcheck ./... && golangci-lint run ./... && go test -race -count=1 -timeout=30m ./...
 
 interop: test-interop ## Alias for test-interop
 

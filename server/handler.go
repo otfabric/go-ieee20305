@@ -273,6 +273,11 @@ func (s *Server) get(ctx context.Context, w http.ResponseWriter, req *Request, h
 	if err != nil {
 		return err
 	}
+	// IEEE 2030.5 requires the href of a resource in the response to a GET.
+	if href, ok := doc.(ieee20305.Hrefer); !ok || href.GetHref() == "" {
+		setHref(doc, req.Node.Href)
+	}
+	s.dressLinks(ctx, req.Principal, doc)
 	return s.respond(w, req.Principal, http.StatusOK, doc, head)
 }
 

@@ -297,6 +297,10 @@ func (n *notifier) build(sub *subscription, status ieee20305.UInt8) ([]byte, iee
 		case err != nil:
 			status = NotificationCancelled
 		default:
+			if h, ok := doc.(ieee20305.Hrefer); !ok || h.GetHref() == "" {
+				setHref(doc, sub.resource)
+			}
+			n.s.dressLinks(ctx, p, doc)
 			note.Resource = &ieee20305.AnyResource{Value: doc}
 		}
 	}

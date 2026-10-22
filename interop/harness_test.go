@@ -1,27 +1,33 @@
 // SPDX-License-Identifier: MIT
 
-//go:build interop
-
 package interop
 
 import (
 	"bytes"
 	"context"
 	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/asn1"
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
+	"math/big"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/otfabric/go-ieee20305/client"
 	"github.com/otfabric/go-ieee20305/security"
+	"github.com/otfabric/go-ieee20305/tlsccm"
 )
 
 // image returns the image to run: the environment variable env, or def.
@@ -37,6 +43,9 @@ func requireDocker(t *testing.T) {
 	if _, err := exec.LookPath("docker"); err != nil {
 		t.Skip("the interop suite needs Docker")
 	}
+	if _, err := docker(context.Background(), "info", "--format", "{{.ServerVersion}}"); err != nil {
+		t.Skipf("the interop suite needs Docker: %v", err)
+	}
 }
 
 func docker(ctx context.Context, args ...string) (string, error) {
@@ -49,6 +58,47 @@ func docker(ctx context.Context, args ...string) (string, error) {
 	return stdout.String(), nil
 }
 
+// The cipher suites of the contract's capabilities, by IANA name.
+const (
+	suiteCCM8   = "TLS_ECDHE_ECDSA_WITH_AES_128_CCM_8"
+	suiteGCM128 = "TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256"
+)
+
+// capabilities is the part of print-capabilities the suite reads.
+type capabilities struct {
+	Adapter  string `json:"adapter"`
+	Upstream struct {
+		Version string `json:"version"`
+	} `json:"upstream"`
+	TLS struct {
+		CipherSuites []string `json:"cipherSuites"`
+	} `json:"tls"`
+	Versions map[string]struct {
+		Client role `json:"client"`
+		Server role `json:"server"`
+	} `json:"versions"`
+}
+
+type role struct {
+	Supported  bool     `json:"supported"`
+	Operations []string `json:"operations"`
+}
+
+func capabilitiesOf(t *testing.T, img string) capabilities {
+	t.Helper()
+	out, err := docker(context.Background(), "run", "--rm", img, "print-capabilities")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var c capabilities
+	if err := json.Unmarshal([]byte(out), &c); err != nil {
+		t.Fatalf("capabilities of %s: %v", img, err)
+	}
+	return c
+}
+
+func (c capabilities) offers(suite string) bool { return slices.Contains(c.TLS.CipherSuites, suite) }
+
 // device is a device certificate and its key.
 type device struct {
 	cert *x509.Certificate
@@ -59,55 +109,123 @@ func (d device) tlsCertificate() tls.Certificate {
 	return tls.Certificate{Certificate: [][]byte{d.cert.Raw}, PrivateKey: d.key, Leaf: d.cert}
 }
 
-// pki is the TLS material of a run, laid out as the --tls-dir of the
-// ieee20305-interop container contract.
+// pki is the TLS material of a run, laid out as the --tls-dir directories of
+// the ieee20305-interop container contract.
 type pki struct {
 	dir     string // the directory to mount at /tls
 	roots   *x509.CertPool
-	device  device // provisioned on the server
+	server  tls.Certificate
+	device  device // provisioned on the server, at client/
 	other   device // signed by the same CA, not provisioned
 	foreign device // signed by another CA
 }
 
-// newPKI writes a CA, a server certificate for the names, the device
-// certificate the server provisions (server/devices) and two more devices.
-func newPKI(t *testing.T, names ...string) *pki {
+// hmn is the HardwareModuleName of a device of the suite.
+func hmn(serial string) security.HMN {
+	return security.HMN{Type: asn1.ObjectIdentifier{1, 3, 6, 1, 4, 1, 99999, 2030, 5}, SerialNumber: []byte(serial)}
+}
+
+// contractCA returns a CA as the contract's make_pki makes one: critical
+// basic constraints and key usage, and a subject key identifier.
+func contractCA(t *testing.T, name string) (*x509.Certificate, *ecdsa.PrivateKey) {
 	t.Helper()
-	ca, caKey, err := security.TestCA("ieee20305 interop test CA")
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		t.Fatal(err)
 	}
-	serverCert, serverKey, err := security.TestServerCert(ca, caKey, names)
+	tmpl := &x509.Certificate{
+		SerialNumber:          big.NewInt(time.Now().UnixNano()),
+		Subject:               pkix.Name{CommonName: name},
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(48 * time.Hour),
+		IsCA:                  true,
+		BasicConstraintsValid: true,
+		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
 	if err != nil {
 		t.Fatal(err)
 	}
-	newDevice := func(ca *x509.Certificate, key *ecdsa.PrivateKey, name string) device {
-		cert, k, err := security.TestDeviceCert(ca, key, name)
+	cert, err := x509.ParseCertificate(der)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return cert, key
+}
+
+// contractServer returns a server certificate as the contract's make_pki
+// makes one: for the host names and IP addresses names, with the key usages
+// digitalSignature and keyAgreement and the extended key usages serverAuth
+// and clientAuth. Its subject is empty, as in IEEE 2030.5 certificates, so
+// that its subjectAltName is critical, which the EPRI client requires.
+func contractServer(t *testing.T, ca *x509.Certificate, caKey *ecdsa.PrivateKey, names []string) (*x509.Certificate, *ecdsa.PrivateKey) {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpl := &x509.Certificate{
+		SerialNumber:          big.NewInt(time.Now().UnixNano()),
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(48 * time.Hour),
+		BasicConstraintsValid: true,
+		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageKeyAgreement,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
+	}
+	for _, n := range names {
+		if ip := net.ParseIP(n); ip != nil {
+			tmpl.IPAddresses = append(tmpl.IPAddresses, ip)
+		} else {
+			tmpl.DNSNames = append(tmpl.DNSNames, n)
+		}
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, ca, &key.PublicKey, caKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cert, err := x509.ParseCertificate(der)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return cert, key
+}
+
+// newPKI writes a CA, a server certificate for the names, the device of
+// serial (whose certificate names its hardware module) in server/devices
+// and client/, and two more devices.
+func newPKI(t *testing.T, serial string, names ...string) *pki {
+	t.Helper()
+	ca, caKey := contractCA(t, "ieee20305 interop test CA")
+	serverCert, serverKey := contractServer(t, ca, caKey, names)
+	newDevice := func(ca *x509.Certificate, key *ecdsa.PrivateKey, serial string) device {
+		cert, k, err := security.TestDeviceCertHMN(ca, key, hmn(serial))
 		if err != nil {
 			t.Fatal(err)
 		}
 		return device{cert, k}
 	}
-	otherCA, otherKey, err := security.TestCA("another CA")
-	if err != nil {
-		t.Fatal(err)
-	}
+	otherCA, otherKey := contractCA(t, "another CA")
 	p := &pki{
 		dir:     t.TempDir(),
 		roots:   x509.NewCertPool(),
-		device:  newDevice(ca, caKey, "interop-device-1"),
-		other:   newDevice(ca, caKey, "interop-device-2"),
-		foreign: newDevice(otherCA, otherKey, "interop-device-3"),
+		server:  tls.Certificate{Certificate: [][]byte{serverCert.Raw}, PrivateKey: serverKey, Leaf: serverCert},
+		device:  newDevice(ca, caKey, serial),
+		other:   newDevice(ca, caKey, "unprovisioned-"+serial),
+		foreign: newDevice(otherCA, otherKey, serial),
 	}
 	p.roots.AddCert(ca)
 	server := filepath.Join(p.dir, "server")
 	writePEM(t, filepath.Join(server, "server.crt"), "CERTIFICATE", serverCert.Raw)
 	writeKey(t, filepath.Join(server, "server.key"), serverKey)
 	writePEM(t, filepath.Join(server, "ca.crt"), "CERTIFICATE", ca.Raw)
-	writePEM(t, filepath.Join(server, "devices", "interop-device-1.crt"), "CERTIFICATE", p.device.cert.Raw)
-	// The container runs as another user: the throwaway material must be
+	writePEM(t, filepath.Join(server, "devices", serial+".crt"), "CERTIFICATE", p.device.cert.Raw)
+	cl := filepath.Join(p.dir, "client")
+	writePEM(t, filepath.Join(cl, "client.crt"), "CERTIFICATE", p.device.cert.Raw)
+	writeKey(t, filepath.Join(cl, "client.key"), p.device.key)
+	writePEM(t, filepath.Join(cl, "ca.crt"), "CERTIFICATE", ca.Raw)
+	// The containers run as another user: the throwaway material must be
 	// readable by it.
-	err = filepath.Walk(p.dir, func(path string, info os.FileInfo, err error) error {
+	err := filepath.Walk(p.dir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
@@ -142,14 +260,14 @@ func writeKey(t *testing.T, path string, key *ecdsa.PrivateKey) {
 	writePEM(t, path, "PRIVATE KEY", der)
 }
 
-// server is a running ieee20305-interop server container.
-type server struct {
+// serverContainer is a running ieee20305-interop server container.
+type serverContainer struct {
 	url string // https://127.0.0.1:<port>
 }
 
-// startServer runs image as a server of IEEE 2030.5 version with the TLS
+// startServer runs img as a server of IEEE 2030.5 version with the TLS
 // material of p, and waits until it is ready.
-func startServer(t *testing.T, img, version string, p *pki) *server {
+func startServer(t *testing.T, img, version string, p *pki) *serverContainer {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
@@ -184,32 +302,90 @@ func startServer(t *testing.T, img, version string, p *pki) *server {
 		t.Fatal(err)
 	}
 	addr := strings.TrimSpace(strings.Split(strings.TrimSpace(port), "\n")[0])
-	return &server{url: "https://" + addr}
+	return &serverContainer{url: "https://" + addr}
 }
 
+// transport is how the client of this module connects: crypto/tls (GCM)
+// or the tlsccm module (CCM_8).
+type transport string
+
+const (
+	viaGCM  transport = "GCM"
+	viaCCM8 transport = "CCM_8"
+)
+
 // newClient returns a client of s with the certificate of d.
-func newClient(t *testing.T, s *server, p *pki, d device, codec client.Codec) *client.Client {
+func newClient(t *testing.T, s *serverContainer, p *pki, d device, via transport, codec client.Codec) *client.Client {
 	t.Helper()
-	c, err := client.New(client.Config{
-		Server:     s.url,
-		HTTPClient: client.NewHTTPClient(d.tlsCertificate(), p.roots),
-		Codec:      codec,
-	})
+	hc := client.NewHTTPClient(d.tlsCertificate(), p.roots)
+	if via == viaCCM8 {
+		hc = tlsccm.NewHTTPClient(d.tlsCertificate(), p.roots, tlsccm.Options{})
+	}
+	c, err := client.New(client.Config{Server: s.url, HTTPClient: hc, Codec: codec})
 	if err != nil {
 		t.Fatal(err)
 	}
 	return c
 }
 
-// fixture is the part of an ieee20305-interop fixture the suite checks.
+// result is the result document of a one-shot client operation.
+type result struct {
+	Adapter   string `json:"adapter"`
+	Operation string `json:"operation"`
+	OK        bool   `json:"ok"`
+	Error     *struct {
+		Code   string `json:"code"`
+		Detail string `json:"detail"`
+	} `json:"error"`
+	Request  json.RawMessage `json:"request"`
+	Response json.RawMessage `json:"response"`
+	// Output is everything the container wrote.
+	Output string `json:"-"`
+}
+
+// runClient runs the one-shot operation op of the client image img against
+// url, as the device of the client/ directory of p, and returns its
+// result.
+func runClient(t *testing.T, img, op, version, url string, p *pki) result {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+	out, err := docker(ctx, "run", "--rm", "--add-host", "host.docker.internal:host-gateway",
+		"--volume", p.dir+":/tls:ro", img,
+		"client", op, "--version", version, "--url", url, "--tls-dir", "/tls/client")
+	var r result
+	line := strings.TrimSpace(out)
+	if i := strings.LastIndexByte(line, '\n'); i >= 0 {
+		line = line[i+1:]
+	}
+	if jerr := json.Unmarshal([]byte(line), &r); jerr != nil {
+		t.Fatalf("client %s: no result document (%v): %s", op, err, out)
+	}
+	r.Output = out
+	if err != nil {
+		r.Output += "\n" + err.Error()
+	}
+	return r
+}
+
+// fixture is the part of an ieee20305-interop fixture the suite uses.
 type fixture struct {
 	Device struct {
-		PIN uint32 `json:"pin"`
+		Serial         string `json:"serial"`
+		PIN            uint32 `json:"pin"`
+		DeviceCategory string `json:"deviceCategory"`
 	} `json:"device"`
 	DERPrograms []struct {
-		Description string `json:"description"`
-		Primacy     uint8  `json:"primacy"`
-		Controls    []struct {
+		MRID           string `json:"mRID"`
+		Description    string `json:"description"`
+		Primacy        uint8  `json:"primacy"`
+		DefaultControl *struct {
+			MRID        string         `json:"mRID"`
+			Description string         `json:"description"`
+			Base        map[string]any `json:"base"`
+		} `json:"defaultControl"`
+		Controls []struct {
+			MRID        string         `json:"mRID"`
 			Description string         `json:"description"`
 			Base        map[string]any `json:"base"`
 			Duration    uint32         `json:"duration"`
@@ -233,7 +409,7 @@ type fixture struct {
 	} `json:"report"`
 }
 
-// bakedFixture reads the fixture name that img seeds its server with.
+// bakedFixture reads the fixture name that img carries.
 func bakedFixture(t *testing.T, img, name string) fixture {
 	t.Helper()
 	out, err := docker(context.Background(), "run", "--rm", img, "print-fixture", name)
