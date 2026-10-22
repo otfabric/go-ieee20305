@@ -12,25 +12,81 @@ API.
 
 ### Summary
 
-Device registration: a device finds or creates its EndDevice on a server
-and checks the PIN of its Registration.
+A full IEEE 2030.5 client and server, for every resource of the WADL and
+both editions (2018 and 2023): a device agent for every function set, a
+server with provisioning, registration, event lifecycle, subscriptions and
+metering, CSIP-AUS helpers, event scheduling, certificate verification for
+HardwareModuleName certificates and DNS-SD discovery. Tested end to end,
+under injected faults, with 500 devices at once, and against the Envoy,
+GridAPPS-D, py20305 and EPRI implementations.
 
-**Upgrade notes:** none.
+**Upgrade notes**
+
+- `server`, `schedule` and `discovery` were placeholders; they are new APIs.
+- `client.Codec` is now an alias of the new `ieee20305.Codec`, and
+  `ieee20305.StandardCodec` the codec of the root package.
+- `security.ClientTLSConfig` and `ServerTLSConfig` verify chains with
+  `security.Verify`, which accepts the critical HardwareModuleName
+  subjectAltName of IEEE 2030.5 certificates.
+- The cipher suite TLS_ECDHE_ECDSA_WITH_AES_128_CCM_8 is in the new module
+  `github.com/otfabric/go-ieee20305/tlsccm` (Go 1.26.8), released apart; the
+  library keeps no dependencies.
 
 ### Added
 
-- **`client.Register`** — makes sure the server's EndDeviceList has an
-  EndDevice for the device: finds it by the SFDI of the device certificate,
-  or posts one with its SFDI and LFDI and reads back what the server created.
-- **`client.FindEndDevice`** — selects the device with the `sFDI` query
-  parameter, and pages through the list and matches itself in case the server
-  ignores it. An EndDevice with the device's SFDI but another LFDI is not the
-  device.
-- **`client.Registration`** and **`client.CheckPIN`** — the Registration of an
-  EndDevice (`ErrNotRegistered` without a RegistrationLink) and the check of
-  its PIN against the one given out of band (`ErrPINMismatch`).
-- **`client.IdentityOf`** — the LFDI and SFDI of a device certificate.
-- **`client.ListOptions.SFDI`** — the `sFDI` query parameter.
+- **Editions** — `ieee20305.Edition`, `MarshalEdition` and `InEdition`: the
+  types follow IEEE 2030.5-2023, and documents for 2018 peers are written
+  without what 2018 does not define (generated `Strip2018`).
+- **Generated helpers** — `Clone`, `Links` (every link of a document with its
+  WADL resource), list items and counts, `Derives` and `TypeBase`, and tests of
+  every generated type.
+- **`client`** — `Head`, `FetchList`, `Iterate`, `Walk` (the resource tree,
+  breadth first, same server only), `Time` (offset of the server's clock),
+  `Register`, `Subscribe`/`Unsubscribe`, `NotificationHandler` (deduplicates
+  repeated notifications), `Codec`.
+- **`agent`** — a device on a client: registration and PIN check, polling at
+  the server's pollRate with backoff; the events of DER, DRLC, messaging,
+  pricing, prepayment and flow reservation, scheduled with randomization,
+  primacy and the conflicts of each function set, with the Responses they ask
+  for (sent again after a failure); the DefaultDERControl, metering mirrors,
+  files, flow reservation requests, LogEvents and device status.
+- **`server`** — an `http.Handler` for every resource of the WADL, with the
+  conformance of each method, paging and the ordering rules of lists, and
+  documents in the edition of each client. `Admin` provisions devices (role:
+  device, aggregator, operator; edition; PIN) and seeds resources, which come
+  with their parts (an EndDevice with its lists, a DERProgram with its
+  controls and default). In-band registration; aggregators act for the
+  devices they manage. The EventStatus of events follows a scheduler, Active
+  lists and the CurrentDERProgram are computed, Responses are stored once,
+  subscriptions are notified of changes (coalesced, retried, cancelled when
+  undeliverable), MirrorUsagePoints mirror to UsagePoints with their
+  readings, and FlowReservationRequests are answered by a `FlowPolicy`.
+  Every GET response carries its href and the `all` of its ListLinks.
+- **`schedule`** — the scheduler of events: primacy, supersession within
+  conflicting events, randomization, cancellation, timelines and the
+  ResponseRequired rules.
+- **`security`** — `Verify`, `VerifyPeerCertificate`, `HardwareModuleName` and
+  test certificates with HardwareModuleNames.
+- **`discovery`** — DNS-SD browsing and advertising of `_smartenergy._tcp`.
+- **`csipaus`** — `Limits` (site limits); `csipaus/csipserver` (the CSIP-AUS
+  profile of a server, with the ConnectionPoint of each EndDevice, envelopes
+  and default limits) and `csipaus/csipclient` (the ConnectionPoint of a
+  device).
+
+### Tested
+
+- `e2e`: agents against the server over mutual TLS for every function set
+  and both editions; chaos (lost, replayed and truncated requests, 503s,
+  aborted responses, connection resets during the TLS handshake, clock skew,
+  corrupted responses, malformed requests); 500 agents at once; a storm of
+  200 subscriptions; no goroutine leaks.
+- `interop` (a module of its own): the client against the Envoy (2018, CCM_8
+  and GCM) and GridAPPS-D (2018, 2023, CCM_8) servers; the GridAPPS-D,
+  py20305 and EPRI clients against the server, for every operation they
+  declare.
+- Fuzz targets for the codecs, the server handler, HardwareModuleNames,
+  scheduling, DNS messages and hrefs, nightly; statement coverage at least
+  90%.
 
 ---
 
