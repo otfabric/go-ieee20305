@@ -179,7 +179,7 @@ func TestSubscriptionErrors(t *testing.T) {
 
 // A server that cannot deliver cancels the subscription.
 func TestUndeliverable(t *testing.T) {
-	env := newEnv(t, server.Config{NotificationAttempts: 2, NotificationRetryDelay: time.Millisecond})
+	env := newEnv(t, server.Config{NotificationRetry: ieee20305.ExponentialBackoff{Initial: time.Millisecond, Attempts: 2}})
 	ctx := context.Background()
 	c, ed, lfdi := env.provisioned(t, "device-1", ieee20305.Edition2023)
 	failing := env.listen(t, notificationHandler(t, func(context.Context, *ieee20305.Notification) error {

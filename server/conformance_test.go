@@ -177,7 +177,7 @@ func seedAll(t testing.TB, h *harness, owner string) {
 func TestConformance(t *testing.T) {
 	for _, edition := range []ieee20305.Edition{ieee20305.Edition2023, ieee20305.Edition2018} {
 		t.Run(edition.String(), func(t *testing.T) {
-			h := newHarness(t, server.Config{DefaultEdition: edition, NotificationClient: &http.Client{}, NotificationRetryDelay: time.Millisecond, NotificationURIAllowed: allowAll}, "dev")
+			h := newHarness(t, server.Config{DefaultEdition: edition, NotificationClient: &http.Client{}, NotificationRetry: ieee20305.ExponentialBackoff{Initial: time.Millisecond, Attempts: 1}, NotificationURIAllowed: allowAll}, "dev")
 			seedAll(t, h, h.lfdi("dev"))
 			// An operator, who may use every method the server supports.
 			op, err := security.ParseLFDI(h.lfdi("dev"))

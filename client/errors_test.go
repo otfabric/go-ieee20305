@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -101,5 +102,57 @@ func TestTransportErrors(t *testing.T) {
 	_, err = c.DeviceCapability(ctx)
 	if !errors.Is(err, ieee20305.ErrCertificate) || ieee20305.Retryable(err) {
 		t.Errorf("an untrusted device: %v", err)
+	}
+}
+
+// With a RetryPolicy the client sends a GET again until it succeeds; a POST
+// only with RetryPOST; it stops when its context ends.
+func TestRetryPolicy(t *testing.T) {
+	p := newPKI(t)
+	var fails, calls atomic.Int32
+	srv := server(t, p, func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		if fails.Add(-1) >= 0 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		if r.Method == http.MethodPost {
+			w.Header().Set("Location", "/edev/1")
+			w.WriteHeader(http.StatusCreated)
+			return
+		}
+		writeDoc(t, w, http.StatusOK, &ieee20305.Time{CurrentTime: 1})
+	})
+	policy := ieee20305.ExponentialBackoff{Initial: time.Millisecond, Attempts: 3, NoJitter: true}
+	ctx := context.Background()
+
+	c := newClient(t, p, srv, client.Config{RetryPolicy: policy})
+	fails.Store(2)
+	if err := c.Get(ctx, "/tm", &ieee20305.Time{}); err != nil || calls.Load() != 3 {
+		t.Errorf("GET after two 503s: %v, %d calls", err, calls.Load())
+	}
+	calls.Store(0)
+	fails.Store(5)
+	if err := c.Get(ctx, "/tm", &ieee20305.Time{}); !errors.Is(err, ieee20305.ErrUnavailable) || calls.Load() != 4 {
+		t.Errorf("GET past the attempts: %v, %d calls", err, calls.Load())
+	}
+	calls.Store(0)
+	fails.Store(1)
+	if _, err := c.Post(ctx, "/edev", &ieee20305.EndDevice{}); err == nil || calls.Load() != 1 {
+		t.Errorf("POST without RetryPOST: %v, %d calls", err, calls.Load())
+	}
+	c = newClient(t, p, srv, client.Config{RetryPolicy: policy, RetryPOST: true})
+	calls.Store(0)
+	fails.Store(1)
+	if loc, err := c.Post(ctx, "/edev", &ieee20305.EndDevice{}); err != nil || loc != "/edev/1" || calls.Load() != 2 {
+		t.Errorf("POST with RetryPOST: %q, %v, %d calls", loc, err, calls.Load())
+	}
+	// The wait ends with the context.
+	c = newClient(t, p, srv, client.Config{RetryPolicy: ieee20305.ExponentialBackoff{Initial: time.Hour, NoJitter: true}})
+	fails.Store(1)
+	short, cancel := context.WithTimeout(ctx, 50*time.Millisecond)
+	defer cancel()
+	if err := c.Get(short, "/tm", &ieee20305.Time{}); !errors.Is(err, ieee20305.ErrTimeout) {
+		t.Errorf("a wait past the deadline: %v", err)
 	}
 }

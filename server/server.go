@@ -105,12 +105,15 @@ type Config struct {
 	// NotificationWorkers bounds the notifications sent at once: 16 when
 	// zero.
 	NotificationWorkers int
-	// NotificationAttempts is the number of attempts to deliver a
-	// notification before the server cancels its subscription, the first
-	// retry after NotificationRetryDelay, doubled after each: 5 and 1s
-	// when zero.
-	NotificationAttempts   int
-	NotificationRetryDelay time.Duration
+	// NotificationRetry decides whether a notification that could not be
+	// delivered is sent again, and when: when nil, it is sent again while
+	// the receiver is unreachable, fails (5xx) or times out, after a delay
+	// that doubles from 1 s to 5 min, with jitter. A notification refused
+	// with a 4xx, or not sent again, cancels its subscription.
+	NotificationRetry ieee20305.RetryPolicy
+	// NotificationCancelAfter cancels a subscription whose notifications
+	// have failed for this long: 24 hours when zero.
+	NotificationCancelAfter time.Duration
 	// EventClock is the clock of the lifecycle of events (when they become
 	// active): Clock, with timers of the operating system, when nil.
 	EventClock schedule.Clock

@@ -59,7 +59,7 @@ func newAgent(t *testing.T, env *env, name string, cfg agent.Config) (*agent.Age
 	if cfg.PollRate == 0 {
 		cfg.PollRate = 20 * time.Millisecond
 	}
-	cfg.RetryDelay = 10 * time.Millisecond
+	cfg.Backoff = ieee20305.ExponentialBackoff{Initial: 10 * time.Millisecond, Max: 100 * time.Millisecond}
 	a, err := agent.New(cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -265,5 +265,27 @@ func TestAgentEndDeviceRemoved(t *testing.T) {
 	eventually(t, "the registration", func() bool { return a.State().Registration != nil })
 	if a.State().EndDevice.GetHref() != "/edev/2" {
 		t.Errorf("EndDevice %q", a.State().EndDevice.GetHref())
+	}
+}
+
+// An agent whose server's certificate does not verify stops: waiting does
+// not fix that.
+func TestAgentStopsOnCertificateError(t *testing.T) {
+	env := newEnv(t, server.Config{InBandRegistration: true})
+	other := newPKI(t)
+	dev := env.pki.device(t, "device-1")
+	c, err := client.New(client.Config{Server: env.url, HTTPClient: client.NewHTTPClient(dev, other.roots)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := agent.New(agent.Config{Client: c, Identity: client.IdentityOf(dev.Leaf),
+		Backoff: ieee20305.ExponentialBackoff{Initial: time.Millisecond}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := a.Run(ctx); !errors.Is(err, ieee20305.ErrCertificate) {
+		t.Errorf("Run = %v", err)
 	}
 }

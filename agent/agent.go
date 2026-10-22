@@ -48,9 +48,12 @@ type Config struct {
 	DeviceInformation *ieee20305.DeviceInformation
 	// PollRate overrides the pollRate of the server's resources.
 	PollRate time.Duration
-	// RetryDelay is the first delay after a failure, doubled after each one
-	// up to MaxRetryDelay: 1s and 5m when zero.
-	RetryDelay, MaxRetryDelay time.Duration
+	// Backoff spaces the attempts after failures (to start, to poll, to
+	// mirror metering): its Delay doubles from Initial (1 s when zero) up to
+	// Max (5 min when zero), with jitter. Its Attempts is not used: the
+	// agent keeps trying, except after errors that waiting does not fix
+	// (see Run).
+	Backoff ieee20305.ExponentialBackoff
 	// OnAssignments is called with the device's FunctionSetAssignments each
 	// time the agent reads them.
 	OnAssignments func(ctx context.Context, fsas []*ieee20305.FunctionSetAssignments) error
@@ -149,11 +152,11 @@ func New(cfg Config) (*Agent, error) {
 	if cfg.Identity.SFDI == 0 {
 		return nil, fmt.Errorf("%w: agent needs the Identity of the device", ieee20305.ErrConfiguration)
 	}
-	if cfg.RetryDelay <= 0 {
-		cfg.RetryDelay = time.Second
+	if cfg.Backoff.Initial <= 0 {
+		cfg.Backoff.Initial = time.Second
 	}
-	if cfg.MaxRetryDelay <= 0 {
-		cfg.MaxRetryDelay = 5 * time.Minute
+	if cfg.Backoff.Max <= 0 {
+		cfg.Backoff.Max = 5 * time.Minute
 	}
 	a := &Agent{cfg: cfg, c: cfg.Client, log: cfg.Logger, files: map[string]bool{}}
 	a.log = ieee20305.ComponentLogger(cfg.Logger, "agent")
@@ -327,27 +330,30 @@ func (a *Agent) pollRate() time.Duration {
 }
 
 // Run starts the agent, retrying until it is registered, and then polls
-// until ctx ends, which it returns (ctx.Err()). A PIN mismatch stops it.
-// Run closes the agent when it returns.
+// until ctx ends, which it returns (ctx.Err()). It keeps trying after a
+// failure (with Backoff), except after errors that waiting does not fix,
+// which it returns: a PIN mismatch, a certificate that does not verify
+// (ErrCertificate), a configuration error, and Close. Run closes the agent
+// when it returns.
 func (a *Agent) Run(ctx context.Context) error {
 	defer a.Close()
-	delay := a.cfg.RetryDelay
-	for {
+	for attempt := 0; ; attempt++ {
 		err := a.Start(ctx)
 		if err == nil {
 			break
 		}
-		if errors.Is(err, client.ErrPINMismatch) || errors.Is(err, ieee20305.ErrClosed) {
+		if permanent(err) {
+			a.log.Errorf("cannot start: %v", err)
 			return err
 		}
-		wait := delay
+		wait := a.cfg.Backoff.Delay(attempt)
 		if errors.Is(err, client.ErrNotRegistered) {
 			// Waiting for the operator, not for a failing server.
-			wait = a.pollRate()
+			wait, attempt = a.pollRate(), -1
 			a.log.Infof("waiting for the server to register the device; again in %v", wait)
 		} else {
+			wait = max(wait, ieee20305.RetryAfter(err))
 			a.log.Warnf("start failed; again in %v: %v", wait, err)
-			delay = min(2*delay, a.cfg.MaxRetryDelay)
 		}
 		if err := sleep(ctx, wait); err != nil {
 			return err
@@ -361,8 +367,7 @@ func (a *Agent) Run(ctx context.Context) error {
 		defer wg.Done()
 		a.mirror(ctx)
 	}()
-	delay = a.cfg.RetryDelay
-	wait := a.pollRate()
+	wait, failures := a.pollRate(), 0
 	for {
 		if err := sleep(ctx, wait); err != nil {
 			return err
@@ -371,13 +376,23 @@ func (a *Agent) Run(ctx context.Context) error {
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
-			a.log.Warnf("poll failed; again in %v: %v", delay, err)
-			wait = delay
-			delay = min(2*delay, a.cfg.MaxRetryDelay)
+			if permanent(err) {
+				a.log.Errorf("stopping: %v", err)
+				return err
+			}
+			wait = max(a.cfg.Backoff.Delay(failures), ieee20305.RetryAfter(err))
+			failures++
+			a.log.Warnf("poll failed; again in %v: %v", wait, err)
 			continue
 		}
-		delay, wait = a.cfg.RetryDelay, a.pollRate()
+		wait, failures = a.pollRate(), 0
 	}
+}
+
+// permanent reports whether an error is one waiting does not fix.
+func permanent(err error) bool {
+	return errors.Is(err, client.ErrPINMismatch) || errors.Is(err, ieee20305.ErrClosed) ||
+		errors.Is(err, ieee20305.ErrCertificate) || errors.Is(err, ieee20305.ErrConfiguration)
 }
 
 // Log posts a LogEvent of the device to its LogEventList.

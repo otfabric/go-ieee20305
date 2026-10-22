@@ -287,40 +287,44 @@ func (n *notifier) cancel(sub *subscription) {
 // deliver sends the notification of sub, retrying with backoff; the
 // resource is read again for each attempt.
 func (n *notifier) deliver(sub *subscription, status ieee20305.UInt8) error {
-	attempts := n.s.cfg.NotificationAttempts
-	if attempts <= 0 {
-		attempts = 5
+	policy := n.s.cfg.NotificationRetry
+	if policy == nil {
+		policy = ieee20305.ExponentialBackoff{Initial: time.Second, Max: 5 * time.Minute, Attempts: -1}
 	}
-	delay := n.s.cfg.NotificationRetryDelay
-	if delay <= 0 {
-		delay = time.Second
+	cancelAfter := n.s.cfg.NotificationCancelAfter
+	if cancelAfter <= 0 {
+		cancelAfter = 24 * time.Hour
 	}
-	var err error
-	for i := 0; i < attempts; i++ {
-		if i > 0 {
-			t := time.NewTimer(delay)
-			select {
-			case <-n.ctx.Done():
-				t.Stop()
-				return n.ctx.Err()
-			case <-t.C:
-			}
-			delay *= 2
-		}
-		var body []byte
-		if body, status, err = n.build(sub, status); err != nil {
+	var first time.Time
+	for attempt := 0; ; attempt++ {
+		body, st, err := n.build(sub, status)
+		if err != nil {
 			return err
 		}
-		if err = n.post(sub.uri, body); err != nil {
-			n.s.log.Warnf("notification %d of subscription %s to %s failed: %v", i+1, sub.href, sub.uri, err)
-		} else {
+		status = st
+		err = n.post(sub.uri, body)
+		if err == nil {
 			if status != NotificationDefault {
 				return errCancelled
 			}
 			return nil
 		}
+		if first.IsZero() {
+			first = time.Now()
+		}
+		retry, wait := policy.ShouldRetry(attempt, err)
+		if !retry || time.Since(first)+wait > cancelAfter {
+			return err
+		}
+		n.s.log.Warnf("notification %d of subscription %s to %s failed, again in %v: %v", attempt+1, sub.href, sub.uri, wait, err)
+		t := time.NewTimer(wait)
+		select {
+		case <-n.ctx.Done():
+			t.Stop()
+			return n.ctx.Err()
+		case <-t.C:
+		}
 	}
-	return err
 }
 
 // errCancelled ends a subscription whose cancellation was sent.

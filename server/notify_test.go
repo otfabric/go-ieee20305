@@ -14,6 +14,7 @@ import (
 	"time"
 
 	ieee20305 "github.com/otfabric/go-ieee20305"
+	examples "github.com/otfabric/go-ieee20305/internal/examples/ieee20305"
 	"github.com/otfabric/go-ieee20305/server"
 )
 
@@ -70,7 +71,7 @@ func TestSubscriptionsAfterRestart(t *testing.T) {
 	}))
 	defer sink.Close()
 	store := server.NewMemStore(nil)
-	cfg := server.Config{Store: store, NotificationClient: sink.Client(), NotificationRetryDelay: time.Millisecond, NotificationURIAllowed: allowAll}
+	cfg := server.Config{Store: store, NotificationClient: sink.Client(), NotificationRetry: ieee20305.ExponentialBackoff{Initial: time.Millisecond, Attempts: 1}, NotificationURIAllowed: allowAll}
 	h := newHarness(t, cfg, "dev")
 	ctx := context.Background()
 	ed, err := h.srv.Admin().ProvisionDevice(ctx, server.DeviceSpec{LFDI: h.id("dev")})
@@ -144,5 +145,66 @@ func TestDefaultNotificationURIAllowed(t *testing.T) {
 	}
 	if status, _, _ := h.do(t, "dev", http.MethodPost, ed+"/sub", marshal(t, subscription(ed+"/fsa", "https://127.0.0.1/n"))); status != http.StatusForbidden {
 		t.Errorf("a subscription to loopback: %d", status)
+	}
+}
+
+// A receiver that refuses a notification with a 4xx ends its subscription
+// at once, whatever the retry policy; one that fails with a 5xx is tried
+// again.
+func TestNotificationRefused(t *testing.T) {
+	var mu sync.Mutex
+	status, calls := http.StatusGone, 0
+	sink := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		calls++
+		w.WriteHeader(status)
+	}))
+	defer sink.Close()
+	h := newHarness(t, server.Config{NotificationClient: sink.Client(), NotificationURIAllowed: allowAll,
+		NotificationRetry: ieee20305.ExponentialBackoff{Initial: time.Millisecond, Attempts: -1}}, "dev")
+	ctx := context.Background()
+	ed, err := h.srv.Admin().ProvisionDevice(ctx, server.DeviceSpec{LFDI: h.id("dev")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	subscribe := func() string {
+		_, hdr, _ := h.do(t, "dev", http.MethodPost, ed+"/sub", marshal(t, subscription(ed+"/fsa", sink.URL)))
+		return hdr.Get("Location")
+	}
+	sub := subscribe()
+	if _, err := h.srv.Admin().AssignFSA(ctx, h.id("dev"), examples.FunctionSetAssignments(0)); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, func() bool { _, err := h.srv.Admin().Get(ctx, sub); return err != nil })
+	mu.Lock()
+	if calls != 1 {
+		t.Errorf("%d attempts for a 410", calls)
+	}
+	status, calls = http.StatusBadGateway, 0
+	mu.Unlock()
+	// A 5xx: tried again until it passes.
+	sub = subscribe()
+	if _, err := h.srv.Admin().AssignFSA(ctx, h.id("dev"), examples.FunctionSetAssignments(0)); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, func() bool { mu.Lock(); defer mu.Unlock(); return calls >= 3 })
+	mu.Lock()
+	status = http.StatusCreated
+	mu.Unlock()
+	time.Sleep(50 * time.Millisecond)
+	if _, err := h.srv.Admin().Get(ctx, sub); err != nil {
+		t.Errorf("a subscription whose receiver came back is gone: %v", err)
+	}
+}
+
+func waitFor(t *testing.T, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for !cond() {
+		if time.Now().After(deadline) {
+			t.Fatal("timed out")
+		}
+		time.Sleep(2 * time.Millisecond)
 	}
 }

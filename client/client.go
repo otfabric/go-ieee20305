@@ -57,6 +57,16 @@ type Config struct {
 	UserAgent string
 	// MaxResponseBytes limits the size of a response body; 1 MiB when zero.
 	MaxResponseBytes int64
+	// RetryPolicy decides whether a request that failed is sent again:
+	// ieee20305.NoRetry() when nil; ieee20305.ExponentialBackoff{} retries
+	// what may succeed (unavailable, 5xx, timeout) a few times. GET, HEAD,
+	// PUT and DELETE are retried; POST only with RetryPOST.
+	RetryPolicy ieee20305.RetryPolicy
+	// RetryPOST lets RetryPolicy retry POSTs too. A POST whose answer is
+	// lost may have taken effect: send it again only to a server that
+	// stores it once (go-ieee20305's server does so for EndDevices,
+	// Responses and mirrors).
+	RetryPOST bool
 	// Logger receives the client's log (see ieee20305.Logger): a Debug
 	// line per request. None when nil.
 	Logger ieee20305.Logger
@@ -75,6 +85,9 @@ type Client struct {
 	maxBytes int64
 	maxItems uint32
 	log      ieee20305.Logger
+	retry    ieee20305.RetryPolicy
+	// retryPOST is Config.RetryPOST.
+	retryPOST bool
 }
 
 // New returns a Client for cfg.
@@ -98,6 +111,10 @@ func New(cfg Config) (*Client, error) {
 		c.maxBytes = defaultMaxResponseBytes
 	}
 	c.log = ieee20305.ComponentLogger(cfg.Logger, "client")
+	c.retry, c.retryPOST = cfg.RetryPolicy, cfg.RetryPOST
+	if c.retry == nil {
+		c.retry = ieee20305.NoRetry()
+	}
 	c.maxItems = cfg.MaxListItems
 	if c.maxItems == 0 {
 		c.maxItems = 100000
@@ -287,12 +304,39 @@ func (c *Client) do(ctx context.Context, method, href string, q url.Values, body
 		}
 		u.RawQuery = merged.Encode()
 	}
-	var reader io.Reader
+	var data []byte
 	if body != nil {
-		data, err := c.codec.Marshal(body)
-		if err != nil {
+		if data, err = c.codec.Marshal(body); err != nil {
 			return nil, nil, fmt.Errorf("%w: %s %s: %w", ieee20305.ErrInvalid, method, u.Path, err)
 		}
+	}
+	// A request is sent again only when it is safe to: a GET, HEAD, PUT
+	// or DELETE, or a POST with RetryPOST.
+	idempotent := method != http.MethodPost || c.retryPOST
+	for attempt := 0; ; attempt++ {
+		resp, out, err := c.send(ctx, method, u, data)
+		if err == nil || !idempotent {
+			return resp, out, err
+		}
+		retry, wait := c.retry.ShouldRetry(attempt, err)
+		if !retry {
+			return nil, nil, err
+		}
+		c.log.Debugf("%s %s: attempt %d failed, again in %v: %v", method, u.Path, attempt+1, wait, err)
+		t := time.NewTimer(wait)
+		select {
+		case <-ctx.Done():
+			t.Stop()
+			return nil, nil, transportError(ctx, method, u, ctx.Err())
+		case <-t.C:
+		}
+	}
+}
+
+// send sends one request and reads its answer.
+func (c *Client) send(ctx context.Context, method string, u *url.URL, data []byte) (*http.Response, []byte, error) {
+	var reader io.Reader
+	if data != nil {
 		reader = bytes.NewReader(data)
 	}
 	req, err := http.NewRequestWithContext(ctx, method, u.String(), reader)
@@ -300,7 +344,7 @@ func (c *Client) do(ctx context.Context, method, href string, q url.Values, body
 		return nil, nil, fmt.Errorf("%w: %s %s: %w", ieee20305.ErrInvalid, method, u.Path, err)
 	}
 	req.Header.Set("Accept", MediaType)
-	if body != nil {
+	if data != nil {
 		req.Header.Set("Content-Type", MediaType)
 	}
 	if c.ua != "" {
@@ -315,18 +359,18 @@ func (c *Client) do(ctx context.Context, method, href string, q url.Values, body
 	}
 	c.log.Debugf("%s %s: %d in %v", method, u.Path, resp.StatusCode, time.Since(start))
 	defer func() { _ = resp.Body.Close() }()
-	data, err := io.ReadAll(io.LimitReader(resp.Body, c.maxBytes+1))
+	out, err := io.ReadAll(io.LimitReader(resp.Body, c.maxBytes+1))
 	if err != nil {
 		return nil, nil, transportError(ctx, method, u, err)
 	}
-	if int64(len(data)) > c.maxBytes {
+	if int64(len(out)) > c.maxBytes {
 		return nil, nil, fmt.Errorf("%w: %s %s: response larger than %d bytes", ieee20305.ErrProtocol, method, u.Path, c.maxBytes)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		se := &ieee20305.StatusError{Method: method, Path: u.Path, StatusCode: resp.StatusCode,
 			RetryAfter: retryAfter(resp.Header.Get("Retry-After"), time.Now())}
-		if len(data) > 0 {
-			if v, err := c.codec.Decode(data); err == nil {
+		if len(out) > 0 {
+			if v, err := c.codec.Decode(out); err == nil {
 				if doc, ok := v.(*ieee20305.Error); ok {
 					se.Document = doc
 				}
@@ -334,7 +378,7 @@ func (c *Client) do(ctx context.Context, method, href string, q url.Values, body
 		}
 		return nil, nil, se
 	}
-	return resp, data, nil
+	return resp, out, nil
 }
 
 // transportError classifies the failure of a request that got no answer,

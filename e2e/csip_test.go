@@ -50,7 +50,7 @@ func TestCSIPAUS(t *testing.T) {
 	var mu2 sync.Mutex
 	var defaults []csipaus.Limits
 	ag, err := agent.New(agent.Config{
-		Client: c, Identity: client.IdentityOf(dev.Leaf), PollRate: 20 * time.Millisecond, RetryDelay: 10 * time.Millisecond,
+		Client: c, Identity: client.IdentityOf(dev.Leaf), PollRate: 20 * time.Millisecond, Backoff: ieee20305.ExponentialBackoff{Initial: 10 * time.Millisecond},
 		OnDefaultDERControl: func(_ context.Context, d any) error {
 			l, ok := csipaus.LimitsOf(d)
 			if !ok {

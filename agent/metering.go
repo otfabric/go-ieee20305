@@ -4,7 +4,9 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net/http"
 	"time"
 
 	ieee20305 "github.com/otfabric/go-ieee20305"
@@ -51,7 +53,7 @@ func (a *Agent) mirror(ctx context.Context) {
 	if a.cfg.MirrorUsagePoint == nil || a.cfg.Readings == nil {
 		return
 	}
-	delay := a.cfg.RetryDelay
+	attempt := 0
 	var href string
 	for href == "" {
 		h, err := a.Mirror(ctx, a.cfg.MirrorUsagePoint.Clone())
@@ -59,11 +61,12 @@ func (a *Agent) mirror(ctx context.Context) {
 			href = h
 			break
 		}
+		delay := a.cfg.Backoff.Delay(attempt)
+		attempt++
 		a.log.Warnf("creating the MirrorUsagePoint failed; again in %v: %v", delay, err)
 		if sleep(ctx, delay) != nil {
 			return
 		}
-		delay = min(2*delay, a.cfg.MaxRetryDelay)
 	}
 	a.mu.Lock()
 	a.state.MirrorUsagePoint = href
@@ -75,25 +78,52 @@ func (a *Agent) mirror(ctx context.Context) {
 			rate = time.Duration(*pr) * time.Second
 		}
 	}
+	// Readings that could not be posted go with the next post, up to
+	// maxPendingReadings of them, the oldest dropped first.
+	var pending []ieee20305.MirrorMeterReading
 	for {
 		readings, err := a.cfg.Readings(ctx)
-		if err == nil {
-			err = a.PostReadings(ctx, href, readings...)
-		}
 		if err != nil {
-			if ctx.Err() != nil {
-				return
-			}
-			a.log.Warnf("posting readings failed: %v", err)
-		} else {
+			a.log.Warnf("reading the meter: %v", err)
+		}
+		batch := append(pending, readings...)
+		if len(batch) > 0 {
+			err = a.PostReadings(ctx, href, batch...)
+		}
+		switch {
+		case ctx.Err() != nil:
+			return
+		case err == nil:
+			pending = nil
 			a.mu.Lock()
 			a.state.Posts++
 			a.mu.Unlock()
+		case rejected(err):
+			pending = nil
+			a.log.Warnf("the server refused %d readings, dropped: %v", len(batch), err)
+		default:
+			if over := len(batch) - maxPendingReadings; over > 0 {
+				a.log.Warnf("dropping the %d oldest readings not posted", over)
+				batch = batch[over:]
+			}
+			pending = batch
+			a.log.Warnf("posting readings failed, %d kept for the next post: %v", len(pending), err)
 		}
 		if sleep(ctx, rate) != nil {
 			return
 		}
 	}
+}
+
+// maxPendingReadings bounds the readings the agent keeps to post again.
+const maxPendingReadings = 1000
+
+// rejected reports whether the server refused a request for good: a 4xx
+// other than 408 (timeout) and 429 (too many requests).
+func rejected(err error) bool {
+	var se *ieee20305.StatusError
+	return errors.As(err, &se) && se.StatusCode >= 400 && se.StatusCode < 500 &&
+		se.StatusCode != http.StatusRequestTimeout && se.StatusCode != http.StatusTooManyRequests
 }
 
 // pollFiles passes the Files of the assignments the agent has not seen to

@@ -382,11 +382,19 @@ const maxPending = 1000
 // harmless).
 func (a *Agent) postResponse(ctx context.Context, r pendingResponse) error {
 	if _, err := a.c.Post(ctx, r.href, r.doc); err != nil {
+		if rejected(err) {
+			a.log.Warnf("the server refused a Response to %s, dropped: %v", r.href, err)
+			return err
+		}
 		a.mu.Lock()
-		if len(a.pending) < maxPending {
+		kept := len(a.pending) < maxPending
+		if kept {
 			a.pending = append(a.pending, r)
 		}
 		a.mu.Unlock()
+		if !kept {
+			a.log.Warnf("%d Responses wait to be posted: one to %s dropped", maxPending, r.href)
+		}
 		return err
 	}
 	a.mu.Lock()

@@ -115,7 +115,7 @@ func chaosAgent(t *testing.T, env *env, name string, rt func(http.RoundTripper) 
 	if cfg.PollRate == 0 {
 		cfg.PollRate = 20 * time.Millisecond
 	}
-	cfg.RetryDelay, cfg.MaxRetryDelay = 5*time.Millisecond, 50*time.Millisecond
+	cfg.Backoff = ieee20305.ExponentialBackoff{Initial: 5 * time.Millisecond, Max: 50 * time.Millisecond}
 	a, err := agent.New(cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -208,7 +208,7 @@ func TestChaosProxy(t *testing.T) {
 		t.Fatal(err)
 	}
 	a, err := agent.New(agent.Config{Client: c, Identity: client.IdentityOf(dev.Leaf), PollRate: 20 * time.Millisecond,
-		RetryDelay: 5 * time.Millisecond, MaxRetryDelay: 50 * time.Millisecond})
+		Backoff: ieee20305.ExponentialBackoff{Initial: 5 * time.Millisecond, Max: 50 * time.Millisecond}})
 	if err != nil {
 		t.Fatal(err)
 	}
