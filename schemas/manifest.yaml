@@ -1,0 +1,24 @@
+# Schema manifest for IEEE 2030.5 code generation.
+#
+# The XSD files are NOT committed (IEEE copyright). Developers must obtain
+# them from the IEEE Standards Association and place them in this directory.
+# The generator verifies the SHA-256 checksums before running.
+
+schemas:
+  sep-2018.xsd:
+    description: "IEEE 2030.5-2018 Smart Energy Profile 2.0 XSD"
+    source: "IEEE Standards Association (IEEE Std 2030.5-2018)"
+    sha256: ""  # Fill after obtaining the XSD
+    version: "2018"
+
+  sep.xsd:
+    description: "IEEE 2030.5-2023 Smart Energy Profile 2.0 XSD"
+    source: "IEEE Standards Association (IEEE Std 2030.5-2023)"
+    sha256: ""  # Fill after obtaining the XSD
+    version: "2023"
+
+  csipaus.xsd:
+    description: "CSIP-AUS Common Smart Inverter Profile - Australia extension"
+    source: "ARENA / AEMO / ANU"
+    sha256: ""  # Fill after obtaining the XSD
+    version: "2023"
