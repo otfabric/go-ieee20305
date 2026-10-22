@@ -3,6 +3,7 @@
 package security_test
 
 import (
+	"net"
 	"testing"
 
 	"github.com/otfabric/go-ieee20305/security"
@@ -170,7 +171,7 @@ func TestTestServerCert(t *testing.T) {
 		t.Fatalf("TestCA: %v", err)
 	}
 
-	cert, key, err := security.TestServerCert(ca, caKey, []string{"localhost"})
+	cert, key, err := security.TestServerCert(ca, caKey, []string{"localhost", "127.0.0.1"})
 	if err != nil {
 		t.Fatalf("TestServerCert: %v", err)
 	}
@@ -180,8 +181,19 @@ func TestTestServerCert(t *testing.T) {
 	if key == nil {
 		t.Error("server key should not be nil")
 	}
-	if len(cert.DNSNames) == 0 || cert.DNSNames[0] != "localhost" {
-		t.Error("server cert should have localhost SAN")
+	if len(cert.DNSNames) != 1 || cert.DNSNames[0] != "localhost" {
+		t.Errorf("DNS SANs = %v, want [localhost]", cert.DNSNames)
+	}
+	if len(cert.IPAddresses) != 1 || !cert.IPAddresses[0].Equal(net.IPv4(127, 0, 0, 1)) {
+		t.Errorf("IP SANs = %v, want [127.0.0.1]", cert.IPAddresses)
+	}
+	for _, host := range []string{"localhost", "127.0.0.1"} {
+		if err := cert.VerifyHostname(host); err != nil {
+			t.Errorf("VerifyHostname(%s): %v", host, err)
+		}
+	}
+	if _, _, err := security.TestServerCert(ca, caKey, nil); err == nil {
+		t.Error("a server certificate without names was created")
 	}
 }
 

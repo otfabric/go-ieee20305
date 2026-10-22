@@ -8,7 +8,9 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"errors"
 	"math/big"
+	"net"
 	"time"
 )
 
@@ -52,8 +54,22 @@ func TestCA(org string) (*x509.Certificate, *ecdsa.PrivateKey, error) {
 }
 
 // TestServerCert generates a server certificate signed by the given CA.
-// The certificate includes the given DNS names and is valid for 1 year.
-func TestServerCert(ca *x509.Certificate, caKey *ecdsa.PrivateKey, dnsNames []string) (*x509.Certificate, *ecdsa.PrivateKey, error) {
+// Each name becomes a DNS or, for an IP address literal, an IP subject
+// alternative name; the first is also the common name. The certificate is
+// valid for 1 year.
+func TestServerCert(ca *x509.Certificate, caKey *ecdsa.PrivateKey, names []string) (*x509.Certificate, *ecdsa.PrivateKey, error) {
+	if len(names) == 0 {
+		return nil, nil, errors.New("a server certificate needs at least one name")
+	}
+	var dnsNames []string
+	var ips []net.IP
+	for _, n := range names {
+		if ip := net.ParseIP(n); ip != nil {
+			ips = append(ips, ip)
+		} else {
+			dnsNames = append(dnsNames, n)
+		}
+	}
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		return nil, nil, err
@@ -68,9 +84,10 @@ func TestServerCert(ca *x509.Certificate, caKey *ecdsa.PrivateKey, dnsNames []st
 		SerialNumber: serial,
 		Subject: pkix.Name{
 			Organization: []string{ca.Subject.Organization[0]},
-			CommonName:   dnsNames[0],
+			CommonName:   names[0],
 		},
 		DNSNames:              dnsNames,
+		IPAddresses:           ips,
 		NotBefore:             time.Now().Add(-1 * time.Hour),
 		NotAfter:              time.Now().Add(365 * 24 * time.Hour),
 		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageKeyAgreement,
