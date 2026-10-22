@@ -144,6 +144,7 @@ func TestAgentProvisioned2018(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer a.Close()
 	if err := a.Start(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -208,6 +209,7 @@ func TestAgentConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer a.Close()
 	ctx := context.Background()
 	if _, err := a.Log(ctx, examples.LogEvent(0)); !errors.Is(err, ieee20305.ErrProtocol) {
 		t.Errorf("Log before Start: %v", err)

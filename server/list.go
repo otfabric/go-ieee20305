@@ -4,6 +4,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"path"
 	"reflect"
@@ -17,13 +18,19 @@ import (
 // list builds the page of the list node the request asks for: the items
 // the client may read, in the order of the list, from s, at most l of them.
 func (s *Server) list(ctx context.Context, req *Request) (any, error) {
-	members, err := s.store.Members(ctx, req.Node.Href)
-	if err != nil {
+	return s.listOf(ctx, req, req.Node.Href, nil)
+}
+
+// listOf builds the page of the list document of req.Node from the items
+// of the list at source that keep accepts (all when nil).
+func (s *Server) listOf(ctx context.Context, req *Request, source string, keep func(*Node) bool) (any, error) {
+	members, err := s.store.Members(ctx, source)
+	if err != nil && !errors.Is(err, ErrNoNode) {
 		return nil, err
 	}
 	var items []*Node
 	for _, m := range members {
-		if m.Value != nil && s.canRead(req.Principal, m) {
+		if m.Value != nil && s.canRead(req.Principal, m) && (keep == nil || keep(m)) {
 			items = append(items, m)
 		}
 	}

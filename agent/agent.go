@@ -7,7 +7,10 @@
 // server's pollRate, retrying with backoff when the server fails.
 //
 // Run does all of this until its context ends. The function sets an agent
-// takes part in plug into it as handlers.
+// takes part in plug into it as handlers: for DER, the agent schedules the
+// DERControls of the device's DERPrograms with randomization and primacy,
+// passes their transitions to OnDERControl and posts the Responses they
+// ask for.
 package agent
 
 import (
@@ -15,11 +18,13 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"sync"
 	"time"
 
 	ieee20305 "github.com/otfabric/go-ieee20305"
 	"github.com/otfabric/go-ieee20305/client"
+	"github.com/otfabric/go-ieee20305/schedule"
 )
 
 // Config configures an Agent.
@@ -46,6 +51,20 @@ type Config struct {
 	// OnAssignments is called with the device's FunctionSetAssignments each
 	// time the agent reads them.
 	OnAssignments func(ctx context.Context, fsas []*ieee20305.FunctionSetAssignments) error
+	// OnDERControl is called with every transition of the DERControls of
+	// the device's DERPrograms: their receipt, start, end, cancellation
+	// and supersession, as a schedule.Scheduler with randomization and
+	// DER conflicts works them out. The agent posts the Responses the
+	// controls ask for.
+	OnDERControl func(ctx context.Context, t schedule.Transition) error
+	// OnDefaultDERControl is called with the DefaultDERControl of the
+	// DERProgram of highest precedence when it changes.
+	OnDefaultDERControl func(ctx context.Context, d *ieee20305.DefaultDERControl) error
+	// Clock is the clock of the events: the local clock corrected to the
+	// server's when nil.
+	Clock schedule.Clock
+	// Seed seeds the randomization of the events: the SFDI when zero.
+	Seed uint64
 	// Logger receives the agent's log; none when nil.
 	Logger *slog.Logger
 }
@@ -57,8 +76,13 @@ type Agent struct {
 	c   *client.Client
 	log *slog.Logger
 
-	mu    sync.Mutex
-	state State
+	clock   schedule.Clock
+	der     *schedule.Scheduler
+	derDone chan struct{}
+
+	mu          sync.Mutex
+	state       State
+	lastDefault []byte
 }
 
 // State is what an agent knows of the server.
@@ -74,6 +98,8 @@ type State struct {
 	Assignments []*ieee20305.FunctionSetAssignments
 	// Polls counts the reads of the assignments.
 	Polls int
+	// Responses counts the Responses the agent posted.
+	Responses int
 }
 
 // New returns an Agent for cfg.
@@ -94,7 +120,26 @@ func New(cfg Config) (*Agent, error) {
 	if a.log == nil {
 		a.log = slog.New(discardHandler{})
 	}
+	a.clock = cfg.Clock
+	if a.clock == nil {
+		a.clock = offsetClock{a}
+	}
+	seed := cfg.Seed
+	if seed == 0 {
+		seed = uint64(cfg.Identity.SFDI)
+	}
+	a.der = schedule.New(schedule.Options{Clock: a.clock, Seed: seed, Randomize: true, Conflicts: schedule.DERConflicts})
+	ch, _ := a.der.Subscribe()
+	a.derDone = make(chan struct{})
+	go a.runDER(ch)
 	return a, nil
+}
+
+// Close stops the scheduling of events and waits for the handlers. Run
+// closes the agent when it returns.
+func (a *Agent) Close() {
+	a.der.Close()
+	<-a.derDone
 }
 
 // State returns what the agent knows of the server.
@@ -169,9 +214,17 @@ func (a *Agent) poll(ctx context.Context) error {
 	a.state.Polls++
 	a.mu.Unlock()
 	if a.cfg.OnAssignments != nil {
-		return a.cfg.OnAssignments(ctx, fsas)
+		if err := a.cfg.OnAssignments(ctx, fsas); err != nil {
+			return err
+		}
 	}
-	return nil
+	return a.pollDER(ctx, fsas)
+}
+
+// isNotFound reports whether err is a 404 of the server.
+func isNotFound(err error) bool {
+	var se *ieee20305.StatusError
+	return errors.As(err, &se) && se.StatusCode == http.StatusNotFound
 }
 
 // pollRate is the interval between polls: the configured one, else the
@@ -188,7 +241,9 @@ func (a *Agent) pollRate() time.Duration {
 
 // Run starts the agent, retrying until it is registered, and then polls
 // until ctx ends, which it returns (ctx.Err()). A PIN mismatch stops it.
+// Run closes the agent when it returns.
 func (a *Agent) Run(ctx context.Context) error {
+	defer a.Close()
 	delay := a.cfg.RetryDelay
 	for {
 		err := a.Start(ctx)

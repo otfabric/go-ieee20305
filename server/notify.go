@@ -32,18 +32,18 @@ const (
 	NotificationResourceDeleted ieee20305.UInt8 = 4
 )
 
-// watchStore is the store of a server: it tells the notifier of every
-// change.
+// watchStore is the store of a server: it tells the server of every
+// change, for its events and notifications.
 type watchStore struct {
 	Store
-	n *notifier
+	s *Server
 }
 
 func (w *watchStore) Put(ctx context.Context, n *Node) error {
 	if err := w.Store.Put(ctx, n); err != nil {
 		return err
 	}
-	w.n.changed(ctx, n.Href, n, false)
+	w.s.changed(ctx, n.Href, n, false)
 	return nil
 }
 
@@ -51,7 +51,7 @@ func (w *watchStore) Delete(ctx context.Context, href string) error {
 	if err := w.Store.Delete(ctx, href); err != nil {
 		return err
 	}
-	w.n.changed(ctx, href, nil, true)
+	w.s.changed(ctx, href, nil, true)
 	return nil
 }
 
@@ -59,7 +59,7 @@ func (w *watchStore) AddMember(ctx context.Context, list, member string) error {
 	if err := w.Store.AddMember(ctx, list, member); err != nil {
 		return err
 	}
-	w.n.changed(ctx, list, nil, false)
+	w.s.changed(ctx, list, nil, false)
 	return nil
 }
 
@@ -67,7 +67,7 @@ func (w *watchStore) RemoveMember(ctx context.Context, list, member string) erro
 	if err := w.Store.RemoveMember(ctx, list, member); err != nil {
 		return err
 	}
-	w.n.changed(ctx, list, nil, false)
+	w.s.changed(ctx, list, nil, false)
 	return nil
 }
 

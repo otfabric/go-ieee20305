@@ -14,6 +14,7 @@ import (
 	"time"
 
 	ieee20305 "github.com/otfabric/go-ieee20305"
+	"github.com/otfabric/go-ieee20305/schedule"
 )
 
 // Profile is what a server needs of the documents it serves: those of
@@ -101,6 +102,12 @@ type Config struct {
 	// when zero.
 	NotificationAttempts   int
 	NotificationRetryDelay time.Duration
+	// EventClock is the clock of the lifecycle of events (when they become
+	// active): Clock, with timers of the operating system, when nil.
+	EventClock schedule.Clock
+	// OnResponse, when set, is called with each new Response a client
+	// posts, and its href.
+	OnResponse func(ctx context.Context, href string, response any)
 	// Hooks override or extend the handling of resources, by WADL resource
 	// ID; they run before the built-in function sets.
 	Hooks map[string]Hooks
@@ -120,6 +127,7 @@ type Server struct {
 	resources map[string]ieee20305.ResourceSpec
 	hooks     map[string]Hooks
 	notifier  *notifier
+	events    *events
 
 	mu       sync.Mutex
 	counters map[string]int        // per list or parent: the last id allocated
@@ -154,7 +162,8 @@ func New(cfg Config) (*Server, error) {
 		s.store = NewMemStore(s.profile.Clone)
 	}
 	s.notifier = newNotifier(s)
-	s.store = &watchStore{Store: s.store, n: s.notifier}
+	s.events = newEvents(s)
+	s.store = &watchStore{Store: s.store, s: s}
 	if s.clock == nil {
 		s.clock = time.Now
 	}
@@ -228,6 +237,7 @@ func (s *Server) Close() error {
 	s.mu.Lock()
 	s.closed = true
 	s.mu.Unlock()
+	s.events.close()
 	s.notifier.close()
 	return nil
 }

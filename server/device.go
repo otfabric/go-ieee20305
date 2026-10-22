@@ -39,27 +39,6 @@ type DeviceSpec struct {
 	EndDevice *ieee20305.EndDevice
 }
 
-// deviceParts are the resources of an EndDevice the server creates with it:
-// lists, and resources the device creates with PUT (no value yet).
-var deviceParts = []struct {
-	resource, path, link string
-	list                 bool
-}{
-	{"FunctionSetAssignmentsList", "fsa", "FunctionSetAssignmentsListLink", true},
-	{"DeviceInformation", "di", "DeviceInformationLink", false},
-	{"DeviceStatus", "dstat", "DeviceStatusLink", false},
-	{"PowerStatus", "ps", "PowerStatusLink", false},
-	{"Configuration", "cfg", "ConfigurationLink", false},
-	{"FileStatus", "fs", "FileStatusLink", false},
-	{"LogEventList", "lel", "LogEventListLink", true},
-	{"IPInterfaceList", "ns", "IPInterfaceListLink", true},
-	{"LoadShedAvailabilityList", "lsl", "LoadShedAvailabilityListLink", true},
-	{"SubscriptionList", "sub", "SubscriptionListLink", true},
-	{"DERList", "der", "DERListLink", true},
-	{"FlowReservationRequestList", "frq", "FlowReservationRequestListLink", true},
-	{"FlowReservationResponseList", "frp", "FlowReservationResponseListLink", true},
-}
-
 // ProvisionDevice tells the server of a device, and creates its EndDevice in
 // the EndDeviceList (created at EndDeviceListHref if there is none) with
 // its resources, unless it is an operator. It returns the href of the
@@ -189,35 +168,11 @@ func (s *Server) newEndDevice(ctx context.Context, lfdi security.LFDI, tmpl *iee
 	if ed.ChangedTime == 0 {
 		ed.ChangedTime = ieee20305.TimeType(s.clock().Unix())
 	}
-	owner := lfdi.String()
-	href := s.newHref(EndDeviceListHref)
-	now := s.clock()
-	var parts []*Node
-	for _, p := range deviceParts {
-		h := path.Join(href, p.path)
-		n := &Node{Href: h, Resource: p.resource, Owner: owner, Parent: href, Modified: now}
-		if p.list {
-			n.Value = s.newList(p.resource)
-			setHref(n.Value, h)
-		}
-		if err := setLink(ed, p.link, h); err != nil {
-			return "", err
-		}
-		parts = append(parts, n)
-	}
-	setHref(ed, href)
-	if err := s.store.Put(ctx, &Node{Href: href, Resource: "EndDevice", Value: ed, Owner: owner, Parent: EndDeviceListHref, Modified: now}); err != nil {
+	list, err := s.store.Get(ctx, EndDeviceListHref)
+	if err != nil {
 		return "", err
 	}
-	for _, n := range parts {
-		if err := s.store.Put(ctx, n); err != nil {
-			return "", err
-		}
-	}
-	if err := s.store.AddMember(ctx, EndDeviceListHref, href); err != nil {
-		return "", err
-	}
-	return href, nil
+	return s.createItem(ctx, list, ed, lfdi.String())
 }
 
 // newList returns an empty document of the list resource.

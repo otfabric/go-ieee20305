@@ -202,6 +202,10 @@ func TestConformance(t *testing.T) {
 							// where no one listens.
 							sub.SubscribedResource, sub.NotificationURI, sub.Encoding = "/edev", "https://127.0.0.1:1/ntfy", 0
 						}
+						if r, ok := v.(*ieee20305.Response); ok {
+							// A Response of a device: an LFDI.
+							r.EndDeviceLFDI = make(ieee20305.HexBinary160, 20)
+						}
 						if ed, ok := v.(*ieee20305.EndDevice); ok {
 							// The sFDI of an EndDevice is that of its lFDI.
 							l := security.LFDI{0x2a, byte(edition)}

@@ -23,4 +23,10 @@
 // which arrives at least once and never before an older one. Delivery is
 // retried with backoff, and the subscription cancelled when it keeps
 // failing.
+//
+// A resource comes with its parts: a DERProgram with its DERControlList,
+// ActiveDERControlList, DERCurveList and DefaultDERControl, say. The server
+// keeps the EventStatus of events as they become active, computes the
+// Active lists and the CurrentDERProgram of a DER, and stores each Response
+// once (Config.OnResponse); Admin.CancelEvent cancels an event.
 package server

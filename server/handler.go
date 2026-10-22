@@ -326,21 +326,6 @@ func (s *Server) post(ctx context.Context, w http.ResponseWriter, req *Request, 
 	return nil
 }
 
-// createItem stores v as a new item of the list node, owned by owner, and
-// returns its href.
-func (s *Server) createItem(ctx context.Context, list *Node, v any, owner string) (string, error) {
-	href := s.newHref(list.Href)
-	setHref(v, href)
-	n := &Node{Href: href, Resource: itemResource(list.Resource), Value: v, Owner: owner, Parent: list.Href, Modified: s.clock()}
-	if err := s.store.Put(ctx, n); err != nil {
-		return "", err
-	}
-	if err := s.store.AddMember(ctx, list.Href, href); err != nil {
-		return "", err
-	}
-	return href, nil
-}
-
 // respond writes doc in the edition of p.
 func (s *Server) respond(w http.ResponseWriter, p Principal, status int, doc any, head bool) error {
 	out, err := s.profile.Codec(p.Edition).Marshal(doc)

@@ -6,8 +6,11 @@ import (
 	"crypto/ecdsa"
 	"crypto/tls"
 	"crypto/x509"
+	"io"
+	"log"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 
 	"github.com/otfabric/go-ieee20305/client"
@@ -20,6 +23,9 @@ type pki struct {
 	ca    *x509.Certificate
 	key   *ecdsa.PrivateKey
 	roots *x509.CertPool
+
+	mu      sync.Mutex
+	devices map[string]tls.Certificate
 }
 
 func newPKI(t testing.TB) *pki {
@@ -30,18 +36,30 @@ func newPKI(t testing.TB) *pki {
 	}
 	roots := x509.NewCertPool()
 	roots.AddCert(ca)
-	return &pki{ca: ca, key: key, roots: roots}
+	return &pki{ca: ca, key: key, roots: roots, devices: map[string]tls.Certificate{}}
 }
 
-// device returns the certificate of a device, with its key.
+// device returns the certificate of the device name, with its key: the
+// same for the same name.
 func (p *pki) device(t testing.TB, name string) tls.Certificate {
 	t.Helper()
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if c, ok := p.devices[name]; ok {
+		return c
+	}
 	cert, key, err := security.TestDeviceCert(p.ca, p.key, name)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return tls.Certificate{Certificate: [][]byte{cert.Raw}, PrivateKey: key, Leaf: cert}
+	c := tls.Certificate{Certificate: [][]byte{cert.Raw}, PrivateKey: key, Leaf: cert}
+	p.devices[name] = c
+	return c
 }
+
+// quiet drops the log of the test servers: handshakes cut short when a test
+// ends.
+var quiet = log.New(io.Discard, "", 0)
 
 // env is a server of this module on loopback, with mutual TLS.
 type env struct {
@@ -72,6 +90,7 @@ func newEnvPKI(t testing.TB, p *pki, cfg server.Config) *env {
 		t.Fatal(err)
 	}
 	ts := httptest.NewUnstartedServer(srv)
+	ts.Config.ErrorLog = quiet
 	ts.TLS = security.ServerTLSConfig(tls.Certificate{Certificate: [][]byte{cert.Raw}, PrivateKey: key, Leaf: cert}, p.roots)
 	ts.StartTLS()
 	t.Cleanup(func() {
@@ -102,6 +121,7 @@ func (e *env) listen(t testing.TB, h http.Handler) string {
 		t.Fatal(err)
 	}
 	ts := httptest.NewUnstartedServer(h)
+	ts.Config.ErrorLog = quiet
 	ts.TLS = security.ServerTLSConfig(tls.Certificate{Certificate: [][]byte{cert.Raw}, PrivateKey: key, Leaf: cert}, e.pki.roots)
 	ts.StartTLS()
 	t.Cleanup(ts.Close)
