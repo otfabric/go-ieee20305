@@ -22,3 +22,9 @@ schemas:
     source: "ARENA / AEMO / ANU"
     sha256: ""  # Fill after obtaining the XSD
     version: "2023"
+
+  sep.wadl:
+    description: "IEEE 2030.5-2023 WADL resource descriptions"
+    source: "IEEE Standards Association (IEEE Std 2030.5-2023)"
+    sha256: ""  # Fill after obtaining the WADL
+    version: "2023"

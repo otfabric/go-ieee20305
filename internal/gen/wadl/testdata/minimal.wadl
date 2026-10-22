@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Synthetic WADL for unit tests. Models a small subset of the IEEE 2030.5
+  resource hierarchy: DeviceCapability, EndDevice list/instance, DER
+  sub-resources, and Time.
+-->
+<application xmlns="http://wadl.dev.java.net/2009/02"
+             xmlns:sep="urn:ieee:std:2030.5:ns">
+  <resources base="https://example.com/sep2">
+
+    <!-- /dcap — Device capabilities (singleton) -->
+    <resource path="/dcap">
+      <method name="GET">
+        <response>
+          <representation mediaType="application/sep+xml"
+                          element="sep:DeviceCapability"/>
+        </response>
+      </method>
+    </resource>
+
+    <!-- /tm — Time (singleton) -->
+    <resource path="/tm">
+      <method name="GET">
+        <response>
+          <representation mediaType="application/sep+xml"
+                          element="sep:Time"/>
+        </response>
+      </method>
+    </resource>
+
+    <!-- /edev — End devices (collection + instance) -->
+    <resource path="/edev">
+      <method name="GET">
+        <response>
+          <representation mediaType="application/sep+xml"
+                          element="sep:EndDeviceList"/>
+        </response>
+      </method>
+      <method name="POST">
+        <request>
+          <representation mediaType="application/sep+xml"
+                          element="sep:EndDevice"/>
+        </request>
+        <response>
+          <representation mediaType="application/sep+xml"
+                          element="sep:EndDevice"/>
+        </response>
+      </method>
+
+      <resource path="/{eDevId}">
+        <param name="eDevId" style="template" type="xs:string"/>
+        <method name="GET">
+          <response>
+            <representation mediaType="application/sep+xml"
+                            element="sep:EndDevice"/>
+          </response>
+        </method>
+        <method name="PUT">
+          <request>
+            <representation mediaType="application/sep+xml"
+                            element="sep:EndDevice"/>
+          </request>
+        </method>
+        <method name="DELETE"/>
+
+        <!-- /edev/{eDevId}/der — DER sub-collection -->
+        <resource path="/der">
+          <method name="GET">
+            <response>
+              <representation mediaType="application/sep+xml"
+                              element="sep:DERList"/>
+            </response>
+          </method>
+
+          <resource path="/{derId}">
+            <param name="derId" style="template" type="xs:string"/>
+            <method name="GET">
+              <response>
+                <representation mediaType="application/sep+xml"
+                                element="sep:DER"/>
+              </response>
+            </method>
+          </resource>
+        </resource>
+      </resource>
+    </resource>
+
+  </resources>
+</application>

@@ -4,7 +4,7 @@
 
 .DEFAULT_GOAL := help
 
-.PHONY: help all build fmt fmt-check lint lint-ci vet vuln test coverage cover fuzz check clean interop test-interop e2e nodeps generate generate-base generate-csipaus generate-verify
+.PHONY: help all build fmt fmt-check lint lint-ci vet vuln test coverage cover fuzz check clean interop test-interop e2e nodeps generate generate-base generate-csipaus generate-wadl generate-verify
 help: ## This help
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z0-9_-]+:.*?## / {printf "\033[36m%-30s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
@@ -105,8 +105,9 @@ check: fmt fmt-check nodeps lint lint-ci vet vuln test coverage ## Run format + 
 
 SCHEMA     ?= schemas/sep.xsd
 CSIPAUS    ?= schemas/csipaus.xsd
+WADL       ?= schemas/sep.wadl
 
-generate: generate-base generate-csipaus ## Generate all Go types from XSD schemas
+generate: generate-base generate-csipaus generate-wadl ## Generate all Go types from XSD and WADL schemas
 
 generate-base: ## Generate base IEEE 2030.5 types from sep.xsd
 	@test -f "$(SCHEMA)" || { echo "Error: $(SCHEMA) not found. See schemas/README.md."; exit 1; }
@@ -118,6 +119,11 @@ generate-csipaus: ## Generate CSIP-AUS extension types from csipaus.xsd
 	@test -f "$(CSIPAUS)" || { echo "Skipping CSIP-AUS: $(CSIPAUS) not found."; exit 0; }
 	@echo "Generating CSIP-AUS extension types from $(CSIPAUS)..."
 	@go run ./internal/gen -base "$(SCHEMA)" -schema "$(CSIPAUS)" -out csipaus -pkg csipaus
+
+generate-wadl: ## Generate resource table from sep.wadl
+	@test -f "$(WADL)" || { echo "Skipping WADL: $(WADL) not found."; exit 0; }
+	@echo "Generating resource table from $(WADL)..."
+	@go run ./internal/gen -wadl "$(WADL)" -out . -pkg ieee20305
 
 generate-verify: ## Verify that *_gen.go headers match schemas/manifest.yaml checksums
 	@echo "Verifying generated code checksums..."

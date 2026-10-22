@@ -17,12 +17,14 @@ import (
 	"path/filepath"
 
 	"github.com/otfabric/go-ieee20305/internal/gen/emit"
+	"github.com/otfabric/go-ieee20305/internal/gen/wadl"
 	"github.com/otfabric/go-ieee20305/internal/gen/xsd"
 )
 
 func main() {
 	schemaPath := flag.String("schema", "", "path to the XSD file")
 	basePath := flag.String("base", "", "path to the base XSD (for extension generation)")
+	wadlPath := flag.String("wadl", "", "path to the WADL file (for resource table generation)")
 	outDir := flag.String("out", ".", "output directory for generated files")
 	pkgName := flag.String("pkg", "ieee20305", "Go package name for generated files")
 	basePkg := flag.String("base-pkg", "github.com/otfabric/go-ieee20305", "Go import path of the base package")
@@ -36,7 +38,9 @@ func main() {
 	}
 
 	var err error
-	if *basePath != "" {
+	if *wadlPath != "" {
+		err = runWADL(*wadlPath, *outDir, *pkgName)
+	} else if *basePath != "" {
 		err = runExtension(*basePath, *schemaPath, *outDir, *pkgName, *basePkg, *baseImport)
 	} else {
 		err = run(*schemaPath, *outDir, *pkgName)
@@ -75,6 +79,33 @@ func run(schemaPath, outDir, pkgName string) error {
 
 	fmt.Printf("Generated %d complex types and %d simple types from %s\n",
 		len(resolved.ComplexTypes), len(resolved.SimpleTypes), source)
+	fmt.Printf("SHA-256: %s\n", hashHex)
+
+	return nil
+}
+
+func runWADL(wadlPath, outDir, pkgName string) error {
+	data, err := os.ReadFile(wadlPath)
+	if err != nil {
+		return fmt.Errorf("read wadl: %w", err)
+	}
+
+	hash := sha256.Sum256(data)
+	hashHex := hex.EncodeToString(hash[:])
+
+	app, err := wadl.Parse(data)
+	if err != nil {
+		return fmt.Errorf("parse wadl: %w", err)
+	}
+
+	source := filepath.Base(wadlPath)
+	e := emit.NewResourceEmitter(app, outDir, pkgName, source, hashHex)
+	if err := e.Emit(); err != nil {
+		return fmt.Errorf("emit resources: %w", err)
+	}
+
+	flat := app.Flatten()
+	fmt.Printf("Generated %d resources from %s\n", len(flat), source)
 	fmt.Printf("SHA-256: %s\n", hashHex)
 
 	return nil
