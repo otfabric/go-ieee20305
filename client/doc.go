@@ -12,6 +12,11 @@
 // or ieee20305.ErrTimeout. With csipaus.Codec as its Codec, a client reads
 // and writes CSIP-AUS documents.
 //
-// Registration, program and control polling, event handling and telemetry
-// reporting are built on these calls in later releases.
+// A device registers with Register: it finds its EndDevice in the server's
+// EndDeviceList by the SFDI of its certificate (IdentityOf), or creates it.
+// Registration retrieves what the server registered, and CheckPIN checks the
+// PIN the device was given out of band.
+//
+// Program and control polling, event handling and telemetry reporting are
+// built on these calls in later releases.
 package client

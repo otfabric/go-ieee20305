@@ -5,6 +5,35 @@ tag, GitHub release). The section of the version below, up to the `---` that
 ends it, is the release's notes. Before v1.0.0 a minor release may change the
 API.
 
+## v0.3.0
+
+**Date:** unreleased  
+**Previous release:** v0.2.0
+
+### Summary
+
+Device registration: a device finds or creates its EndDevice on a server
+and checks the PIN of its Registration.
+
+**Upgrade notes:** none.
+
+### Added
+
+- **`client.Register`** — makes sure the server's EndDeviceList has an
+  EndDevice for the device: finds it by the SFDI of the device certificate,
+  or posts one with its SFDI and LFDI and reads back what the server created.
+- **`client.FindEndDevice`** — selects the device with the `sFDI` query
+  parameter, and pages through the list and matches itself in case the server
+  ignores it. An EndDevice with the device's SFDI but another LFDI is not the
+  device.
+- **`client.Registration`** and **`client.CheckPIN`** — the Registration of an
+  EndDevice (`ErrNotRegistered` without a RegistrationLink) and the check of
+  its PIN against the one given out of band (`ErrPINMismatch`).
+- **`client.IdentityOf`** — the LFDI and SFDI of a device certificate.
+- **`client.ListOptions.SFDI`** — the `sFDI` query parameter.
+
+---
+
 ## v0.2.0
 
 **Date:** 2026-10-22  

@@ -160,6 +160,9 @@ type ListOptions struct {
 	// Limit is the maximum number of items (the l query parameter); the
 	// server's default when zero.
 	Limit uint32
+	// SFDI selects the EndDevice with this SFDI in an EndDeviceList (the
+	// sFDI query parameter); no selection when zero.
+	SFDI uint64
 }
 
 // GetList retrieves a page of the list resource at href into v, a pointer
@@ -169,6 +172,9 @@ func (c *Client) GetList(ctx context.Context, href string, opts ListOptions, v a
 	q.Set("s", strconv.FormatUint(uint64(opts.Start), 10))
 	if opts.Limit > 0 {
 		q.Set("l", strconv.FormatUint(uint64(opts.Limit), 10))
+	}
+	if opts.SFDI != 0 {
+		q.Set("sFDI", strconv.FormatUint(opts.SFDI, 10))
 	}
 	return c.get(ctx, href, q, v)
 }
