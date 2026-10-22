@@ -5,6 +5,122 @@ tag, GitHub release). The section of the version below, up to the `---` that
 ends it, is the release's notes. Before v1.0.0 a minor release may change the
 API.
 
+## v0.5.0
+
+**Date:** 2026-10-23  
+**Previous release:** v0.4.0
+
+### Summary
+
+The Go API of the client, server and agent in the form of the other
+otfabric libraries: one taxonomy of errors, pluggable logging, retry
+policies and metrics hooks. A review of the code fixed races, unbounded
+growth and unsafe defaults. The agent subscribes. The interop suite runs
+every operation of ieee20305-interop v0.2.0 (contract 0.3) in both
+directions, in a workflow of its own, and
+[docs/FEATURES.md](docs/FEATURES.md) states, feature by feature, what is
+tested and how far each other implementation goes.
+
+**Upgrade notes**
+
+Before v1.0.0 a minor release may change the API; this one does:
+
+- `Logger` in `server.Config` and `agent.Config` is an `ieee20305.Logger`,
+  not a `*slog.Logger`: pass `ieee20305.NewSlogLogger(handler)`.
+- `agent.Config.Backoff` (an `ieee20305.ExponentialBackoff`) replaces
+  `RetryDelay` and `MaxRetryDelay`. The agent now stops on errors that
+  waiting does not fix (4xx, certificates, configuration), and drops a
+  Response a server refuses with a 4xx.
+- `server.Config.NotificationRetry` (an `ieee20305.RetryPolicy`) and
+  `NotificationCancelAfter` (24 h) replace `NotificationAttempts` and
+  `NotificationRetryDelay`. A 4xx cancels a subscription at once.
+- `server.Config.NotificationURIAllowed` guards the notificationURIs devices
+  choose. Its default, `DefaultNotificationURIAllowed`, refuses loopback,
+  link-local, multicast and unspecified addresses: set it to reach
+  listeners on such addresses (in tests, say).
+- `client.NewNotificationHandler(handle, client.NotificationConfig{...})`
+  builds a `NotificationHandler`; its fields are no longer set directly.
+- `ieee20305.ErrSchedule` is gone (the scheduler returns `ErrInvalid`).
+  `discovery.ErrNoDcap` matches `ErrProtocol`; `server.ErrNoNode` matches
+  `ErrNotFound`.
+- `security.ClientTLSConfig`, `ServerTLSConfig` and `Verify` fail with
+  `ErrConfiguration` on a nil pool of roots, instead of falling back to the
+  system's roots.
+- The server answers a first PUT of a resource it linked (a DERSettings,
+  say) with 204, as any other PUT, not 201.
+- `server.Admin.Create` refuses, with `ErrInvalid`, an item its list cannot
+  hold.
+- Lists that clients post to are capped by `server.Config.MaxListItems`
+  (1000; the oldest go first), and events in a final state are pruned after
+  `server.Config.EventRetention` (24 h). `client.Iterate` stops after
+  `client.Config.MaxListItems` items (100000).
+- The tlsccm module changes too (`NewListener` returns an error;
+  `Options.Logger` replaces `ErrorLog`), in tlsccm/v0.2.0, released apart.
+
+### Added
+
+- **Errors** ([ERRORS.md](ERRORS.md)) — `ErrServer`, `ErrConflict`,
+  `ErrUnavailable` and `ErrCanceled`; `StatusError.RetryAfter`;
+  `ieee20305.Retryable` and `ieee20305.RetryAfter`. Transport failures of
+  the client are classified (timeouts, refused and reset connections,
+  certificates), and the server answers the sentinels of its hooks with
+  their statuses. `agent.ErrNotStarted`; `ErrClosed` after `Close`
+  everywhere.
+- **Logging** — `ieee20305.Logger` (`Debugf`, `Infof`, `Warnf`, `Errorf`),
+  `FieldLogger`, `NopLogger`, `NewSlogLogger` and `NewStdLogger`, in the
+  configuration of the server, client, agent, discovery and tlsccm, with a
+  `component` field. Silent by default.
+- **Retries** — `ieee20305.RetryPolicy`, `NoRetry` and
+  `ExponentialBackoff` (full jitter, `Retry-After`); `client.Config.RetryPolicy`
+  and `RetryPOST`.
+- **Metrics** ([OBSERVABILITY.md](OBSERVABILITY.md)) — `client.Metrics`,
+  `server.Metrics` and `agent.Metrics`, with the optional
+  `client.AttemptMetrics`, `server.NotificationMetrics` and
+  `server.EventMetrics`, and a `NopMetrics` to embed in each.
+- **Agent subscriptions** — `agent.Config.NotificationURI` and
+  `SubscribedPollRate`, and `Agent.NotificationHandler`: the agent
+  subscribes to its FunctionSetAssignments, programs and controls, and polls
+  less while subscribed.
+- **Notifications** — `server.NewNotificationClient` and
+  `security.NotificationTLSConfig`, which verify listeners served with
+  device certificates.
+- `server.Admin.Now`; `ieee20305.MediaType`.
+- **Documentation** — [API.md](API.md), [ARCHITECTURE.md](ARCHITECTURE.md),
+  [INTEROPERABILITY.md](INTEROPERABILITY.md) and
+  [docs/FEATURES.md](docs/FEATURES.md); a README with client and server
+  quickstarts, a comparison with Envoy, GridAPPS-D, py20305 and EPRI, the
+  interop qualification and the limitations; a fuller SECURITY.md; and
+  runnable [examples](examples/README.md) (quickstart, server, client,
+  csipaus, observability) with `Example` functions, which CI runs.
+
+### Fixed
+
+- The locks of Responses and mirrors were shared by every Server; the
+  notifier panicked when it reloaded subscriptions without a client; a PUT
+  of an event lost the EventStatus the scheduler had just written.
+- `server.New` leaked its goroutines on an error; `Agent.Close` could wait on
+  posts without end; `Agent.State` shared its maps.
+- A TimeTariffInterval has its ConsumptionTariffIntervalList.
+- `client.Walk` fetched its first page twice.
+- The package documentation of `security` claimed CCM_8, which is in
+  `tlsccm`, and described the SFDI's check digit wrongly.
+
+### Tested
+
+- `e2e` for every function set in both editions, discovery to client,
+  SelfDevice, aggregators, curves, prepayment, the agent with and without
+  subscriptions, and the logging, metrics and retries under injected faults.
+- `interop`, now against ieee20305-interop v0.2.0, and in the Interop
+  workflow: every fixture (baseline, csip, csip-aus) and every operation of
+  each image, both ways: register, discover, poll-controls, poll-pricing,
+  report, respond, log-event, put-der, flow-reservation and subscribe, with
+  our notifier delivering to py20305 and GridAPPS-D notifying our
+  NotificationHandler. Known upstream bugs skip while they reproduce.
+- `make features` checks [docs/FEATURES.md](docs/FEATURES.md) against the
+  tests. Statement coverage 92.8%.
+
+---
+
 ## v0.4.0
 
 **Date:** 2026-10-22  
