@@ -6,7 +6,7 @@ package ieee20305
 // --- Primitive types ---
 
 // HexBinary160 is generated from xs:simpleType "HexBinary160".
-type HexBinary160 []byte
+type HexBinary160 [20]byte
 
 // TimeType is generated from xs:simpleType "TimeType".
 //

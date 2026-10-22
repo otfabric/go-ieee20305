@@ -77,6 +77,10 @@ func resolveSimpleBase(st *xsd.SimpleType) string {
 	if st.Base == "" {
 		return "string"
 	}
+	// xs:hexBinary with a fixed length → [N]byte.
+	if st.Base == "xs:hexBinary" && st.MinLength > 0 && st.MinLength == st.MaxLength {
+		return fmt.Sprintf("[%d]byte", st.MinLength)
+	}
 	if xsd.IsBuiltinXSD(st.Base) {
 		return XSDToGoType(st.Base)
 	}

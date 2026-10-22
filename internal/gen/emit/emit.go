@@ -44,6 +44,9 @@ func (e *Emitter) Emit() error {
 	if err := e.emitPrimitives(); err != nil {
 		return fmt.Errorf("emit primitives_gen.go: %w", err)
 	}
+	if err := e.emitXML(); err != nil {
+		return fmt.Errorf("emit xml_gen.go: %w", err)
+	}
 	return nil
 }
 
