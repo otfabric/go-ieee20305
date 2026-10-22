@@ -164,8 +164,13 @@ func copyLinks(d, s reflect.Value) {
 		switch {
 		case f.Anonymous:
 			copyLinks(d.Field(i), s.Field(i))
-		case f.IsExported() && strings.HasSuffix(f.Name, "Link") && f.Type.Kind() == reflect.Pointer:
+		case f.IsExported() && strings.HasSuffix(f.Name, "Link") && (f.Type.Kind() == reflect.Pointer || f.Type.Kind() == reflect.Struct):
 			d.Field(i).Set(s.Field(i))
 		}
 	}
 }
+
+// Document returns a new, empty document of the WADL resource, such as an
+// *ieee20305.DemandResponseProgramList for DemandResponseProgramList, or
+// nil.
+func (a *Admin) Document(resource string) any { return a.s.newList(resource) }

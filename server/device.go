@@ -175,7 +175,7 @@ func (s *Server) newEndDevice(ctx context.Context, lfdi security.LFDI, tmpl *iee
 	return s.createItem(ctx, list, ed, lfdi.String())
 }
 
-// newList returns an empty document of the list resource.
+// newList returns an empty document of the resource (a list, mostly).
 func (s *Server) newList(resource string) any {
 	spec := s.resources[resource]
 	for _, m := range spec.Methods {

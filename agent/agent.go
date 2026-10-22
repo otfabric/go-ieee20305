@@ -7,10 +7,10 @@
 // server's pollRate, retrying with backoff when the server fails.
 //
 // Run does all of this until its context ends. The function sets an agent
-// takes part in plug into it as handlers: for DER, the agent schedules the
-// DERControls of the device's DERPrograms with randomization and primacy,
-// passes their transitions to OnDERControl and posts the Responses they
-// ask for.
+// takes part in plug into it as handlers: for DER, DRLC, messaging, pricing
+// and prepayment, the agent schedules the events of the device's programs
+// with randomization and primacy, passes their transitions to the handler
+// of the function set and posts the Responses they ask for.
 package agent
 
 import (
@@ -57,6 +57,16 @@ type Config struct {
 	// DER conflicts works them out. The agent posts the Responses the
 	// controls ask for.
 	OnDERControl func(ctx context.Context, t schedule.Transition) error
+	// OnEndDeviceControl, OnTextMessage, OnTimeTariffInterval and
+	// OnSupplyInterruptionOverride are called with the transitions of the
+	// events of DRLC, messaging, pricing and prepayment, as OnDERControl
+	// is for DER: EndDeviceControls conflict by deviceCategory, the
+	// TimeTariffIntervals of a RateComponent with each other, and
+	// TextMessages and SupplyInterruptionOverrides never.
+	OnEndDeviceControl           func(ctx context.Context, t schedule.Transition) error
+	OnTextMessage                func(ctx context.Context, t schedule.Transition) error
+	OnTimeTariffInterval         func(ctx context.Context, t schedule.Transition) error
+	OnSupplyInterruptionOverride func(ctx context.Context, t schedule.Transition) error
 	// OnDefaultDERControl is called with the DefaultDERControl of the
 	// DERProgram of highest precedence when it changes.
 	OnDefaultDERControl func(ctx context.Context, d *ieee20305.DefaultDERControl) error
@@ -76,9 +86,8 @@ type Agent struct {
 	c   *client.Client
 	log *slog.Logger
 
-	clock   schedule.Clock
-	der     *schedule.Scheduler
-	derDone chan struct{}
+	clock schedule.Clock
+	loops [functionSets]*eventLoop
 
 	mu          sync.Mutex
 	state       State
@@ -128,19 +137,13 @@ func New(cfg Config) (*Agent, error) {
 	if seed == 0 {
 		seed = uint64(cfg.Identity.SFDI)
 	}
-	a.der = schedule.New(schedule.Options{Clock: a.clock, Seed: seed, Randomize: true, Conflicts: schedule.DERConflicts})
-	ch, _ := a.der.Subscribe()
-	a.derDone = make(chan struct{})
-	go a.runDER(ch)
+	a.newLoops(seed)
 	return a, nil
 }
 
 // Close stops the scheduling of events and waits for the handlers. Run
 // closes the agent when it returns.
-func (a *Agent) Close() {
-	a.der.Close()
-	<-a.derDone
-}
+func (a *Agent) Close() { a.closeLoops() }
 
 // State returns what the agent knows of the server.
 func (a *Agent) State() State {
@@ -218,7 +221,12 @@ func (a *Agent) poll(ctx context.Context) error {
 			return err
 		}
 	}
-	return a.pollDER(ctx, fsas)
+	for _, l := range a.loops {
+		if err := a.pollEvents(ctx, l, fsas); err != nil {
+			return err
+		}
+	}
+	return a.pollDefault(ctx)
 }
 
 // isNotFound reports whether err is a 404 of the server.

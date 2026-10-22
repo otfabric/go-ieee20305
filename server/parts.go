@@ -25,6 +25,8 @@ var itemParts = map[string][]string{
 	"TariffProfile":         {"RateComponentList"},
 	"RateComponent":         {"TimeTariffIntervalList", "ActiveTimeTariffIntervalList"},
 	"ResponseSet":           {"ResponseList"},
+	"Prepayment": {"AccountBalance", "PrepayOperationStatus", "CreditRegisterList", "ActiveCreditRegisterList",
+		"SupplyInterruptionOverrideList", "ActiveSupplyInterruptionOverrideList"},
 }
 
 // partPath returns the path segment of a part: the last segment of its
