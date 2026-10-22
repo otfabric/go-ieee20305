@@ -24,18 +24,46 @@ func (s *Server) list(ctx context.Context, req *Request) (any, error) {
 // listOf builds the page of the list document of req.Node from the items
 // of the list at source that keep accepts (all when nil).
 func (s *Server) listOf(ctx context.Context, req *Request, source string, keep func(*Node) bool) (any, error) {
-	members, err := s.store.Members(ctx, source)
-	if err != nil && !errors.Is(err, ErrNoNode) {
-		return nil, err
+	reads := s.reader(req.Principal)
+	q := req.Query
+	// The items the client reads (and of the sFDI it asks for), which a
+	// store that filters copies alone.
+	visible := func(n *Node) bool {
+		if n.Value == nil || !reads(n.Owner) {
+			return false
+		}
+		if q.HasSFDI {
+			if v, ok := fieldUint(n.Value, "SFDI"); !ok || v != q.SFDI {
+				return false
+			}
+		}
+		return true
 	}
 	var items []*Node
-	for _, m := range members {
-		if m.Value != nil && s.canRead(req.Principal, m) && (keep == nil || keep(m)) {
-			items = append(items, m)
+	if f, ok := s.base().(memberFilter); ok {
+		var err error
+		if items, err = f.filterMembers(source, visible); err != nil && !errors.Is(err, ErrNoNode) {
+			return nil, err
+		}
+	} else {
+		members, err := s.store.Members(ctx, source)
+		if err != nil && !errors.Is(err, ErrNoNode) {
+			return nil, err
+		}
+		for _, m := range members {
+			if visible(m) {
+				items = append(items, m)
+			}
 		}
 	}
-	if req.Query.HasSFDI {
-		items = filterSFDI(items, req.Query.SFDI)
+	if keep != nil {
+		kept := items[:0]
+		for _, m := range items {
+			if keep(m) {
+				kept = append(kept, m)
+			}
+		}
+		items = kept
 	}
 	sortItems(req.Node.Resource, items)
 	if req.Query.HasAfter {
@@ -72,17 +100,6 @@ func (s *Server) listOf(ctx context.Context, req *Request, source string, keep f
 	l.SetListCounts(uint32(all), uint32(len(page)))
 	setHref(doc, req.Node.Href)
 	return doc, nil
-}
-
-// filterSFDI keeps the items whose sFDI is sfdi.
-func filterSFDI(items []*Node, sfdi uint64) []*Node {
-	var out []*Node
-	for _, n := range items {
-		if v, ok := fieldUint(n.Value, "SFDI"); ok && v == sfdi {
-			out = append(out, n)
-		}
-	}
-	return out
 }
 
 // filterAfter keeps the events that start at or after a time, and the

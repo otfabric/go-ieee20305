@@ -109,6 +109,7 @@ type Agent struct {
 	state       State
 	lastDefault []byte
 	files       map[string]bool
+	pending     []pendingResponse
 }
 
 // State is what an agent knows of the server.
@@ -250,6 +251,7 @@ func (a *Agent) poll(ctx context.Context) error {
 	if err := a.pollFiles(ctx, fsas); err != nil {
 		return err
 	}
+	a.retryResponses(ctx)
 	return a.pollDefault(ctx)
 }
 

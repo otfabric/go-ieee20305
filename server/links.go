@@ -132,8 +132,9 @@ func (s *Server) count(ctx context.Context, p Principal, n *Node) int {
 		return 0
 	}
 	if c, ok := s.base().(memberCounter); ok {
+		reads := s.reader(p)
 		n, err := c.countMembers(n.Href, func(owner string, hasValue bool) bool {
-			return hasValue && s.canRead(p, &Node{Owner: owner})
+			return hasValue && reads(owner)
 		})
 		if err == nil {
 			return n
@@ -191,4 +192,25 @@ func (s *memStore) countMembers(list string, keep func(owner string, hasValue bo
 		}
 	}
 	return c, nil
+}
+
+// memberFilter is a store that copies only the items of a list a predicate
+// keeps. The predicate runs under the lock of the store.
+type memberFilter interface {
+	filterMembers(list string, keep func(*Node) bool) ([]*Node, error)
+}
+
+func (s *memStore) filterMembers(list string, keep func(*Node) bool) ([]*Node, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if _, ok := s.nodes[list]; !ok {
+		return nil, ErrNoNode
+	}
+	var out []*Node
+	for _, m := range s.members[list] {
+		if n, ok := s.nodes[m]; ok && keep(n) {
+			out = append(out, copyNode(n, s.clone))
+		}
+	}
+	return out, nil
 }

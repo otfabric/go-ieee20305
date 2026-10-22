@@ -62,6 +62,23 @@ jobs:
       - name: Coverage of at least COVER_MIN percent
         run: make coverage-gate
 
+  # The tests shuffled and run twice with the race detector, to shake out
+  # order dependencies and races: the chaos and parallelism suites of e2e
+  # among them.
+  stress:
+    name: Race and shuffle
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      GOWORK: "off"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Tests, shuffled, twice, with -race
+        run: make stress
+
   # The tlsccm module: the cipher suite TLS_ECDHE_ECDSA_WITH_AES_128_CCM_8,
   # on the Go version and dependencies of its own go.mod.
   tlsccm:

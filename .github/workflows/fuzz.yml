@@ -1,0 +1,41 @@
+name: Fuzz
+run-name: "Fuzz (${{ github.event_name }}) on ${{ github.ref_name }}"
+
+# Runs every fuzz target of the Makefile (FUZZ_TARGETS) for longer than CI
+# can: nightly, and on demand. An input that fails is kept as an artifact;
+# add it to the target's testdata/fuzz directory to make it a regression
+# test.
+on:
+  schedule:
+    - cron: "17 2 * * *"
+  workflow_dispatch:
+    inputs:
+      fuzztime:
+        description: "How long each target runs (a Go duration)"
+        required: false
+        default: "5m"
+
+permissions:
+  contents: read
+
+jobs:
+  fuzz:
+    name: Fuzz
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      GOWORK: "off"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Fuzz every target
+        run: make fuzz FUZZTIME=${{ inputs.fuzztime || '5m' }}
+      - name: Keep the failing inputs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-failures
+          path: "**/testdata/fuzz/**"
+          if-no-files-found: ignore

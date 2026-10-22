@@ -93,6 +93,28 @@ func (s *Server) acts(p Principal, owner string) bool {
 	return s.devices[owner].ManagedBy == p.lfdi()
 }
 
+// reader returns whether p reads the resources of an owner, from what the
+// server knows now: for checks under the lock of a store, which must not
+// take the server's.
+func (s *Server) reader(p Principal) func(owner string) bool {
+	own := p.lfdi()
+	if p.Role == RoleOperator {
+		return func(string) bool { return true }
+	}
+	var managed map[string]bool
+	if p.Role == RoleAggregator {
+		managed = map[string]bool{}
+		s.mu.Lock()
+		for lfdi, d := range s.devices {
+			if d.ManagedBy == own {
+				managed[lfdi] = true
+			}
+		}
+		s.mu.Unlock()
+	}
+	return func(owner string) bool { return owner == "" || owner == own || managed[owner] }
+}
+
 // canRead reports whether p may read the node: one it acts for, or one
 // every client may read.
 func (s *Server) canRead(p Principal, n *Node) bool {

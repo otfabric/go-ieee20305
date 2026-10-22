@@ -347,13 +347,45 @@ func (a *Agent) respond(ctx context.Context, set *eventSet, t schedule.Transitio
 	r.CreatedDateTime, r.Status = &created, &st
 	r.Subject, _ = ev.FieldByName("MRID").Interface().(ieee20305.MRIDType)
 	r.EndDeviceLFDI = ieee20305.HexBinary160(a.cfg.Identity.LFDI[:])
-	if _, err := a.c.Post(ctx, *replyTo, doc); err != nil {
+	return a.postResponse(ctx, pendingResponse{href: *replyTo, doc: doc})
+}
+
+// pendingResponse is a Response the agent could not post yet.
+type pendingResponse struct {
+	href string
+	doc  any
+}
+
+// maxPending bounds the Responses the agent keeps to send again.
+const maxPending = 1000
+
+// postResponse posts a Response, or keeps it to send again at the next
+// poll (the server stores a Response once, so sending one twice is
+// harmless).
+func (a *Agent) postResponse(ctx context.Context, r pendingResponse) error {
+	if _, err := a.c.Post(ctx, r.href, r.doc); err != nil {
+		a.mu.Lock()
+		if len(a.pending) < maxPending {
+			a.pending = append(a.pending, r)
+		}
+		a.mu.Unlock()
 		return err
 	}
 	a.mu.Lock()
 	a.state.Responses++
 	a.mu.Unlock()
 	return nil
+}
+
+// retryResponses posts the Responses kept after a failure.
+func (a *Agent) retryResponses(ctx context.Context) {
+	a.mu.Lock()
+	pending := a.pending
+	a.pending = nil
+	a.mu.Unlock()
+	for _, r := range pending {
+		_ = a.postResponse(ctx, r)
+	}
 }
 
 // Active returns the events of the function set fs active now, in order of

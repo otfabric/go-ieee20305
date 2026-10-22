@@ -68,6 +68,8 @@ type env struct {
 	url string
 	// clients are the HTTP clients of the clients of the server.
 	clients []*http.Client
+	// close stops the server, once.
+	close func()
 }
 
 func newEnv(t testing.TB, cfg server.Config) *env {
@@ -76,6 +78,17 @@ func newEnv(t testing.TB, cfg server.Config) *env {
 }
 
 func newEnvPKI(t testing.TB, p *pki, cfg server.Config) *env {
+	t.Helper()
+	return newEnvFull(t, p, cfg, nil)
+}
+
+// newEnvWrapped is newEnv with the handler of the server wrapped by wrap.
+func newEnvWrapped(t testing.TB, cfg server.Config, wrap func(http.Handler) http.Handler) *env {
+	t.Helper()
+	return newEnvFull(t, newPKI(t), cfg, wrap)
+}
+
+func newEnvFull(t testing.TB, p *pki, cfg server.Config, wrap func(http.Handler) http.Handler) *env {
 	t.Helper()
 	if cfg.NotificationClient == nil {
 		// The server notifies with a certificate of its own, as a client.
@@ -89,15 +102,21 @@ func newEnvPKI(t testing.TB, p *pki, cfg server.Config) *env {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ts := httptest.NewUnstartedServer(srv)
+	var h http.Handler = srv
+	if wrap != nil {
+		h = wrap(srv)
+	}
+	ts := httptest.NewUnstartedServer(h)
 	ts.Config.ErrorLog = quiet
 	ts.TLS = security.ServerTLSConfig(tls.Certificate{Certificate: [][]byte{cert.Raw}, PrivateKey: key, Leaf: cert}, p.roots)
 	ts.StartTLS()
-	t.Cleanup(func() {
+	e := &env{pki: p, srv: srv, url: ts.URL}
+	e.close = sync.OnceFunc(func() {
 		ts.Close()
 		_ = srv.Close()
 	})
-	return &env{pki: p, srv: srv, url: ts.URL}
+	t.Cleanup(e.close)
+	return e
 }
 
 // client returns a client of the server with the certificate of device.

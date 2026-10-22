@@ -4,7 +4,7 @@
 
 .DEFAULT_GOAL := help
 
-.PHONY: help all build fmt fmt-check lint lint-ci vet vuln test coverage cover fuzz check clean interop test-interop test-tlsccm e2e nodeps download schemas generate generate-verify generate-check check-updates
+.PHONY: help all build fmt fmt-check lint lint-ci vet vuln test stress coverage cover fuzz check clean interop test-interop test-tlsccm e2e nodeps download schemas generate generate-verify generate-check check-updates
 help: ## This help
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z0-9_-]+:.*?## / {printf "\033[36m%-30s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
@@ -87,6 +87,10 @@ test: ## Run the library tests with the race detector
 	@echo "Running tests"
 	@go test -count=1 -race $(TEST_PKGS)
 
+stress: ## Run the library tests shuffled, twice, with the race detector (CI)
+	@echo "Running the tests shuffled, twice, with the race detector"
+	@go test -count=2 -race -shuffle=on -timeout=30m $(TEST_PKGS)
+
 coverage: ## Run tests with coverage on the library packages (writes coverage.out)
 	@echo "Running coverage"
 	@go test -count=1 -race -coverprofile=coverage.out -covermode=atomic -coverpkg=$(COVER_PKGS) $(TEST_PKGS)
@@ -107,7 +111,8 @@ cover: coverage ## Open coverage report in browser
 # Duration each fuzz target runs. Override with FUZZTIME=... (e.g. FUZZTIME=5m).
 FUZZTIME ?= 30s
 # The fuzz targets, as <package>:<target>.
-FUZZ_TARGETS := ./server:FuzzHandler ./security:FuzzHardwareModuleName ./schedule:FuzzResolve ./internal/dnsmsg:FuzzParse
+FUZZ_TARGETS := ./server:FuzzHandler ./security:FuzzHardwareModuleName ./schedule:FuzzResolve ./internal/dnsmsg:FuzzParse \
+	.:FuzzDecode ./csipaus:FuzzDecode ./client:FuzzResolve
 
 fuzz: ## Run the fuzz targets for FUZZTIME each (default 30s)
 	@echo "Fuzzing (FUZZTIME=$(FUZZTIME))"
