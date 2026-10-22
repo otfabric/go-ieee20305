@@ -42,12 +42,18 @@ func generate(t *testing.T) (base, profile, baseEx, profileEx emit.Files) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	s18, err := xsd.Load(fixture("base2018.xsd"), xsd.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
 	baseCfg := emit.Config{
-		Package:     "base",
-		ImportPath:  module,
-		Header:      header,
-		Polymorphic: map[xsd.QName]map[string]bool{b("Notification"): {"Resource": true}},
-		Examples:    baseExamples,
+		Package:       "base",
+		ImportPath:    module,
+		Header:        header,
+		Polymorphic:   map[xsd.QName]map[string]bool{b("Notification"): {"Resource": true}},
+		Examples:      baseExamples,
+		Edition2018:   s18,
+		Resources2018: []string{"DeviceList"},
 	}
 	base, err = emit.Generate(bs, baseCfg)
 	if err != nil {
@@ -76,6 +82,7 @@ func generate(t *testing.T) (base, profile, baseEx, profileEx emit.Files) {
 		ProfileVersion: "9.9",
 		Base:           &emit.Base{Package: "base", ImportPath: module, Set: bs, Examples: baseExamples},
 		Examples:       profileExamples,
+		Edition2018:    s18,
 	}
 	profile, err = emit.Generate(ps, profileCfg)
 	if err != nil {
@@ -373,6 +380,18 @@ func TestBehaviour(t *testing.T) {
 	if name, ok := profile.ElementName(pd); !ok || name.Space != "urn:test:base" {
 		t.Error("profile documents keep the base namespace")
 	}
+
+	ver := base.Version("1.0")
+	off := true
+	sd := base.Device{SFDI: 1, Version: &ver, Link: []base.Link{{Href: "/l"}}, Control: &base.Control{Share: &base.PercentControl{Value: 5, Disabled: &off}}}
+	sd.ResourceR2_3 = &base.Revision{}
+	sd.Strip2018()
+	if sd.Version != nil || sd.ResourceR2_3 != nil || sd.Control.Share.Disabled != nil || sd.Control.Share.Value != 5 || sd.SFDI != 1 {
+		t.Errorf("Strip2018: %+v %+v", sd, sd.Control.Share)
+	}
+	if !base.InEdition2018("DeviceList") || base.InEdition2018("Device") {
+		t.Error("InEdition2018")
+	}
 }
 
 func ptr[T any](v T) *T { return &v }
@@ -445,6 +464,39 @@ func TestResourceOverrides(t *testing.T) {
 	} {
 		if _, err := emit.Resources(app, bs, "base", header, o); err == nil {
 			t.Errorf("%s: Resources succeeded", name)
+		}
+	}
+}
+
+func TestEditionIncompatible(t *testing.T) {
+	bs, err := xsd.Load(fixture("base.xsd"), xsd.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	src, err := os.ReadFile(fixture("base2018.xsd"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, edit := range map[string][2]string{
+		// The later edition requires sFDI; the earlier one has none.
+		"required element missing": {`<xs:element name="sFDI" type="UInt48"/>`, ``},
+		// The later Link type does not derive from the earlier one.
+		"type not derived": {`<xs:element name="share" type="Percent" minOccurs="0"/>`, `<xs:element name="share" type="Power" minOccurs="0"/>`},
+	} {
+		changed := strings.Replace(string(src), edit[0], edit[1], 1)
+		if changed == string(src) {
+			t.Fatalf("%s: the fixture has no %s", name, edit[0])
+		}
+		path := filepath.Join(t.TempDir(), "edition.xsd")
+		if err := os.WriteFile(path, []byte(changed), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		s18, err := xsd.Load(path, xsd.Options{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := emit.Generate(bs, emit.Config{Package: "base", Header: header, Edition2018: s18}); err == nil || !strings.Contains(err.Error(), "2018") {
+			t.Errorf("%s: Generate = %v", name, err)
 		}
 	}
 }

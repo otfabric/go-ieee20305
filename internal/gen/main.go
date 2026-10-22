@@ -102,6 +102,10 @@ func inputs(t *manifest.Target) []string {
 	if t.WADL != "" {
 		set[t.WADL] = true
 	}
+	if e := t.Edition2018; e != nil {
+		set[e.XSD] = true
+		set[e.WADL] = true
+	}
 	for _, loc := range t.SchemaLocations {
 		set[loc] = true
 	}
@@ -173,6 +177,20 @@ func generate(m *manifest.Manifest, upstreamDir, root string) error {
 		}
 		sets[t.Name] = set
 		cfg := emit.Config{Package: t.Package, ImportPath: t.ImportPath, Header: header(m, t), ProfileVersion: t.ProfileVersion, Polymorphic: poly, Examples: examplesOf(t)}
+		if e := t.Edition2018; e != nil {
+			s18, err := xsd.Load(filepath.Join(upstreamDir, filepath.FromSlash(e.XSD)), xsd.Options{})
+			if err != nil {
+				return fmt.Errorf("target %s: 2018 schema: %w", t.Name, err)
+			}
+			app18, err := wadl.ParseFile(filepath.Join(upstreamDir, filepath.FromSlash(e.WADL)))
+			if err != nil {
+				return fmt.Errorf("target %s: 2018 WADL: %w", t.Name, err)
+			}
+			cfg.Edition2018 = s18
+			for _, r := range app18.Resources {
+				cfg.Resources2018 = append(cfg.Resources2018, r.ID)
+			}
+		}
 		if t.Base != "" {
 			bt, _ := m.Target(t.Base)
 			cfg.Base = &emit.Base{Package: bt.Package, ImportPath: bt.ImportPath, Set: sets[t.Base], Examples: examplesOf(bt)}

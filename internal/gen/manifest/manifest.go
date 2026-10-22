@@ -78,6 +78,15 @@ type Target struct {
 	// builders of every type there, and tests of the generated code that use
 	// them next to it.
 	Examples *Examples `json:"examples,omitempty"`
+	// Edition2018, when set, is the IEEE 2030.5-2018 schema and WADL: the
+	// generator then also writes what reduces documents to 2018.
+	Edition2018 *Edition `json:"edition2018,omitempty"`
+}
+
+// Edition is the schema and WADL of an edition of IEEE 2030.5.
+type Edition struct {
+	XSD  string `json:"xsd"`
+	WADL string `json:"wadl"`
 }
 
 // Examples locates the package of example builders of a target.
@@ -214,6 +223,12 @@ func (m *Manifest) validate() error {
 			}
 		}
 		inputs := []string{t.XSD, t.WADL}
+		if e := t.Edition2018; e != nil {
+			if e.XSD == "" || e.WADL == "" {
+				return fmt.Errorf("target %s: edition2018 needs xsd and wadl", t.Name)
+			}
+			inputs = append(inputs, e.XSD, e.WADL)
+		}
 		for _, loc := range t.SchemaLocations {
 			inputs = append(inputs, loc)
 		}

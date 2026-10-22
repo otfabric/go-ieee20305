@@ -14,12 +14,17 @@ import (
 // such as *DERControl, or of the base package for documents CSIP-AUS does not
 // change.
 //
-// CSIP-AUS v1.3 profiles IEEE 2030.5-2018, whose schema does not allow the
-// schemaVer attribute of IEEE 2030.5-2023, so Marshal does not write it.
+// CSIP-AUS v1.3 profiles IEEE 2030.5-2018, so Marshal writes a 2018
+// document: it encodes a copy of v reduced to what 2018 defines (its own
+// CSIP-AUS elements stay), without the schemaVer attribute of 2023.
 func Marshal(v any) ([]byte, error) {
 	name, ok := elementName(v)
 	if !ok {
 		return nil, fmt.Errorf("%w: %T is not an IEEE 2030.5 or CSIP-AUS document type", ieee20305.ErrInvalid, v)
+	}
+	if c, ok := Clone(v).(ieee20305.Stripper); ok {
+		c.Strip2018()
+		v = c
 	}
 	return sepxml.Marshal(name, "", v)
 }

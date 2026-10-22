@@ -6,6 +6,8 @@
 // inputs in schemas/manifest.json, instead of editing this file.
 //
 // Sources (pinned in schemas/manifest.json):
+//	ieee-2030.5-2018/sep.xsd sha256:5b32e18378e64133e3a9f7f320ea10e204bb5596aac96898cdef9e8ec39a9164
+//	ieee-2030.5-2018/sep_wadl.xml sha256:93ee874d3a7e216dd1074781a0be390af2fa075f8f9145f5fbf08d509f4fa1c5
 //	ieee-2030.5-2023/sep.xsd sha256:fc8a0acbd7e995bad0f5fcd8102f48dfa107ba94881268185574840f73a35d35
 //	ieee-2030.5-2023/sep_wadl.xml sha256:8faa40c636cee615ff21d3744ed088c45514e35de7790a79b19f50afff699396
 
@@ -374,6 +376,18 @@ func TestGeneratedExamples(t *testing.T) {
 			}
 			if after, err := xml.Marshal(clone); err != nil || string(after) != string(out) {
 				t.Errorf("%s(%d): the clone encodes differently", c.name, d)
+			}
+			if s, ok := clone.(interface{ Strip2018() }); ok {
+				s.Strip2018()
+				if err := clone.(interface{ Validate() error }).Validate(); err != nil {
+					t.Errorf("%s(%d): invalid after Strip2018: %v", c.name, d, err)
+				}
+				if _, err := xml.Marshal(clone); err != nil {
+					t.Errorf("%s(%d): Strip2018: %v", c.name, d, err)
+				}
+				if !reflect.DeepEqual(v, c.build(d)) {
+					t.Errorf("%s(%d): Strip2018 of the clone changed the original", c.name, d)
+				}
 			}
 		}
 	}

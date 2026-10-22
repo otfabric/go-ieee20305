@@ -55,6 +55,18 @@ func TestGeneratedExamples(t *testing.T) {
 			if after, err := xml.Marshal(clone); err != nil || string(after) != string(out) {
 				t.Errorf("%s(%d): the clone encodes differently", c.name, d)
 			}
+			if s, ok := clone.(interface{ Strip2018() }); ok {
+				s.Strip2018()
+				if err := clone.(interface{ Validate() error }).Validate(); err != nil {
+					t.Errorf("%s(%d): invalid after Strip2018: %v", c.name, d, err)
+				}
+				if _, err := xml.Marshal(clone); err != nil {
+					t.Errorf("%s(%d): Strip2018: %v", c.name, d, err)
+				}
+				if !reflect.DeepEqual(v, c.build(d)) {
+					t.Errorf("%s(%d): Strip2018 of the clone changed the original", c.name, d)
+				}
+			}
 		}
 	}
 	if profile.Clone(struct{}{}) != nil {

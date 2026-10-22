@@ -8,6 +8,8 @@
 // Sources (pinned in schemas/manifest.json):
 //	csipaus-1.3/csipaus-core-v1.3.xsd sha256:dc746492dad27b1c8c89d7b1bad4b68bd87e31a6ade69bf6fa693d789f1f696c
 //	csipaus-1.3/csipaus-ext-v1.3.xsd sha256:6662ed52ec2c5c9253d01f55a292708d3d21aee8e4de291718e3da42ed065515
+//	ieee-2030.5-2018/sep.xsd sha256:5b32e18378e64133e3a9f7f320ea10e204bb5596aac96898cdef9e8ec39a9164
+//	ieee-2030.5-2018/sep_wadl.xml sha256:93ee874d3a7e216dd1074781a0be390af2fa075f8f9145f5fbf08d509f4fa1c5
 //	ieee-2030.5-2023/sep.xsd sha256:fc8a0acbd7e995bad0f5fcd8102f48dfa107ba94881268185574840f73a35d35
 
 // Package examples builds example values of every type of package csipaus,

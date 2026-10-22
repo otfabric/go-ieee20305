@@ -39,6 +39,11 @@ type Config struct {
 	// Polymorphic lists, per complex type, the elements whose xsi:type may
 	// name any type derived from the declared type.
 	Polymorphic map[xsd.QName]map[string]bool
+	// Edition2018, when set, is the IEEE 2030.5-2018 schema: Generate then
+	// writes editions_gen.go, which reduces documents to what 2018 defines.
+	Edition2018 *xsd.Set
+	// Resources2018 are the IDs of the resources of the 2018 WADL.
+	Resources2018 []string
 	// Examples, when set, adds tests of the generated code
 	// (generated_gen_test.go) that use the example builders of
 	// GenerateExamples.
@@ -124,6 +129,7 @@ func Generate(set *xsd.Set, cfg Config) (Files, error) {
 		{"defaults_gen.go", g.defaults},
 		{"elements_gen.go", g.elements},
 		{"generic_gen.go", g.generic},
+		{"editions_gen.go", g.editions},
 	} {
 		body, err := p.fn()
 		if err != nil {
@@ -402,6 +408,7 @@ type field struct {
 	goType  string
 	tag     string
 	xmlName string // for validation paths
+	ns      string // the namespace of an element; empty for an attribute
 	typ     xsd.QName
 	kind    int // kindValue, kindPointer, kindSlice
 	min     int
@@ -472,7 +479,7 @@ func (g *gen) plan(q xsd.QName) (*structPlan, error) {
 		if g.cfg.Polymorphic[q][el.Name.Local] {
 			t = wrapperName(el.Type)
 		}
-		f := field{goName: GoName(el.Name.Local), xmlName: el.Name.Local, typ: el.Type, min: pa.MinOccurs, max: pa.MaxOccurs, defVal: el.Default}
+		f := field{goName: GoName(el.Name.Local), xmlName: el.Name.Local, ns: el.Name.Space, typ: el.Type, min: pa.MinOccurs, max: pa.MaxOccurs, defVal: el.Default}
 		tagName := el.Name.Local
 		if el.Name.Space != "" {
 			tagName = el.Name.Space + " " + el.Name.Local
@@ -557,7 +564,7 @@ func (g *gen) promotedNames(q xsd.QName) (map[string]bool, error) {
 var reservedMethods = map[string]bool{
 	"Validate": true, "String": true, "MarshalText": true, "UnmarshalText": true,
 	"Clone": true, "AppendLinks": true, "ListItems": true, "SetListItems": true,
-	"NewListItem": true, "ListItemElement": true, "SetListCounts": true,
+	"NewListItem": true, "ListItemElement": true, "SetListCounts": true, "Strip2018": true,
 }
 
 func (g *gen) types() (string, error) {
