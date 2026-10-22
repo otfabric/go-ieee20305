@@ -123,6 +123,7 @@ func Generate(set *xsd.Set, cfg Config) (Files, error) {
 		{"validate_gen.go", g.validate},
 		{"defaults_gen.go", g.defaults},
 		{"elements_gen.go", g.elements},
+		{"generic_gen.go", g.generic},
 	} {
 		body, err := p.fn()
 		if err != nil {
@@ -553,7 +554,11 @@ func (g *gen) promotedNames(q xsd.QName) (map[string]bool, error) {
 	return names, nil
 }
 
-var reservedMethods = map[string]bool{"Validate": true, "String": true, "MarshalText": true, "UnmarshalText": true}
+var reservedMethods = map[string]bool{
+	"Validate": true, "String": true, "MarshalText": true, "UnmarshalText": true,
+	"Clone": true, "AppendLinks": true, "ListItems": true, "SetListItems": true,
+	"NewListItem": true, "ListItemElement": true, "SetListCounts": true,
+}
 
 func (g *gen) types() (string, error) {
 	var b strings.Builder

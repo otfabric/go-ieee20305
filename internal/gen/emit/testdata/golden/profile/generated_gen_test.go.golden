@@ -48,7 +48,17 @@ func TestGeneratedExamples(t *testing.T) {
 			if !reflect.DeepEqual(v, back) {
 				t.Errorf("%s(%d): the round trip changed the value\n%s", c.name, d, out)
 			}
+			clone := profile.Clone(v)
+			if !reflect.DeepEqual(v, clone) {
+				t.Errorf("%s(%d): Clone differs", c.name, d)
+			}
+			if after, err := xml.Marshal(clone); err != nil || string(after) != string(out) {
+				t.Errorf("%s(%d): the clone encodes differently", c.name, d)
+			}
 		}
+	}
+	if profile.Clone(struct{}{}) != nil {
+		t.Error("Clone of a foreign value")
 	}
 }
 
@@ -301,4 +311,38 @@ func TestGeneratedElements(t *testing.T) {
 	}
 }
 
+func TestGeneratedLinks(t *testing.T) {
+	for _, v := range []interface {
+		AppendLinks([]base.LinkRef) []base.LinkRef
+	}{
+		examples.Control(3),
+		examples.Device(3),
+		examples.DeviceList(3),
+	} {
+		for _, l := range v.AppendLinks(nil) {
+			generic := l.Type == "Link" || l.Type == "ListLink"
+			if l.Element == "" || l.Type == "" || l.Href == "" || (l.Resource == "") != generic {
+				t.Errorf("%T: incomplete link %+v", v, l)
+			}
+		}
+	}
+}
+
+func TestGeneratedDerivations(t *testing.T) {
+	for _, e := range []string{
+		"Device",
+		"DeviceList",
+		"Meter",
+	} {
+		if !profile.Derives(e, e) {
+			t.Errorf("Derives(%q, %q) = false", e, e)
+		}
+	}
+	if profile.Derives("NoSuchElement", "NoSuchElement") {
+		t.Error("Derives of an unknown element")
+	}
+	if _, ok := profile.TypeBase("NoSuchType"); ok {
+		t.Error("TypeBase of an unknown type")
+	}
+}
 func generatedPtr[T any](v T) *T { return &v }

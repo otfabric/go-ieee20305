@@ -368,7 +368,17 @@ func TestGeneratedExamples(t *testing.T) {
 			if !reflect.DeepEqual(v, back) {
 				t.Errorf("%s(%d): the round trip changed the value\n%s", c.name, d, out)
 			}
+			clone := ieee20305.Clone(v)
+			if !reflect.DeepEqual(v, clone) {
+				t.Errorf("%s(%d): Clone differs", c.name, d)
+			}
+			if after, err := xml.Marshal(clone); err != nil || string(after) != string(out) {
+				t.Errorf("%s(%d): the clone encodes differently", c.name, d)
+			}
 		}
+	}
+	if ieee20305.Clone(struct{}{}) != nil {
+		t.Error("Clone of a foreign value")
 	}
 }
 
@@ -7911,4 +7921,315 @@ func TestGeneratedAnyResource(t *testing.T) {
 	}
 }
 
+func TestGeneratedLists(t *testing.T) {
+	for _, l := range []ieee20305.Lister{
+		examples.AggregatedDeviceList(2),
+		examples.BillingPeriodList(2),
+		examples.BillingReadingList(2),
+		examples.BillingReadingSetList(2),
+		examples.ConsumptionTariffIntervalList(2),
+		examples.CreditRegisterList(2),
+		examples.CustomerAccountList(2),
+		examples.CustomerAgreementList(2),
+		examples.DERComponentList(2),
+		examples.DERControlList(2),
+		examples.DERCurveList(2),
+		examples.DERList(2),
+		examples.DERProgramList(2),
+		examples.DemandResponseProgramList(2),
+		examples.EndDeviceControlList(2),
+		examples.EndDeviceList(2),
+		examples.FileList(2),
+		examples.FlowReservationRequestList(2),
+		examples.FlowReservationResponseList(2),
+		examples.FunctionSetAssignmentsList(2),
+		examples.HistoricalReadingList(2),
+		examples.IPAddrList(2),
+		examples.IPInterfaceList(2),
+		examples.LLInterfaceList(2),
+		examples.LoadShedAvailabilityList(2),
+		examples.LogEventList(2),
+		examples.MessagingProgramList(2),
+		examples.MeterReadingList(2),
+		examples.MirrorMeterReadingList(2),
+		examples.MirrorUsagePointList(2),
+		examples.NeighborList(2),
+		examples.NotificationList(2),
+		examples.PrepaymentList(2),
+		examples.PriceResponseCfgList(2),
+		examples.ProjectionReadingList(2),
+		examples.ProxiedDeviceList(2),
+		examples.RPLInstanceList(2),
+		examples.RPLSourceRoutesList(2),
+		examples.RateComponentList(2),
+		examples.ReadingList(2),
+		examples.ReadingSetList(2),
+		examples.ResponseList(2),
+		examples.ResponseSetList(2),
+		examples.SubscriptionList(2),
+		examples.SupplyInterruptionOverrideList(2),
+		examples.SupportedLocaleList(2),
+		examples.TargetReadingList(2),
+		examples.TariffProfileList(2),
+		examples.TextMessageList(2),
+		examples.TimeTariffIntervalList(2),
+		examples.UsagePointList(2),
+	} {
+		items := l.ListItems()
+		if len(items) == 0 {
+			t.Errorf("%T: no items", l)
+			continue
+		}
+		if err := l.SetListItems(append(items, l.NewListItem())); err != nil || len(l.ListItems()) != len(items)+1 {
+			t.Errorf("%T: SetListItems: %v", l, err)
+		}
+		first := reflect.ValueOf(items[0]).Elem().Interface()
+		if err := l.SetListItems([]any{first}); err != nil || len(l.ListItems()) != 1 {
+			t.Errorf("%T: SetListItems of a value: %v", l, err)
+		}
+		if err := l.SetListItems([]any{struct{}{}}); err == nil {
+			t.Errorf("%T: SetListItems accepted a foreign item", l)
+		}
+		if l.ListItemElement() == "" {
+			t.Errorf("%T: no item element", l)
+		}
+		l.SetListCounts(7, 1)
+		v := reflect.ValueOf(l).Elem()
+		if v.FieldByName("All").Uint() != 7 || v.FieldByName("Results").Uint() != 1 {
+			t.Errorf("%T: SetListCounts", l)
+		}
+	}
+}
+
+func TestGeneratedLinks(t *testing.T) {
+	for _, v := range []interface {
+		AppendLinks([]ieee20305.LinkRef) []ieee20305.LinkRef
+	}{
+		examples.AbstractDevice(3),
+		examples.BillingMeterReadingBase(3),
+		examples.BillingReadingSet(3),
+		examples.BillingReadingSetList(3),
+		examples.Configuration(3),
+		examples.CustomerAccount(3),
+		examples.CustomerAccountList(3),
+		examples.CustomerAgreement(3),
+		examples.CustomerAgreementList(3),
+		examples.DER(3),
+		examples.DERComponent(3),
+		examples.DERComponentBase(3),
+		examples.DERComponentList(3),
+		examples.DERControl(3),
+		examples.DERControlBase(3),
+		examples.DERControlList(3),
+		examples.DERList(3),
+		examples.DERProgram(3),
+		examples.DERProgramList(3),
+		examples.DefaultDERControl(3),
+		examples.DemandResponseProgram(3),
+		examples.DemandResponseProgramList(3),
+		examples.DeviceCapability(3),
+		examples.DeviceInformation(3),
+		examples.DeviceStatus(3),
+		examples.EndDevice(3),
+		examples.EndDeviceList(3),
+		examples.ExternalDevice(3),
+		examples.FileStatus(3),
+		examples.FunctionSetAssignments(3),
+		examples.FunctionSetAssignmentsBase(3),
+		examples.FunctionSetAssignmentsList(3),
+		examples.HistoricalReading(3),
+		examples.HistoricalReadingList(3),
+		examples.IEEE_802_15_4(3),
+		examples.IPAddr(3),
+		examples.IPAddrList(3),
+		examples.IPInterface(3),
+		examples.IPInterfaceList(3),
+		examples.LLInterface(3),
+		examples.LLInterfaceList(3),
+		examples.LoadShedAvailability(3),
+		examples.LoadShedAvailabilityList(3),
+		examples.MessagingProgram(3),
+		examples.MessagingProgramList(3),
+		examples.MeterReading(3),
+		examples.MeterReadingList(3),
+		examples.MirrorUsagePoint(3),
+		examples.MirrorUsagePointList(3),
+		examples.Prepayment(3),
+		examples.PrepaymentList(3),
+		examples.PriceResponseCfg(3),
+		examples.PriceResponseCfgList(3),
+		examples.ProjectionReading(3),
+		examples.ProjectionReadingList(3),
+		examples.ProxiedDevice(3),
+		examples.ProxiedDeviceList(3),
+		examples.RPLInstance(3),
+		examples.RPLInstanceList(3),
+		examples.RateComponent(3),
+		examples.RateComponentList(3),
+		examples.ReadingSet(3),
+		examples.ReadingSetList(3),
+		examples.ResponseSet(3),
+		examples.ResponseSetList(3),
+		examples.SelfDevice(3),
+		examples.TargetReading(3),
+		examples.TargetReadingList(3),
+		examples.TariffProfile(3),
+		examples.TariffProfileList(3),
+		examples.TimeTariffInterval(3),
+		examples.TimeTariffIntervalList(3),
+		examples.UsagePoint(3),
+		examples.UsagePointList(3),
+	} {
+		for _, l := range v.AppendLinks(nil) {
+			generic := l.Type == "Link" || l.Type == "ListLink"
+			if l.Element == "" || l.Type == "" || l.Href == "" || (l.Resource == "") != generic {
+				t.Errorf("%T: incomplete link %+v", v, l)
+			}
+		}
+	}
+}
+
+func TestGeneratedDerivations(t *testing.T) {
+	for _, e := range []string{
+		"AccountBalance",
+		"AggregatedDevice",
+		"AggregatedDeviceList",
+		"AggregationPriority",
+		"BillingPeriod",
+		"BillingPeriodList",
+		"BillingReading",
+		"BillingReadingList",
+		"BillingReadingSet",
+		"BillingReadingSetList",
+		"Configuration",
+		"ConsumptionTariffInterval",
+		"ConsumptionTariffIntervalList",
+		"CreditRegister",
+		"CreditRegisterList",
+		"CurrentDERControls",
+		"CustomerAccount",
+		"CustomerAccountList",
+		"CustomerAgreement",
+		"CustomerAgreementList",
+		"DER",
+		"DERAvailability",
+		"DERCapability",
+		"DERComponent",
+		"DERComponentList",
+		"DERControl",
+		"DERControlList",
+		"DERControlResponse",
+		"DERCurve",
+		"DERCurveList",
+		"DERList",
+		"DERProgram",
+		"DERProgramList",
+		"DERSettings",
+		"DERStatus",
+		"DefaultDERControl",
+		"DefaultDERControlResponse",
+		"DemandResponseProgram",
+		"DemandResponseProgramList",
+		"DeviceCapability",
+		"DeviceInformation",
+		"DeviceStatus",
+		"DrResponse",
+		"EndDevice",
+		"EndDeviceControl",
+		"EndDeviceControlList",
+		"EndDeviceList",
+		"Error",
+		"File",
+		"FileList",
+		"FileStatus",
+		"FlowReservationRequest",
+		"FlowReservationRequestList",
+		"FlowReservationResponse",
+		"FlowReservationResponseList",
+		"FlowReservationResponseResponse",
+		"FunctionSetAssignments",
+		"FunctionSetAssignmentsList",
+		"HistoricalReading",
+		"HistoricalReadingList",
+		"IPAddr",
+		"IPAddrList",
+		"IPInterface",
+		"IPInterfaceList",
+		"LLInterface",
+		"LLInterfaceList",
+		"LoadShedAvailability",
+		"LoadShedAvailabilityList",
+		"LogEvent",
+		"LogEventList",
+		"MessagingProgram",
+		"MessagingProgramList",
+		"MeterReading",
+		"MeterReadingList",
+		"MirrorMeterReading",
+		"MirrorMeterReadingList",
+		"MirrorUsagePoint",
+		"MirrorUsagePointList",
+		"Neighbor",
+		"NeighborList",
+		"Notification",
+		"NotificationList",
+		"PowerStatus",
+		"PrepayOperationStatus",
+		"Prepayment",
+		"PrepaymentList",
+		"PriceResponse",
+		"PriceResponseCfg",
+		"PriceResponseCfgList",
+		"ProjectionReading",
+		"ProjectionReadingList",
+		"ProxiedDevice",
+		"ProxiedDeviceList",
+		"RPLInstance",
+		"RPLInstanceList",
+		"RPLSourceRoutes",
+		"RPLSourceRoutesList",
+		"RateComponent",
+		"RateComponentList",
+		"Reading",
+		"ReadingList",
+		"ReadingSet",
+		"ReadingSetList",
+		"ReadingType",
+		"Registration",
+		"Response",
+		"ResponseList",
+		"ResponseSet",
+		"ResponseSetList",
+		"SelfDevice",
+		"ServiceSupplier",
+		"Subscription",
+		"SubscriptionList",
+		"SupplyInterruptionOverride",
+		"SupplyInterruptionOverrideList",
+		"SupportedLocale",
+		"SupportedLocaleList",
+		"TargetReading",
+		"TargetReadingList",
+		"TariffProfile",
+		"TariffProfileList",
+		"TextMessage",
+		"TextMessageList",
+		"TextResponse",
+		"Time",
+		"TimeTariffInterval",
+		"TimeTariffIntervalList",
+		"UsagePoint",
+		"UsagePointList",
+	} {
+		if !ieee20305.Derives(e, e) {
+			t.Errorf("Derives(%q, %q) = false", e, e)
+		}
+	}
+	if ieee20305.Derives("NoSuchElement", "NoSuchElement") {
+		t.Error("Derives of an unknown element")
+	}
+	if _, ok := ieee20305.TypeBase("NoSuchType"); ok {
+		t.Error("TypeBase of an unknown type")
+	}
+}
 func generatedPtr[T any](v T) *T { return &v }

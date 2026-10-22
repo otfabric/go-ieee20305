@@ -31,7 +31,7 @@ func (g *gen) tests() ([]byte, error) {
 		fmt.Fprintf(&b, "\t{%q, func(d int) interface{ Validate() error } { return examples.%s(d) }, func() any { return new(%s.%s) }},\n", n, n, pkg, n)
 	}
 	b.WriteString("}\n\n")
-	b.WriteString(`func TestGeneratedExamples(t *testing.T) {
+	b.WriteString(strings.ReplaceAll(`func TestGeneratedExamples(t *testing.T) {
 	for _, c := range exampleCases {
 		for _, d := range []int{0, 2} {
 			v := c.build(d)
@@ -52,11 +52,21 @@ func (g *gen) tests() ([]byte, error) {
 			if !reflect.DeepEqual(v, back) {
 				t.Errorf("%s(%d): the round trip changed the value\n%s", c.name, d, out)
 			}
+			clone := PKG.Clone(v)
+			if !reflect.DeepEqual(v, clone) {
+				t.Errorf("%s(%d): Clone differs", c.name, d)
+			}
+			if after, err := xml.Marshal(clone); err != nil || string(after) != string(out) {
+				t.Errorf("%s(%d): the clone encodes differently", c.name, d)
+			}
 		}
+	}
+	if PKG.Clone(struct{}{}) != nil {
+		t.Error("Clone of a foreign value")
 	}
 }
 
-`)
+`, "PKG", pkg))
 
 	// Invalid values: every Invalid builder, and every field that can be
 	// made invalid on its own.
@@ -276,6 +286,10 @@ func (g *gen) tests() ([]byte, error) {
 		}
 		b.WriteString("}\n\n")
 	}
+	if err := g.genericTests(&b); err != nil {
+		return nil, err
+	}
+
 	body := b.String()
 	if strings.Contains(body, "generatedPtr(") {
 		body += "func generatedPtr[T any](v T) *T { return &v }\n"
@@ -301,4 +315,98 @@ func (g *gen) tests() ([]byte, error) {
 	src.WriteString("\n)\n\n")
 	src.WriteString(body)
 	return formatSource(src.String())
+}
+
+// genericTests emits the tests of generic_gen.go: list methods, links and
+// derivations.
+func (g *gen) genericTests(b *strings.Builder) error {
+	pkg := g.cfg.Package
+	lister := g.basePkgPrefix() + "Lister"
+	var lists []xsd.QName
+	for _, q := range g.ownedSorted(true) {
+		if _, ok := g.listItems(q); ok {
+			lists = append(lists, q)
+		}
+	}
+	if len(lists) > 0 {
+		b.WriteString("func TestGeneratedLists(t *testing.T) {\n\tfor _, l := range []" + lister + "{\n")
+		for _, q := range lists {
+			fmt.Fprintf(b, "\t\texamples.%s(2),\n", GoName(q.Local))
+		}
+		b.WriteString(`	} {
+		items := l.ListItems()
+		if len(items) == 0 {
+			t.Errorf("%T: no items", l)
+			continue
+		}
+		if err := l.SetListItems(append(items, l.NewListItem())); err != nil || len(l.ListItems()) != len(items)+1 {
+			t.Errorf("%T: SetListItems: %v", l, err)
+		}
+		first := reflect.ValueOf(items[0]).Elem().Interface()
+		if err := l.SetListItems([]any{first}); err != nil || len(l.ListItems()) != 1 {
+			t.Errorf("%T: SetListItems of a value: %v", l, err)
+		}
+		if err := l.SetListItems([]any{struct{}{}}); err == nil {
+			t.Errorf("%T: SetListItems accepted a foreign item", l)
+		}
+		if l.ListItemElement() == "" {
+			t.Errorf("%T: no item element", l)
+		}
+		l.SetListCounts(7, 1)
+		v := reflect.ValueOf(l).Elem()
+		if v.FieldByName("All").Uint() != 7 || v.FieldByName("Results").Uint() != 1 {
+			t.Errorf("%T: SetListCounts", l)
+		}
+	}
+}
+
+`)
+	}
+	memo := map[xsd.QName]int{}
+	var linkers []xsd.QName
+	for _, q := range g.ownedSorted(true) {
+		if g.hasLinks(q, memo) {
+			linkers = append(linkers, q)
+		}
+	}
+	if len(linkers) > 0 {
+		ref := g.basePkgPrefix() + "LinkRef"
+		b.WriteString("func TestGeneratedLinks(t *testing.T) {\n\tfor _, v := range []interface{ AppendLinks([]" + ref + ") []" + ref + " }{\n")
+		for _, q := range linkers {
+			fmt.Fprintf(b, "\t\texamples.%s(3),\n", GoName(q.Local))
+		}
+		b.WriteString(`	} {
+		for _, l := range v.AppendLinks(nil) {
+			generic := l.Type == "Link" || l.Type == "ListLink"
+			if l.Element == "" || l.Type == "" || l.Href == "" || (l.Resource == "") != generic {
+				t.Errorf("%T: incomplete link %+v", v, l)
+			}
+		}
+	}
+}
+
+`)
+	}
+	roots, err := g.roots()
+	if err != nil {
+		return err
+	}
+	b.WriteString("func TestGeneratedDerivations(t *testing.T) {\n\tfor _, e := range []string{\n")
+	for _, el := range roots {
+		fmt.Fprintf(b, "\t\t%q,\n", el.Name.Local)
+	}
+	fmt.Fprintf(b, `	} {
+		if !%[1]s.Derives(e, e) {
+			t.Errorf("Derives(%%q, %%q) = false", e, e)
+		}
+	}
+	if %[1]s.Derives("NoSuchElement", "NoSuchElement") {
+		t.Error("Derives of an unknown element")
+	}
+	if _, ok := %[1]s.TypeBase("NoSuchType"); ok {
+		t.Error("TypeBase of an unknown type")
+	}
+}
+`, pkg)
+	return nil
 }

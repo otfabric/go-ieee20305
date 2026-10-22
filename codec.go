@@ -8,6 +8,23 @@ import (
 	sepxml "github.com/otfabric/go-ieee20305/internal/xml"
 )
 
+// Codec encodes and decodes IEEE 2030.5 documents. StandardCodec is the one
+// of this package; a profile package such as csipaus has its own.
+type Codec interface {
+	Marshal(v any) ([]byte, error)
+	Unmarshal(data []byte, v any) error
+	Decode(data []byte) (any, error)
+}
+
+// StandardCodec is the Codec of Marshal, Unmarshal and Decode.
+var StandardCodec Codec = standardCodec{}
+
+type standardCodec struct{}
+
+func (standardCodec) Marshal(v any) ([]byte, error)      { return Marshal(v) }
+func (standardCodec) Unmarshal(data []byte, v any) error { return Unmarshal(data, v) }
+func (standardCodec) Decode(data []byte) (any, error)    { return Decode(data) }
+
 // Marshal encodes v, a document type such as *EndDevice or *DERControlList,
 // as an IEEE 2030.5 XML document with schemaVer set to SchemaVersion.
 func Marshal(v any) ([]byte, error) {

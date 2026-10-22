@@ -93,3 +93,20 @@ func TestLookupResource(t *testing.T) {
 		}
 	}
 }
+
+func TestStandardCodec(t *testing.T) {
+	c := ieee20305.StandardCodec
+	out, err := c.Marshal(&ieee20305.Time{CurrentTime: 7})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tm ieee20305.Time
+	if err := c.Unmarshal(out, &tm); err != nil || tm.CurrentTime != 7 {
+		t.Errorf("Unmarshal = %+v, %v", tm, err)
+	}
+	if v, err := c.Decode(out); err != nil {
+		t.Errorf("Decode: %v", err)
+	} else if _, ok := v.(*ieee20305.Time); !ok {
+		t.Errorf("Decode = %T", v)
+	}
+}

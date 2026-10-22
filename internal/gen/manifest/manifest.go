@@ -96,12 +96,19 @@ type Examples struct {
 // Kind "polymorphicElement" generates the element Name of the complex type
 // Type as a value whose xsi:type may name any type derived from its declared
 // type.
+//
+// Kind "resource" adds the resource Name, which the schema links to but the
+// WADL does not define, with the sample path Path and the methods of the WADL
+// resource Like, its document elements renamed by Elements.
 type Override struct {
-	Kind   string `json:"kind"`
-	Ref    string `json:"ref,omitempty"`
-	Name   string `json:"name,omitempty"`
-	Type   string `json:"type,omitempty"`
-	Reason string `json:"reason"`
+	Kind     string            `json:"kind"`
+	Ref      string            `json:"ref,omitempty"`
+	Name     string            `json:"name,omitempty"`
+	Type     string            `json:"type,omitempty"`
+	Like     string            `json:"like,omitempty"`
+	Path     string            `json:"path,omitempty"`
+	Elements map[string]string `json:"elements,omitempty"`
+	Reason   string            `json:"reason"`
 }
 
 var sha256Hex = regexp.MustCompile(`^[0-9a-f]{64}$`)
@@ -217,6 +224,10 @@ func (m *Manifest) validate() error {
 		}
 		for _, o := range t.Overrides {
 			switch {
+			case o.Kind == "resource":
+				if o.Reason == "" || o.Name == "" || o.Like == "" || o.Path == "" || t.WADL == "" {
+					return fmt.Errorf("target %s: a resource override needs a name, a like, a path, a reason and a WADL", t.Name)
+				}
 			case o.Reason == "" || o.Name == "" || o.Type == "":
 				return fmt.Errorf("target %s: an override needs a name, a type and a reason", t.Name)
 			case o.Kind == "elementRef" && o.Ref != "":

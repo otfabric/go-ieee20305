@@ -14,7 +14,17 @@ import (
 
 // Resources generates resources_gen.go, the resource table of a WADL. Every
 // representation must name a document element of set.
-func Resources(app *wadl.Application, set *xsd.Set, pkg, header string) ([]byte, error) {
+// ResourceOverride adds a resource the schema links to but the WADL does not
+// define: ID, with sample path Path and the methods of the WADL resource Like,
+// whose document elements Elements renames.
+type ResourceOverride struct {
+	ID       string
+	Like     string
+	Path     string
+	Elements map[string]string
+}
+
+func Resources(app *wadl.Application, set *xsd.Set, pkg, header string, extra ...ResourceOverride) ([]byte, error) {
 	var b strings.Builder
 	b.WriteString(`// Conformance is the support IEEE 2030.5 requires of a server for a
 // method on a resource (the wx:mode of the WADL).
@@ -60,6 +70,21 @@ type MethodSpec struct {
 var Resources = []ResourceSpec{
 `)
 	resources := append([]*wadl.Resource{}, app.Resources...)
+	for _, o := range extra {
+		var like *wadl.Resource
+		for _, r := range app.Resources {
+			if r.ID == o.ID {
+				return nil, fmt.Errorf("resource override %s: the WADL defines it now; remove the override", o.ID)
+			}
+			if r.ID == o.Like {
+				like = r
+			}
+		}
+		if like == nil {
+			return nil, fmt.Errorf("resource override %s: no WADL resource %s to take the methods of", o.ID, o.Like)
+		}
+		resources = append(resources, like.Renamed(o.ID, o.Path, o.Elements))
+	}
 	sort.Slice(resources, func(i, j int) bool { return resources[i].ID < resources[j].ID })
 	modes := map[string]string{"M": "ConformanceMandatory", "O": "ConformanceOptional", "D": "ConformanceDiscouraged", "E": "ConformanceError"}
 	for _, r := range resources {

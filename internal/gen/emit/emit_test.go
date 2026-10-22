@@ -228,6 +228,33 @@ type ExtensionElement struct {
 	InnerXML []byte     ` + "`xml:\",innerxml\"`" + `
 }
 
+type LinkRef struct {
+	Element, Type, Resource, Href string
+	All                           *UInt32
+}
+
+func (e ExtensionElement) Clone() ExtensionElement {
+	c := ExtensionElement{XMLName: e.XMLName}
+	if e.Attrs != nil {
+		c.Attrs = append(c.Attrs, e.Attrs...)
+	}
+	if e.InnerXML != nil {
+		c.InnerXML = append([]byte{}, e.InnerXML...)
+	}
+	return c
+}
+
+func CloneExtensions(es []ExtensionElement) []ExtensionElement {
+	if es == nil {
+		return nil
+	}
+	out := make([]ExtensionElement, len(es))
+	for i, e := range es {
+		out[i] = e.Clone()
+	}
+	return out
+}
+
 func (e *ExtensionElement) UnmarshalXML(d *xml.Decoder, start xml.StartElement) error {
 	type plain ExtensionElement
 	if err := d.DecodeElement((*plain)(e), &start); err != nil {
@@ -390,5 +417,34 @@ func TestGeneratedCodeCompilesAndBehaves(t *testing.T) {
 	cmd.Env = append(os.Environ(), "GOWORK=off", "GOFLAGS=-mod=mod")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("generated code does not build or behave:\n%s", out)
+	}
+}
+
+func TestResourceOverrides(t *testing.T) {
+	bs, err := xsd.Load(fixture("base.xsd"), xsd.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	app, err := wadl.ParseFile(fixture("app.wadl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	src, err := emit.Resources(app, bs, "base", header, emit.ResourceOverride{
+		ID: "ActiveDeviceList", Like: "DeviceList", Path: "/dev/act", Elements: map[string]string{"DeviceList": "DeviceList"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(src), `ID:         "ActiveDeviceList",`) || !strings.Contains(string(src), `"/dev/act"`) {
+		t.Errorf("the override is not among the resources:\n%s", src)
+	}
+	for name, o := range map[string]emit.ResourceOverride{
+		"defined by the WADL": {ID: "Device", Like: "DeviceList", Path: "/x"},
+		"unknown like":        {ID: "Other", Like: "Nope", Path: "/x"},
+		"unknown element":     {ID: "Other", Like: "DeviceList", Path: "/x", Elements: map[string]string{"DeviceList": "Nope"}},
+	} {
+		if _, err := emit.Resources(app, bs, "base", header, o); err == nil {
+			t.Errorf("%s: Resources succeeded", name)
+		}
 	}
 }

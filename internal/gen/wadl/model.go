@@ -82,3 +82,33 @@ func (m *Method) Statuses() []int {
 	}
 	return out
 }
+
+// Renamed returns a copy of r with the ID id and the sample path path, whose
+// representations name the elements elements maps their names to.
+func (r *Resource) Renamed(id, path string, elements map[string]string) *Resource {
+	rename := func(reps []Representation) []Representation {
+		out := make([]Representation, len(reps))
+		for i, rep := range reps {
+			if to, ok := elements[rep.Element]; ok {
+				rep.Element = to
+			}
+			out[i] = rep
+		}
+		return out
+	}
+	c := &Resource{ID: id, SamplePath: path}
+	for _, m := range r.Methods {
+		mc := *m
+		mc.QueryParams = append([]string(nil), m.QueryParams...)
+		mc.Request = rename(m.Request)
+		mc.Responses = make([]Response, len(m.Responses))
+		for i, resp := range m.Responses {
+			resp.Statuses = append([]int(nil), resp.Statuses...)
+			resp.Representations = rename(resp.Representations)
+			resp.HeaderParams = append([]string(nil), resp.HeaderParams...)
+			mc.Responses[i] = resp
+		}
+		c.Methods = append(c.Methods, &mc)
+	}
+	return c
+}

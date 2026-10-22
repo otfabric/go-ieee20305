@@ -471,6 +471,20 @@ func (g *gen) examples() (string, error) {
 			fmt.Fprintf(&b, "// Invalid%s returns a %s that Validate rejects.\nfunc Invalid%s() *%s {\n\tconst d = 0\n\tv := %s(d)\n\tv.%s = %s\n\treturn v\n}\n\n", name, name, name, t, name, inv.field, inv.expr)
 		}
 	}
+	roots, err := g.roots()
+	if err != nil {
+		return "", err
+	}
+	b.WriteString("// Element returns an example of the document element with the local name\n// name, filled to depth d, or nil if this package has no such element.\nfunc Element(name string, d int) any {\n\tswitch name {\n")
+	for _, el := range roots {
+		fmt.Fprintf(&b, "\tcase %q:\n\t\treturn %s(d)\n", el.Name.Local, GoName(el.Type.Local))
+	}
+	b.WriteString("\t}\n\treturn nil\n}\n\n")
+	b.WriteString("// All returns an example of every struct type of the package, filled to\n// depth d.\nfunc All(d int) []any {\n\treturn []any{\n")
+	for _, q := range g.ownedSorted(true) {
+		fmt.Fprintf(&b, "\t\t%s(d),\n", GoName(q.Local))
+	}
+	b.WriteString("\t}\n}\n\n")
 	b.WriteString("func ptr[T any](v T) *T { return &v }\n")
 	return b.String(), nil
 }

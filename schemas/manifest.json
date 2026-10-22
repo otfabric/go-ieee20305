@@ -123,6 +123,30 @@
           "type": "{urn:ieee:std:2030.5:ns}Notification",
           "name": "Resource",
           "reason": "A Notification carries the subscribed resource in its Resource element, declared as type Resource, with xsi:type naming the actual type (see Examples/C_09_04_Notification.xml). Generate it as a value of any type derived from Resource."
+        },
+        {
+          "kind": "resource",
+          "name": "ActiveProjectionReadingList",
+          "like": "ActiveBillingPeriodList",
+          "path": "/bill/{id1}/ca/{id2}/actpro",
+          "elements": {"BillingPeriodList": "ProjectionReadingList", "BillingPeriod": "ProjectionReading"},
+          "reason": "CustomerAgreement links to it (ActiveProjectionReadingListLink), but the WADL defines no such resource. Serve it like the other active lists of the billing function set: read-only, paged."
+        },
+        {
+          "kind": "resource",
+          "name": "ActiveTargetReadingList",
+          "like": "ActiveBillingPeriodList",
+          "path": "/bill/{id1}/ca/{id2}/acttar",
+          "elements": {"BillingPeriodList": "TargetReadingList", "BillingPeriod": "TargetReading"},
+          "reason": "CustomerAgreement links to it (ActiveTargetReadingListLink), but the WADL defines no such resource. Serve it like the other active lists of the billing function set: read-only, paged."
+        },
+        {
+          "kind": "resource",
+          "name": "ActiveCreditRegisterList",
+          "like": "ActiveBillingPeriodList",
+          "path": "/ppy/{id1}/actcr",
+          "elements": {"BillingPeriodList": "CreditRegisterList", "BillingPeriod": "CreditRegister"},
+          "reason": "Prepayment links to it (ActiveCreditRegisterListLink), but the WADL defines no such resource. Serve it like the active lists of the billing and prepayment function sets: read-only, paged."
         }
       ],
       "examples": {

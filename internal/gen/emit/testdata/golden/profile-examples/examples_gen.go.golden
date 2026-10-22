@@ -117,4 +117,30 @@ func InvalidMeterType() *profile.MeterType {
 	return v
 }
 
+// Element returns an example of the document element with the local name
+// name, filled to depth d, or nil if this package has no such element.
+func Element(name string, d int) any {
+	switch name {
+	case "Device":
+		return Device(d)
+	case "DeviceList":
+		return DeviceList(d)
+	case "Meter":
+		return MeterType(d)
+	}
+	return nil
+}
+
+// All returns an example of every struct type of the package, filled to
+// depth d.
+func All(d int) []any {
+	return []any{
+		Control(d),
+		Device(d),
+		DeviceList(d),
+		Link(d),
+		MeterType(d),
+	}
+}
+
 func ptr[T any](v T) *T { return &v }

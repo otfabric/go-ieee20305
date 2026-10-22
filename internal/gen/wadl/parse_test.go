@@ -67,3 +67,21 @@ func TestParseErrors(t *testing.T) {
 		t.Error("malformed XML parsed")
 	}
 }
+
+func TestRenamed(t *testing.T) {
+	r := &wadl.Resource{ID: "A", SamplePath: "/a", Methods: []*wadl.Method{{
+		Name: "GET", Mode: "M", QueryParams: []string{"s"},
+		Request:   []wadl.Representation{{Element: "AList"}},
+		Responses: []wadl.Response{{Statuses: []int{200}, Representations: []wadl.Representation{{Element: "AList"}, {Element: "Other"}}}},
+	}}}
+	c := r.Renamed("B", "/b", map[string]string{"AList": "BList"})
+	if c.ID != "B" || c.SamplePath != "/b" || c.Methods[0].RequestElement() != "BList" || c.Methods[0].ResponseElement() != "BList" {
+		t.Errorf("Renamed = %+v", c.Methods[0])
+	}
+	if c.Methods[0].Responses[0].Representations[1].Element != "Other" {
+		t.Error("an unmapped element was renamed")
+	}
+	if r.Methods[0].RequestElement() != "AList" || r.Methods[0].Responses[0].Representations[0].Element != "AList" {
+		t.Error("Renamed changed the original")
+	}
+}

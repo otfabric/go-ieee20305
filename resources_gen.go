@@ -80,6 +80,17 @@ var Resources = []ResourceSpec{
 		},
 	},
 	{
+		ID:         "ActiveCreditRegisterList",
+		SamplePath: "/ppy/{id1}/actcr",
+		Methods: []MethodSpec{
+			{Method: "GET", Conformance: ConformanceMandatory, Response: "CreditRegisterList", QueryParams: []string{"s", "l"}},
+			{Method: "HEAD", Conformance: ConformanceMandatory},
+			{Method: "PUT", Conformance: ConformanceError, Request: "CreditRegister", Statuses: []int{400, 405}},
+			{Method: "POST", Conformance: ConformanceError, Request: "CreditRegister", Statuses: []int{400, 405}},
+			{Method: "DELETE", Conformance: ConformanceError, Statuses: []int{400, 405}},
+		},
+	},
+	{
 		ID:         "ActiveDERControlList",
 		SamplePath: "/derp/{id1}/actderc",
 		Methods: []MethodSpec{
@@ -102,6 +113,17 @@ var Resources = []ResourceSpec{
 		},
 	},
 	{
+		ID:         "ActiveProjectionReadingList",
+		SamplePath: "/bill/{id1}/ca/{id2}/actpro",
+		Methods: []MethodSpec{
+			{Method: "GET", Conformance: ConformanceMandatory, Response: "ProjectionReadingList", QueryParams: []string{"s", "l"}},
+			{Method: "HEAD", Conformance: ConformanceMandatory},
+			{Method: "PUT", Conformance: ConformanceError, Request: "ProjectionReading", Statuses: []int{400, 405}},
+			{Method: "POST", Conformance: ConformanceError, Request: "ProjectionReading", Statuses: []int{400, 405}},
+			{Method: "DELETE", Conformance: ConformanceError, Statuses: []int{400, 405}},
+		},
+	},
+	{
 		ID:         "ActiveSupplyInterruptionOverrideList",
 		SamplePath: "/ppy/{id1}/actsi",
 		Methods: []MethodSpec{
@@ -109,6 +131,17 @@ var Resources = []ResourceSpec{
 			{Method: "HEAD", Conformance: ConformanceMandatory},
 			{Method: "PUT", Conformance: ConformanceError, Request: "SupplyInterruptionOverride", Statuses: []int{400, 405}},
 			{Method: "POST", Conformance: ConformanceError, Request: "SupplyInterruptionOverride", Statuses: []int{400, 405}},
+			{Method: "DELETE", Conformance: ConformanceError, Statuses: []int{400, 405}},
+		},
+	},
+	{
+		ID:         "ActiveTargetReadingList",
+		SamplePath: "/bill/{id1}/ca/{id2}/acttar",
+		Methods: []MethodSpec{
+			{Method: "GET", Conformance: ConformanceMandatory, Response: "TargetReadingList", QueryParams: []string{"s", "l"}},
+			{Method: "HEAD", Conformance: ConformanceMandatory},
+			{Method: "PUT", Conformance: ConformanceError, Request: "TargetReading", Statuses: []int{400, 405}},
+			{Method: "POST", Conformance: ConformanceError, Request: "TargetReading", Statuses: []int{400, 405}},
 			{Method: "DELETE", Conformance: ConformanceError, Statuses: []int{400, 405}},
 		},
 	},

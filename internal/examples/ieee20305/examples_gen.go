@@ -7432,4 +7432,595 @@ func InvalidWattHour() *ieee20305.WattHour {
 	return v
 }
 
+// Element returns an example of the document element with the local name
+// name, filled to depth d, or nil if this package has no such element.
+func Element(name string, d int) any {
+	switch name {
+	case "AccountBalance":
+		return AccountBalance(d)
+	case "AggregatedDevice":
+		return AggregatedDevice(d)
+	case "AggregatedDeviceList":
+		return AggregatedDeviceList(d)
+	case "AggregationPriority":
+		return AggregationPriority(d)
+	case "BillingPeriod":
+		return BillingPeriod(d)
+	case "BillingPeriodList":
+		return BillingPeriodList(d)
+	case "BillingReading":
+		return BillingReading(d)
+	case "BillingReadingList":
+		return BillingReadingList(d)
+	case "BillingReadingSet":
+		return BillingReadingSet(d)
+	case "BillingReadingSetList":
+		return BillingReadingSetList(d)
+	case "Configuration":
+		return Configuration(d)
+	case "ConsumptionTariffInterval":
+		return ConsumptionTariffInterval(d)
+	case "ConsumptionTariffIntervalList":
+		return ConsumptionTariffIntervalList(d)
+	case "CreditRegister":
+		return CreditRegister(d)
+	case "CreditRegisterList":
+		return CreditRegisterList(d)
+	case "CurrentDERControls":
+		return CurrentDERControls(d)
+	case "CustomerAccount":
+		return CustomerAccount(d)
+	case "CustomerAccountList":
+		return CustomerAccountList(d)
+	case "CustomerAgreement":
+		return CustomerAgreement(d)
+	case "CustomerAgreementList":
+		return CustomerAgreementList(d)
+	case "DER":
+		return DER(d)
+	case "DERAvailability":
+		return DERAvailability(d)
+	case "DERCapability":
+		return DERCapability(d)
+	case "DERComponent":
+		return DERComponent(d)
+	case "DERComponentList":
+		return DERComponentList(d)
+	case "DERControl":
+		return DERControl(d)
+	case "DERControlList":
+		return DERControlList(d)
+	case "DERControlResponse":
+		return DERControlResponse(d)
+	case "DERCurve":
+		return DERCurve(d)
+	case "DERCurveList":
+		return DERCurveList(d)
+	case "DERList":
+		return DERList(d)
+	case "DERProgram":
+		return DERProgram(d)
+	case "DERProgramList":
+		return DERProgramList(d)
+	case "DERSettings":
+		return DERSettings(d)
+	case "DERStatus":
+		return DERStatus(d)
+	case "DefaultDERControl":
+		return DefaultDERControl(d)
+	case "DefaultDERControlResponse":
+		return DefaultDERControlResponse(d)
+	case "DemandResponseProgram":
+		return DemandResponseProgram(d)
+	case "DemandResponseProgramList":
+		return DemandResponseProgramList(d)
+	case "DeviceCapability":
+		return DeviceCapability(d)
+	case "DeviceInformation":
+		return DeviceInformation(d)
+	case "DeviceStatus":
+		return DeviceStatus(d)
+	case "DrResponse":
+		return DrResponse(d)
+	case "EndDevice":
+		return EndDevice(d)
+	case "EndDeviceControl":
+		return EndDeviceControl(d)
+	case "EndDeviceControlList":
+		return EndDeviceControlList(d)
+	case "EndDeviceList":
+		return EndDeviceList(d)
+	case "Error":
+		return Error(d)
+	case "File":
+		return File(d)
+	case "FileList":
+		return FileList(d)
+	case "FileStatus":
+		return FileStatus(d)
+	case "FlowReservationRequest":
+		return FlowReservationRequest(d)
+	case "FlowReservationRequestList":
+		return FlowReservationRequestList(d)
+	case "FlowReservationResponse":
+		return FlowReservationResponse(d)
+	case "FlowReservationResponseList":
+		return FlowReservationResponseList(d)
+	case "FlowReservationResponseResponse":
+		return FlowReservationResponseResponse(d)
+	case "FunctionSetAssignments":
+		return FunctionSetAssignments(d)
+	case "FunctionSetAssignmentsList":
+		return FunctionSetAssignmentsList(d)
+	case "HistoricalReading":
+		return HistoricalReading(d)
+	case "HistoricalReadingList":
+		return HistoricalReadingList(d)
+	case "IPAddr":
+		return IPAddr(d)
+	case "IPAddrList":
+		return IPAddrList(d)
+	case "IPInterface":
+		return IPInterface(d)
+	case "IPInterfaceList":
+		return IPInterfaceList(d)
+	case "LLInterface":
+		return LLInterface(d)
+	case "LLInterfaceList":
+		return LLInterfaceList(d)
+	case "LoadShedAvailability":
+		return LoadShedAvailability(d)
+	case "LoadShedAvailabilityList":
+		return LoadShedAvailabilityList(d)
+	case "LogEvent":
+		return LogEvent(d)
+	case "LogEventList":
+		return LogEventList(d)
+	case "MessagingProgram":
+		return MessagingProgram(d)
+	case "MessagingProgramList":
+		return MessagingProgramList(d)
+	case "MeterReading":
+		return MeterReading(d)
+	case "MeterReadingList":
+		return MeterReadingList(d)
+	case "MirrorMeterReading":
+		return MirrorMeterReading(d)
+	case "MirrorMeterReadingList":
+		return MirrorMeterReadingList(d)
+	case "MirrorUsagePoint":
+		return MirrorUsagePoint(d)
+	case "MirrorUsagePointList":
+		return MirrorUsagePointList(d)
+	case "Neighbor":
+		return Neighbor(d)
+	case "NeighborList":
+		return NeighborList(d)
+	case "Notification":
+		return Notification(d)
+	case "NotificationList":
+		return NotificationList(d)
+	case "PowerStatus":
+		return PowerStatus(d)
+	case "PrepayOperationStatus":
+		return PrepayOperationStatus(d)
+	case "Prepayment":
+		return Prepayment(d)
+	case "PrepaymentList":
+		return PrepaymentList(d)
+	case "PriceResponse":
+		return PriceResponse(d)
+	case "PriceResponseCfg":
+		return PriceResponseCfg(d)
+	case "PriceResponseCfgList":
+		return PriceResponseCfgList(d)
+	case "ProjectionReading":
+		return ProjectionReading(d)
+	case "ProjectionReadingList":
+		return ProjectionReadingList(d)
+	case "ProxiedDevice":
+		return ProxiedDevice(d)
+	case "ProxiedDeviceList":
+		return ProxiedDeviceList(d)
+	case "RPLInstance":
+		return RPLInstance(d)
+	case "RPLInstanceList":
+		return RPLInstanceList(d)
+	case "RPLSourceRoutes":
+		return RPLSourceRoutes(d)
+	case "RPLSourceRoutesList":
+		return RPLSourceRoutesList(d)
+	case "RateComponent":
+		return RateComponent(d)
+	case "RateComponentList":
+		return RateComponentList(d)
+	case "Reading":
+		return Reading(d)
+	case "ReadingList":
+		return ReadingList(d)
+	case "ReadingSet":
+		return ReadingSet(d)
+	case "ReadingSetList":
+		return ReadingSetList(d)
+	case "ReadingType":
+		return ReadingType(d)
+	case "Registration":
+		return Registration(d)
+	case "Response":
+		return Response(d)
+	case "ResponseList":
+		return ResponseList(d)
+	case "ResponseSet":
+		return ResponseSet(d)
+	case "ResponseSetList":
+		return ResponseSetList(d)
+	case "SelfDevice":
+		return SelfDevice(d)
+	case "ServiceSupplier":
+		return ServiceSupplier(d)
+	case "Subscription":
+		return Subscription(d)
+	case "SubscriptionList":
+		return SubscriptionList(d)
+	case "SupplyInterruptionOverride":
+		return SupplyInterruptionOverride(d)
+	case "SupplyInterruptionOverrideList":
+		return SupplyInterruptionOverrideList(d)
+	case "SupportedLocale":
+		return SupportedLocale(d)
+	case "SupportedLocaleList":
+		return SupportedLocaleList(d)
+	case "TargetReading":
+		return TargetReading(d)
+	case "TargetReadingList":
+		return TargetReadingList(d)
+	case "TariffProfile":
+		return TariffProfile(d)
+	case "TariffProfileList":
+		return TariffProfileList(d)
+	case "TextMessage":
+		return TextMessage(d)
+	case "TextMessageList":
+		return TextMessageList(d)
+	case "TextResponse":
+		return TextResponse(d)
+	case "Time":
+		return Time(d)
+	case "TimeTariffInterval":
+		return TimeTariffInterval(d)
+	case "TimeTariffIntervalList":
+		return TimeTariffIntervalList(d)
+	case "UsagePoint":
+		return UsagePoint(d)
+	case "UsagePointList":
+		return UsagePointList(d)
+	}
+	return nil
+}
+
+// All returns an example of every struct type of the package, filled to
+// depth d.
+func All(d int) []any {
+	return []any{
+		AbstractDevice(d),
+		AccountBalance(d),
+		AccountBalanceLink(d),
+		AccountingUnit(d),
+		ActiveBillingPeriodListLink(d),
+		ActiveCreditRegisterListLink(d),
+		ActiveDERControlListLink(d),
+		ActiveEndDeviceControlListLink(d),
+		ActiveFlowReservationListLink(d),
+		ActivePower(d),
+		ActivePowerControlType(d),
+		ActivePowerDeltaControlType(d),
+		ActiveProjectionReadingListLink(d),
+		ActiveSupplyInterruptionOverrideListLink(d),
+		ActiveTargetReadingListLink(d),
+		ActiveTextMessageListLink(d),
+		ActiveTimeTariffIntervalListLink(d),
+		AggregatedDevice(d),
+		AggregatedDeviceList(d),
+		AggregatedDeviceListLink(d),
+		AggregationPriority(d),
+		AggregationPriorityLink(d),
+		AmpereHour(d),
+		ApparentPower(d),
+		ApplianceLoadReduction(d),
+		AppliedTargetReduction(d),
+		AssociatedDERProgramListLink(d),
+		AssociatedUsagePointLink(d),
+		BillingMeterReadingBase(d),
+		BillingPeriod(d),
+		BillingPeriodList(d),
+		BillingPeriodListLink(d),
+		BillingReading(d),
+		BillingReadingList(d),
+		BillingReadingListLink(d),
+		BillingReadingSet(d),
+		BillingReadingSetList(d),
+		BillingReadingSetListLink(d),
+		Charge(d),
+		Condition(d),
+		Configuration(d),
+		ConfigurationLink(d),
+		ConnectStatusType(d),
+		ConnectStatusType2(d),
+		ConsumptionTariffInterval(d),
+		ConsumptionTariffIntervalList(d),
+		ConsumptionTariffIntervalListLink(d),
+		CreditRegister(d),
+		CreditRegisterList(d),
+		CreditRegisterListLink(d),
+		CreditTypeChange(d),
+		CurrentDERControls(d),
+		CurrentDERControlsLink(d),
+		CurrentDERProgramLink(d),
+		CurrentRMS(d),
+		CurveData(d),
+		CustomerAccount(d),
+		CustomerAccountLink(d),
+		CustomerAccountList(d),
+		CustomerAccountListLink(d),
+		CustomerAgreement(d),
+		CustomerAgreementList(d),
+		CustomerAgreementListLink(d),
+		DER(d),
+		DERAvailability(d),
+		DERAvailabilityLink(d),
+		DERCapability(d),
+		DERCapabilityLink(d),
+		DERComponent(d),
+		DERComponentBase(d),
+		DERComponentList(d),
+		DERComponentListLink(d),
+		DERControl(d),
+		DERControlBase(d),
+		DERControlList(d),
+		DERControlListLink(d),
+		DERControlResponse(d),
+		DERCurve(d),
+		DERCurveControlType(d),
+		DERCurveLink(d),
+		DERCurveList(d),
+		DERCurveListLink(d),
+		DERLink(d),
+		DERList(d),
+		DERListLink(d),
+		DERProgram(d),
+		DERProgramLink(d),
+		DERProgramList(d),
+		DERProgramListLink(d),
+		DERSettings(d),
+		DERSettingsLink(d),
+		DERStatus(d),
+		DERStatusLink(d),
+		DRLCCapabilities(d),
+		DateTimeInterval(d),
+		DefaultDERControl(d),
+		DefaultDERControlLink(d),
+		DefaultDERControlResponse(d),
+		DemandResponseProgram(d),
+		DemandResponseProgramLink(d),
+		DemandResponseProgramList(d),
+		DemandResponseProgramListLink(d),
+		DeviceCapability(d),
+		DeviceCapabilityLink(d),
+		DeviceInformation(d),
+		DeviceInformationLink(d),
+		DeviceStatus(d),
+		DeviceStatusLink(d),
+		DrResponse(d),
+		DutyCycle(d),
+		EndDevice(d),
+		EndDeviceControl(d),
+		EndDeviceControlList(d),
+		EndDeviceControlListLink(d),
+		EndDeviceLink(d),
+		EndDeviceList(d),
+		EndDeviceListLink(d),
+		EnvironmentalCost(d),
+		Error(d),
+		Event(d),
+		EventStatus(d),
+		ExternalDevice(d),
+		File(d),
+		FileLink(d),
+		FileList(d),
+		FileListLink(d),
+		FileStatus(d),
+		FileStatusLink(d),
+		FixedPointType(d),
+		FixedVar(d),
+		FixedVarControlType(d),
+		FlowReservationRequest(d),
+		FlowReservationRequestList(d),
+		FlowReservationRequestListLink(d),
+		FlowReservationResponse(d),
+		FlowReservationResponseList(d),
+		FlowReservationResponseListLink(d),
+		FlowReservationResponseResponse(d),
+		FreqDroopType(d),
+		FunctionSetAssignments(d),
+		FunctionSetAssignmentsBase(d),
+		FunctionSetAssignmentsList(d),
+		FunctionSetAssignmentsListLink(d),
+		GPSLocationType(d),
+		GeographicLocationType(d),
+		HistoricalReading(d),
+		HistoricalReadingList(d),
+		HistoricalReadingListLink(d),
+		IEEE_802_15_4(d),
+		IPAddr(d),
+		IPAddrList(d),
+		IPAddrListLink(d),
+		IPInterface(d),
+		IPInterfaceList(d),
+		IPInterfaceListLink(d),
+		IdentifiedObject(d),
+		InverterStatusType(d),
+		LLInterface(d),
+		LLInterfaceList(d),
+		LLInterfaceListLink(d),
+		Link(d),
+		List(d),
+		ListLink(d),
+		LoWPAN(d),
+		LoadShedAvailability(d),
+		LoadShedAvailabilityList(d),
+		LoadShedAvailabilityListLink(d),
+		LocalControlModeStatusType(d),
+		LogEvent(d),
+		LogEventList(d),
+		LogEventListLink(d),
+		ManufacturerStatusType(d),
+		MessagingProgram(d),
+		MessagingProgramList(d),
+		MessagingProgramListLink(d),
+		MeterReading(d),
+		MeterReadingBase(d),
+		MeterReadingLink(d),
+		MeterReadingList(d),
+		MeterReadingListLink(d),
+		MirrorMeterReading(d),
+		MirrorMeterReadingList(d),
+		MirrorReadingSet(d),
+		MirrorUsagePoint(d),
+		MirrorUsagePointList(d),
+		MirrorUsagePointListLink(d),
+		Neighbor(d),
+		NeighborList(d),
+		NeighborListLink(d),
+		Notification(d),
+		NotificationList(d),
+		NotificationListLink(d),
+		Offset(d),
+		OperationalModeStatusType(d),
+		PEVInfo(d),
+		PerCentControlType(d),
+		PowerConfiguration(d),
+		PowerFactor(d),
+		PowerFactorWithExcitation(d),
+		PowerFactorWithExcitationControlType(d),
+		PowerStatus(d),
+		PowerStatusLink(d),
+		PrepayOperationStatus(d),
+		PrepayOperationStatusLink(d),
+		Prepayment(d),
+		PrepaymentLink(d),
+		PrepaymentList(d),
+		PrepaymentListLink(d),
+		PriceResponse(d),
+		PriceResponseCfg(d),
+		PriceResponseCfgList(d),
+		PriceResponseCfgListLink(d),
+		PriorityData(d),
+		ProjectionReading(d),
+		ProjectionReadingList(d),
+		ProjectionReadingListLink(d),
+		ProxiedDevice(d),
+		ProxiedDeviceList(d),
+		ProxiedDeviceListLink(d),
+		RPLInstance(d),
+		RPLInstanceList(d),
+		RPLInstanceListLink(d),
+		RPLSourceRoutes(d),
+		RPLSourceRoutesList(d),
+		RPLSourceRoutesListLink(d),
+		RandomizableEvent(d),
+		RateComponent(d),
+		RateComponentLink(d),
+		RateComponentList(d),
+		RateComponentListLink(d),
+		ReactivePower(d),
+		ReactivePowerControlType(d),
+		ReactivePowerDeltaControlType(d),
+		ReactiveSusceptance(d),
+		Reading(d),
+		ReadingBase(d),
+		ReadingLink(d),
+		ReadingList(d),
+		ReadingListLink(d),
+		ReadingSet(d),
+		ReadingSetBase(d),
+		ReadingSetList(d),
+		ReadingSetListLink(d),
+		ReadingType(d),
+		ReadingTypeLink(d),
+		RealEnergy(d),
+		Registration(d),
+		RegistrationLink(d),
+		RequestStatus(d),
+		Resource(d),
+		RespondableIdentifiedObject(d),
+		RespondableResource(d),
+		RespondableSubscribableIdentifiedObject(d),
+		Response(d),
+		ResponseList(d),
+		ResponseListLink(d),
+		ResponseSet(d),
+		ResponseSetList(d),
+		ResponseSetListLink(d),
+		Revision2_3Type(d),
+		SelfDevice(d),
+		SelfDeviceLink(d),
+		ServiceChange(d),
+		ServiceSupplier(d),
+		ServiceSupplierLink(d),
+		SetPoint(d),
+		SignedPerCentControlType(d),
+		SignedRealEnergy(d),
+		StateOfChargeStatusType(d),
+		StorageModeStatusType(d),
+		SubscribableIdentifiedObject(d),
+		SubscribableList(d),
+		SubscribableResource(d),
+		Subscription(d),
+		SubscriptionBase(d),
+		SubscriptionList(d),
+		SubscriptionListLink(d),
+		SupplyInterruptionOverride(d),
+		SupplyInterruptionOverrideList(d),
+		SupplyInterruptionOverrideListLink(d),
+		SupportedLocale(d),
+		SupportedLocaleList(d),
+		SupportedLocaleListLink(d),
+		TargetReading(d),
+		TargetReadingList(d),
+		TargetReadingListLink(d),
+		TargetReduction(d),
+		TariffProfile(d),
+		TariffProfileLink(d),
+		TariffProfileList(d),
+		TariffProfileListLink(d),
+		Temperature(d),
+		TextMessage(d),
+		TextMessageList(d),
+		TextMessageListLink(d),
+		TextResponse(d),
+		Time(d),
+		TimeConfiguration(d),
+		TimeLink(d),
+		TimeTariffInterval(d),
+		TimeTariffIntervalList(d),
+		TimeTariffIntervalListLink(d),
+		UnitValueType(d),
+		UnsignedActivePower(d),
+		UnsignedActivePowerControlType(d),
+		UnsignedFixedPointType(d),
+		UnsignedFixedVar(d),
+		UnsignedFixedVarControlType(d),
+		UnsignedReactivePower(d),
+		UnsignedReactivePowerControlType(d),
+		UsagePoint(d),
+		UsagePointBase(d),
+		UsagePointLink(d),
+		UsagePointList(d),
+		UsagePointListLink(d),
+		VoltageRMS(d),
+		VoltageRMSControlType(d),
+		WattHour(d),
+	}
+}
+
 func ptr[T any](v T) *T { return &v }

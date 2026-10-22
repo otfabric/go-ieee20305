@@ -352,4 +352,61 @@ func InvalidTimeTariffIntervalList() *csipaus.TimeTariffIntervalList {
 	return v
 }
 
+// Element returns an example of the document element with the local name
+// name, filled to depth d, or nil if this package has no such element.
+func Element(name string, d int) any {
+	switch name {
+	case "ConnectionPoint":
+		return ConnectionPointType(d)
+	case "DERCapability":
+		return DERCapability(d)
+	case "DERControl":
+		return DERControl(d)
+	case "DERControlList":
+		return DERControlList(d)
+	case "DERSettings":
+		return DERSettings(d)
+	case "DefaultDERControl":
+		return DefaultDERControl(d)
+	case "EndDevice":
+		return EndDevice(d)
+	case "EndDeviceList":
+		return EndDeviceList(d)
+	case "RateComponentList":
+		return RateComponentList(d)
+	case "TariffProfile":
+		return TariffProfile(d)
+	case "TariffProfileList":
+		return TariffProfileList(d)
+	case "TimeTariffInterval":
+		return TimeTariffInterval(d)
+	case "TimeTariffIntervalList":
+		return TimeTariffIntervalList(d)
+	}
+	return nil
+}
+
+// All returns an example of every struct type of the package, filled to
+// depth d.
+func All(d int) []any {
+	return []any{
+		CombinedTimeTariffIntervalList(d),
+		ConnectionPointType(d),
+		ConsumptionTariffIntervalListSummary(d),
+		DERCapability(d),
+		DERControl(d),
+		DERControlBase(d),
+		DERControlList(d),
+		DERSettings(d),
+		DefaultDERControl(d),
+		EndDevice(d),
+		EndDeviceList(d),
+		RateComponentList(d),
+		TariffProfile(d),
+		TariffProfileList(d),
+		TimeTariffInterval(d),
+		TimeTariffIntervalList(d),
+	}
+}
+
 func ptr[T any](v T) *T { return &v }

@@ -31,19 +31,9 @@ const DefaultDeviceCapabilityPath = "/dcap"
 
 const defaultMaxResponseBytes = 1 << 20
 
-// Codec encodes and decodes documents. The functions of package ieee20305
-// are the default; csipaus.Codec reads and writes CSIP-AUS documents.
-type Codec interface {
-	Marshal(v any) ([]byte, error)
-	Unmarshal(data []byte, v any) error
-	Decode(data []byte) (any, error)
-}
-
-type baseCodec struct{}
-
-func (baseCodec) Marshal(v any) ([]byte, error)      { return ieee20305.Marshal(v) }
-func (baseCodec) Unmarshal(data []byte, v any) error { return ieee20305.Unmarshal(data, v) }
-func (baseCodec) Decode(data []byte) (any, error)    { return ieee20305.Decode(data) }
+// Codec encodes and decodes documents: ieee20305.StandardCodec by default,
+// csipaus.Codec for CSIP-AUS documents.
+type Codec = ieee20305.Codec
 
 // Config configures a Client.
 type Config struct {
@@ -93,7 +83,7 @@ func New(cfg Config) (*Client, error) {
 		c.dcap = DefaultDeviceCapabilityPath
 	}
 	if c.codec == nil {
-		c.codec = baseCodec{}
+		c.codec = ieee20305.StandardCodec
 	}
 	if c.maxBytes <= 0 {
 		c.maxBytes = defaultMaxResponseBytes

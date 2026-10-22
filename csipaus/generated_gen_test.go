@@ -69,7 +69,17 @@ func TestGeneratedExamples(t *testing.T) {
 			if !reflect.DeepEqual(v, back) {
 				t.Errorf("%s(%d): the round trip changed the value\n%s", c.name, d, out)
 			}
+			clone := csipaus.Clone(v)
+			if !reflect.DeepEqual(v, clone) {
+				t.Errorf("%s(%d): Clone differs", c.name, d)
+			}
+			if after, err := xml.Marshal(clone); err != nil || string(after) != string(out) {
+				t.Errorf("%s(%d): the clone encodes differently", c.name, d)
+			}
 		}
+	}
+	if csipaus.Clone(struct{}{}) != nil {
+		t.Error("Clone of a foreign value")
 	}
 }
 
@@ -499,4 +509,90 @@ func TestGeneratedElements(t *testing.T) {
 	}
 }
 
+func TestGeneratedLists(t *testing.T) {
+	for _, l := range []ieee20305.Lister{
+		examples.DERControlList(2),
+		examples.EndDeviceList(2),
+		examples.TariffProfileList(2),
+		examples.TimeTariffIntervalList(2),
+	} {
+		items := l.ListItems()
+		if len(items) == 0 {
+			t.Errorf("%T: no items", l)
+			continue
+		}
+		if err := l.SetListItems(append(items, l.NewListItem())); err != nil || len(l.ListItems()) != len(items)+1 {
+			t.Errorf("%T: SetListItems: %v", l, err)
+		}
+		first := reflect.ValueOf(items[0]).Elem().Interface()
+		if err := l.SetListItems([]any{first}); err != nil || len(l.ListItems()) != 1 {
+			t.Errorf("%T: SetListItems of a value: %v", l, err)
+		}
+		if err := l.SetListItems([]any{struct{}{}}); err == nil {
+			t.Errorf("%T: SetListItems accepted a foreign item", l)
+		}
+		if l.ListItemElement() == "" {
+			t.Errorf("%T: no item element", l)
+		}
+		l.SetListCounts(7, 1)
+		v := reflect.ValueOf(l).Elem()
+		if v.FieldByName("All").Uint() != 7 || v.FieldByName("Results").Uint() != 1 {
+			t.Errorf("%T: SetListCounts", l)
+		}
+	}
+}
+
+func TestGeneratedLinks(t *testing.T) {
+	for _, v := range []interface {
+		AppendLinks([]ieee20305.LinkRef) []ieee20305.LinkRef
+	}{
+		examples.CombinedTimeTariffIntervalList(3),
+		examples.DERControl(3),
+		examples.DERControlBase(3),
+		examples.DERControlList(3),
+		examples.DefaultDERControl(3),
+		examples.EndDevice(3),
+		examples.EndDeviceList(3),
+		examples.RateComponentList(3),
+		examples.TariffProfile(3),
+		examples.TariffProfileList(3),
+		examples.TimeTariffInterval(3),
+		examples.TimeTariffIntervalList(3),
+	} {
+		for _, l := range v.AppendLinks(nil) {
+			generic := l.Type == "Link" || l.Type == "ListLink"
+			if l.Element == "" || l.Type == "" || l.Href == "" || (l.Resource == "") != generic {
+				t.Errorf("%T: incomplete link %+v", v, l)
+			}
+		}
+	}
+}
+
+func TestGeneratedDerivations(t *testing.T) {
+	for _, e := range []string{
+		"ConnectionPoint",
+		"DERCapability",
+		"DERControl",
+		"DERControlList",
+		"DERSettings",
+		"DefaultDERControl",
+		"EndDevice",
+		"EndDeviceList",
+		"RateComponentList",
+		"TariffProfile",
+		"TariffProfileList",
+		"TimeTariffInterval",
+		"TimeTariffIntervalList",
+	} {
+		if !csipaus.Derives(e, e) {
+			t.Errorf("Derives(%q, %q) = false", e, e)
+		}
+	}
+	if csipaus.Derives("NoSuchElement", "NoSuchElement") {
+		t.Error("Derives of an unknown element")
+	}
+	if _, ok := csipaus.TypeBase("NoSuchType"); ok {
+		t.Error("TypeBase of an unknown type")
+	}
+}
 func generatedPtr[T any](v T) *T { return &v }

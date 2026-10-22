@@ -143,7 +143,12 @@ func generate(m *manifest.Manifest, upstreamDir, root string) error {
 			opts.Locations[loc] = filepath.Join(upstreamDir, filepath.FromSlash(rel))
 		}
 		poly := map[xsd.QName]map[string]bool{}
+		var extra []emit.ResourceOverride
 		for _, o := range t.Overrides {
+			if o.Kind == "resource" {
+				extra = append(extra, emit.ResourceOverride{ID: o.Name, Like: o.Like, Path: o.Path, Elements: o.Elements})
+				continue
+			}
 			typ, err := xsd.ParseQName(o.Type)
 			if err != nil {
 				return fmt.Errorf("target %s: override type: %w", t.Name, err)
@@ -181,7 +186,7 @@ func generate(m *manifest.Manifest, upstreamDir, root string) error {
 			if err != nil {
 				return fmt.Errorf("target %s: %w", t.Name, err)
 			}
-			src, err := emit.Resources(app, set, t.Package, cfg.Header)
+			src, err := emit.Resources(app, set, t.Package, cfg.Header, extra...)
 			if err != nil {
 				return fmt.Errorf("target %s: %w", t.Name, err)
 			}

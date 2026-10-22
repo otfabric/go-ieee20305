@@ -39,13 +39,17 @@ build: ## Build the examples into ./bin
 		go build -o "$(BIN_DIR)/example-$$name" "./$$dir"; \
 	done
 
+# The Go files of the repository: tracked or new, not ignored. Not "." with
+# its subdirectories, which may hold other checkouts (git worktrees).
+GO_FILES = $(shell git ls-files --cached --others --exclude-standard -- '*.go')
+
 fmt: ## Format Go code with the gofmt of the Go version in go.mod (what CI uses)
 	@echo "Running gofmt (go$(GO_MOD_VERSION))"
-	@$(GOFMT_CI) -w .
+	@$(GOFMT_CI) -w $(GO_FILES)
 
 fmt-check: ## Fail if the go.mod-version gofmt or the local gofmt would change any file
 	@echo "Checking formatting (gofmt go$(GO_MOD_VERSION) and local $$(go env GOVERSION))"
-	@ci="$$($(GOFMT_CI) -l .)"; loc="$$(gofmt -l .)"; \
+	@ci="$$($(GOFMT_CI) -l $(GO_FILES))"; loc="$$(gofmt -l $(GO_FILES))"; \
 	if [ -n "$$ci$$loc" ]; then \
 		[ -z "$$ci" ] || { echo "Not formatted for gofmt go$(GO_MOD_VERSION) (CI):"; echo "$$ci"; }; \
 		[ -z "$$loc" ] || { echo "Not formatted for the local gofmt:"; echo "$$loc"; }; \
