@@ -124,7 +124,12 @@
           "name": "Resource",
           "reason": "A Notification carries the subscribed resource in its Resource element, declared as type Resource, with xsi:type naming the actual type (see Examples/C_09_04_Notification.xml). Generate it as a value of any type derived from Resource."
         }
-      ]
+      ],
+      "examples": {
+        "dir": "internal/examples/ieee20305",
+        "package": "examples",
+        "importPath": "github.com/otfabric/go-ieee20305/internal/examples/ieee20305"
+      }
     },
     {
       "name": "csipaus",
@@ -147,7 +152,12 @@
           "type": "{urn:ieee:std:2030.5:ns}RateComponentLink",
           "reason": "csipaus-core-v1.3.xsd redefines TimeTariffInterval with ref=\"RateComponentLink\", but sep.xsd declares no global element of that name, only local elements of type RateComponentLink. Treat the ref as a local element named RateComponentLink of that type."
         }
-      ]
+      ],
+      "examples": {
+        "dir": "internal/examples/csipaus",
+        "package": "examples",
+        "importPath": "github.com/otfabric/go-ieee20305/internal/examples/csipaus"
+      }
     }
   ]
 }

@@ -25,6 +25,9 @@ import (
 // Config describes the package to generate.
 type Config struct {
 	Package string
+	// ImportPath is the import path of the package; the example builders
+	// and the generated tests import it.
+	ImportPath string
 	// Header is the comment block written at the top of every file,
 	// including the "Code generated ... DO NOT EDIT." line.
 	Header string
@@ -36,6 +39,10 @@ type Config struct {
 	// Polymorphic lists, per complex type, the elements whose xsi:type may
 	// name any type derived from the declared type.
 	Polymorphic map[xsd.QName]map[string]bool
+	// Examples, when set, adds tests of the generated code
+	// (generated_gen_test.go) that use the example builders of
+	// GenerateExamples.
+	Examples *Examples
 }
 
 // Base identifies the base package a profile package builds on.
@@ -44,6 +51,9 @@ type Base struct {
 	ImportPath string
 	// Set is the schema set of the base package: the types it defines.
 	Set *xsd.Set
+	// Examples are the example builders of the base package, which those
+	// of a profile package use for the base types.
+	Examples *Examples
 }
 
 // Files maps file names to formatted Go source.
@@ -58,11 +68,14 @@ type gen struct {
 	goNames  map[string]xsd.QName
 	refd     map[xsd.QName]bool // global elements used by reference
 	wrappers map[xsd.QName]bool // declared types of polymorphic elements
+	base     *gen               // profile: the generator of the base package, for examples
+	memo     map[xsd.QName]int  // examples: invalidable, by type
+	exQual   string             // examples: the qualifier of this package's builders
 }
 
-// Generate produces the Go files of a package from set.
-func Generate(set *xsd.Set, cfg Config) (Files, error) {
-	g := &gen{cfg: cfg, set: set, owned: map[xsd.QName]bool{}, redef: map[xsd.QName]bool{}, affected: map[xsd.QName]bool{}, goNames: map[string]xsd.QName{}, wrappers: map[xsd.QName]bool{}}
+// newGen prepares the generation of a package from set.
+func newGen(set *xsd.Set, cfg Config) (*gen, error) {
+	g := &gen{cfg: cfg, set: set, owned: map[xsd.QName]bool{}, redef: map[xsd.QName]bool{}, affected: map[xsd.QName]bool{}, goNames: map[string]xsd.QName{}, wrappers: map[xsd.QName]bool{}, memo: map[xsd.QName]int{}}
 	if err := g.ownership(); err != nil {
 		return nil, err
 	}
@@ -90,6 +103,15 @@ func Generate(set *xsd.Set, cfg Config) (Files, error) {
 			}
 		}
 	}
+	return g, nil
+}
+
+// Generate produces the Go files of a package from set.
+func Generate(set *xsd.Set, cfg Config) (Files, error) {
+	g, err := newGen(set, cfg)
+	if err != nil {
+		return nil, err
+	}
 	files := Files{}
 	type part struct {
 		name string
@@ -115,7 +137,23 @@ func Generate(set *xsd.Set, cfg Config) (Files, error) {
 		}
 		files[p.name] = src
 	}
+	if cfg.Examples != nil {
+		src, err := g.tests()
+		if err != nil {
+			return nil, fmt.Errorf("generated_gen_test.go: %w", err)
+		}
+		files["generated_gen_test.go"] = src
+	}
 	return files, nil
+}
+
+// formatSource formats Go source, reporting the source on failure.
+func formatSource(src string) ([]byte, error) {
+	out, err := format.Source([]byte(src))
+	if err != nil {
+		return nil, fmt.Errorf("gofmt: %w\n%s", err, src)
+	}
+	return out, nil
 }
 
 // file prepends the header, package clause and imports, and formats.
@@ -850,8 +888,9 @@ func (g *gen) defaults() (string, error) {
 
 // --- root elements ---
 
-func (g *gen) elements() (string, error) {
-	var b strings.Builder
+// roots returns the document elements of the package: the global elements
+// of its struct types that no type refers to.
+func (g *gen) roots() ([]*xsd.Element, error) {
 	var roots []*xsd.Element
 	for _, n := range g.set.ElementNames() {
 		el := g.set.Elements[n]
@@ -860,10 +899,19 @@ func (g *gen) elements() (string, error) {
 		}
 		for _, a := range el.ExtraAttributes {
 			if a.Name != "schemaVer" {
-				return "", fmt.Errorf("element %s: extra attribute %s is not supported", n, a.Name)
+				return nil, fmt.Errorf("element %s: extra attribute %s is not supported", n, a.Name)
 			}
 		}
 		roots = append(roots, el)
+	}
+	return roots, nil
+}
+
+func (g *gen) elements() (string, error) {
+	var b strings.Builder
+	roots, err := g.roots()
+	if err != nil {
+		return "", err
 	}
 	if g.cfg.Base == nil {
 		ns, version := "", ""

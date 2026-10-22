@@ -47,6 +47,21 @@ jobs:
       - name: Test against the official examples and schemas
         run: go test -count=1 -race . ./csipaus ./internal/...
 
+  # Statement coverage of the library packages, with the race detector: the
+  # gate is COVER_MIN in the Makefile.
+  coverage:
+    name: Coverage gate
+    runs-on: ubuntu-latest
+    env:
+      GOWORK: "off"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Coverage of at least COVER_MIN percent
+        run: make coverage-gate
+
   # Runs the client against IEEE 2030.5 servers implemented by others: the
   # images of github.com/otfabric/ieee20305-interop, pinned by digest in
   # interop/images.go. Envoy is the one server this client can reach today;

@@ -167,10 +167,10 @@ func generate(m *manifest.Manifest, upstreamDir, root string) error {
 			return fmt.Errorf("target %s: %w", t.Name, err)
 		}
 		sets[t.Name] = set
-		cfg := emit.Config{Package: t.Package, Header: header(m, t), ProfileVersion: t.ProfileVersion, Polymorphic: poly}
+		cfg := emit.Config{Package: t.Package, ImportPath: t.ImportPath, Header: header(m, t), ProfileVersion: t.ProfileVersion, Polymorphic: poly, Examples: examplesOf(t)}
 		if t.Base != "" {
 			bt, _ := m.Target(t.Base)
-			cfg.Base = &emit.Base{Package: bt.Package, ImportPath: bt.ImportPath, Set: sets[t.Base]}
+			cfg.Base = &emit.Base{Package: bt.Package, ImportPath: bt.ImportPath, Set: sets[t.Base], Examples: examplesOf(bt)}
 		}
 		files, err := emit.Generate(set, cfg)
 		if err != nil {
@@ -192,8 +192,37 @@ func generate(m *manifest.Manifest, upstreamDir, root string) error {
 			return fmt.Errorf("target %s: %w", t.Name, err)
 		}
 		fmt.Printf("%-10s %d files in %s\n", t.Name, len(files), dir)
+		if t.Examples != nil {
+			ex, err := emit.GenerateExamples(set, cfg)
+			if err != nil {
+				return fmt.Errorf("target %s: examples: %w", t.Name, err)
+			}
+			exDir := filepath.Join(root, filepath.FromSlash(t.Examples.Dir))
+			if err := write(exDir, ex); err != nil {
+				return fmt.Errorf("target %s: %w", t.Name, err)
+			}
+			fmt.Printf("%-10s %d files in %s\n", t.Name, len(ex), exDir)
+		}
 	}
 	return nil
+}
+
+// examplesOf returns the examples configuration of t for the emitter, or
+// nil.
+func examplesOf(t *manifest.Target) *emit.Examples {
+	if t.Examples == nil {
+		return nil
+	}
+	return &emit.Examples{Package: t.Examples.Package, ImportPath: t.Examples.ImportPath}
+}
+
+// targetDirs returns the directories the generator writes for t.
+func targetDirs(t *manifest.Target) []string {
+	dirs := []string{t.Dir}
+	if t.Examples != nil {
+		dirs = append(dirs, t.Examples.Dir)
+	}
+	return dirs
 }
 
 // write replaces the generated files of dir with files, removing files this
@@ -248,35 +277,48 @@ func generatedFiles(dir string) ([]string, error) {
 func verify(m *manifest.Manifest, root string) error {
 	for i := range m.Targets {
 		t := &m.Targets[i]
-		dir := filepath.Join(root, filepath.FromSlash(t.Dir))
-		names, err := generatedFiles(dir)
-		if err != nil {
-			return err
-		}
-		if len(names) == 0 {
-			return fmt.Errorf("target %s: no generated files in %s", t.Name, dir)
-		}
 		want := map[string]string{}
 		for _, in := range inputs(t) {
 			want[in] = m.FileSHA256(in)
 		}
-		for _, name := range names {
-			got, err := recordedSources(filepath.Join(dir, name))
+		total := 0
+		for _, rel := range targetDirs(t) {
+			n, err := verifyDir(rel, filepath.Join(root, filepath.FromSlash(rel)), want)
 			if err != nil {
-				return err
+				return fmt.Errorf("target %s: %w", t.Name, err)
 			}
-			if len(got) != len(want) {
-				return fmt.Errorf("%s/%s: records %d sources, the manifest pins %d; run make generate", t.Dir, name, len(got), len(want))
-			}
-			for in, sum := range want {
-				if got[in] != sum {
-					return fmt.Errorf("%s/%s: generated from %s sha256:%s, the manifest pins %s; run make generate", t.Dir, name, in, got[in], sum)
-				}
-			}
+			total += n
 		}
-		fmt.Printf("%-10s %d generated files match the manifest\n", t.Name, len(names))
+		fmt.Printf("%-10s %d generated files match the manifest\n", t.Name, total)
 	}
 	return nil
+}
+
+// verifyDir checks the recorded sources of the generated files of dir and
+// returns how many there are.
+func verifyDir(rel, dir string, want map[string]string) (int, error) {
+	names, err := generatedFiles(dir)
+	if err != nil {
+		return 0, err
+	}
+	if len(names) == 0 {
+		return 0, fmt.Errorf("no generated files in %s", dir)
+	}
+	for _, name := range names {
+		got, err := recordedSources(filepath.Join(dir, name))
+		if err != nil {
+			return 0, err
+		}
+		if len(got) != len(want) {
+			return 0, fmt.Errorf("%s/%s: records %d sources, the manifest pins %d; run make generate", rel, name, len(got), len(want))
+		}
+		for in, sum := range want {
+			if got[in] != sum {
+				return 0, fmt.Errorf("%s/%s: generated from %s sha256:%s, the manifest pins %s; run make generate", rel, name, in, got[in], sum)
+			}
+		}
+	}
+	return len(names), nil
 }
 
 func recordedSources(path string) (map[string]string, error) {

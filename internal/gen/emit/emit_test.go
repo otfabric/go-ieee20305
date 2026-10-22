@@ -29,19 +29,31 @@ func b(local string) xsd.QName { return xsd.QName{Space: baseNS, Local: local} }
 
 func fixture(name string) string { return filepath.Join("..", "testdata", name) }
 
-// generate produces the fixture base package (with resources) and profile.
-func generate(t *testing.T) (base, profile emit.Files) {
+var (
+	baseExamples    = &emit.Examples{Package: "examples", ImportPath: module + "/examples"}
+	profileExamples = &emit.Examples{Package: "examples", ImportPath: module + "/profile/examples"}
+)
+
+// generate produces the fixture base package (with resources and generated
+// tests) and profile, and their example builders.
+func generate(t *testing.T) (base, profile, baseEx, profileEx emit.Files) {
 	t.Helper()
 	bs, err := xsd.Load(fixture("base.xsd"), xsd.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	base, err = emit.Generate(bs, emit.Config{
+	baseCfg := emit.Config{
 		Package:     "base",
+		ImportPath:  module,
 		Header:      header,
 		Polymorphic: map[xsd.QName]map[string]bool{b("Notification"): {"Resource": true}},
-	})
+		Examples:    baseExamples,
+	}
+	base, err = emit.Generate(bs, baseCfg)
 	if err != nil {
+		t.Fatal(err)
+	}
+	if baseEx, err = emit.GenerateExamples(bs, baseCfg); err != nil {
 		t.Fatal(err)
 	}
 	app, err := wadl.ParseFile(fixture("app.wadl"))
@@ -57,21 +69,27 @@ func generate(t *testing.T) (base, profile emit.Files) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	profile, err = emit.Generate(ps, emit.Config{
+	profileCfg := emit.Config{
 		Package:        "profile",
+		ImportPath:     module + "/profile",
 		Header:         header,
 		ProfileVersion: "9.9",
-		Base:           &emit.Base{Package: "base", ImportPath: module, Set: bs},
-	})
+		Base:           &emit.Base{Package: "base", ImportPath: module, Set: bs, Examples: baseExamples},
+		Examples:       profileExamples,
+	}
+	profile, err = emit.Generate(ps, profileCfg)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return base, profile
+	if profileEx, err = emit.GenerateExamples(ps, profileCfg); err != nil {
+		t.Fatal(err)
+	}
+	return base, profile, baseEx, profileEx
 }
 
 func TestGolden(t *testing.T) {
-	base, profile := generate(t)
-	for dir, files := range map[string]emit.Files{"base": base, "profile": profile} {
+	base, profile, baseEx, profileEx := generate(t)
+	for dir, files := range map[string]emit.Files{"base": base, "profile": profile, "base-examples": baseEx, "profile-examples": profileEx} {
 		goldenDir := filepath.Join("testdata", "golden", dir)
 		if *update {
 			if err := os.RemoveAll(goldenDir); err != nil {
@@ -105,22 +123,22 @@ func TestGolden(t *testing.T) {
 }
 
 func TestDeterministic(t *testing.T) {
-	a, ap := generate(t)
-	b, bp := generate(t)
-	for name := range a {
-		if !bytes.Equal(a[name], b[name]) {
-			t.Errorf("base %s differs between runs", name)
-		}
-	}
-	for name := range ap {
-		if !bytes.Equal(ap[name], bp[name]) {
-			t.Errorf("profile %s differs between runs", name)
+	a, ap, ae, ape := generate(t)
+	b, bp, be, bpe := generate(t)
+	for _, pair := range []struct {
+		what string
+		x, y emit.Files
+	}{{"base", a, b}, {"profile", ap, bp}, {"base examples", ae, be}, {"profile examples", ape, bpe}} {
+		for name := range pair.x {
+			if !bytes.Equal(pair.x[name], pair.y[name]) {
+				t.Errorf("%s %s differs between runs", pair.what, name)
+			}
 		}
 	}
 }
 
 func TestProfileOwnership(t *testing.T) {
-	_, profile := generate(t)
+	_, profile, _, _ := generate(t)
 	src := string(profile["types_gen.go"])
 	var types []string
 	for _, line := range strings.Split(src, "\n") {
@@ -208,6 +226,24 @@ type ExtensionElement struct {
 	XMLName  xml.Name
 	Attrs    []xml.Attr ` + "`xml:\",any,attr\"`" + `
 	InnerXML []byte     ` + "`xml:\",innerxml\"`" + `
+}
+
+func (e *ExtensionElement) UnmarshalXML(d *xml.Decoder, start xml.StartElement) error {
+	type plain ExtensionElement
+	if err := d.DecodeElement((*plain)(e), &start); err != nil {
+		return err
+	}
+	attrs := e.Attrs[:0]
+	for _, a := range e.Attrs {
+		if a.Name.Space != "xmlns" && !(a.Name.Space == "" && a.Name.Local == "xmlns") {
+			attrs = append(attrs, a)
+		}
+	}
+	if len(attrs) == 0 {
+		attrs = nil
+	}
+	e.Attrs = attrs
+	return nil
 }
 `
 
@@ -323,7 +359,7 @@ func TestGeneratedCodeCompilesAndBehaves(t *testing.T) {
 	if err != nil {
 		t.Skip("go tool not found")
 	}
-	base, profile := generate(t)
+	base, profile, baseEx, profileEx := generate(t)
 	dir := t.TempDir()
 	write := func(rel string, data []byte) {
 		p := filepath.Join(dir, rel)
@@ -342,6 +378,12 @@ func TestGeneratedCodeCompilesAndBehaves(t *testing.T) {
 	}
 	for name, src := range profile {
 		write(filepath.Join("profile", name), src)
+	}
+	for name, src := range baseEx {
+		write(filepath.Join("examples", name), src)
+	}
+	for name, src := range profileEx {
+		write(filepath.Join("profile", "examples", name), src)
 	}
 	cmd := exec.Command(goTool, "test", "-count=1", "./...")
 	cmd.Dir = dir

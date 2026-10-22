@@ -74,6 +74,17 @@ type Target struct {
 	WADL            string            `json:"wadl,omitempty"`
 	SchemaLocations map[string]string `json:"schemaLocations,omitempty"`
 	Overrides       []Override        `json:"overrides,omitempty"`
+	// Examples, when set, has the generator also write a package of example
+	// builders of every type there, and tests of the generated code that use
+	// them next to it.
+	Examples *Examples `json:"examples,omitempty"`
+}
+
+// Examples locates the package of example builders of a target.
+type Examples struct {
+	Dir        string `json:"dir"`
+	Package    string `json:"package"`
+	ImportPath string `json:"importPath"`
 }
 
 // Override is an explicit, documented instruction for generating from an
@@ -184,6 +195,16 @@ func (m *Manifest) validate() error {
 		}
 		if t.Base != "" && !names[t.Base] {
 			return fmt.Errorf("target %s: base %q must be a target listed before it", t.Name, t.Base)
+		}
+		if e := t.Examples; e != nil {
+			if e.Dir == "" || e.Package == "" || e.ImportPath == "" {
+				return fmt.Errorf("target %s: examples need dir, package and importPath", t.Name)
+			}
+			if t.Base != "" {
+				if bt, _ := m.Target(t.Base); bt == nil || bt.Examples == nil {
+					return fmt.Errorf("target %s: its base %s needs examples too", t.Name, t.Base)
+				}
+			}
 		}
 		inputs := []string{t.XSD, t.WADL}
 		for _, loc := range t.SchemaLocations {

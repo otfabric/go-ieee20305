@@ -37,19 +37,21 @@ func TestParseRejects(t *testing.T) {
 		return `{"sources":[{"id":"a","url":"https://x/a.zip","sha256":"` + sha + `","archive":"zip","license":"l",` + extra + `}]}`
 	}
 	tests := map[string]string{
-		"unknown field":    `{"nope":1}`,
-		"http":             `{"sources":[{"id":"a","url":"http://x","sha256":"` + sha + `","files":[{"to":"a","sha256":"` + sha + `"}]}]}`,
-		"short sha":        `{"sources":[{"id":"a","url":"https://x","sha256":"abc","files":[{"to":"a","sha256":"` + sha + `"}]}]}`,
-		"no files":         src(`"files":[]`),
-		"escaping path":    src(`"files":[{"from":"x","to":"../x","sha256":"` + sha + `"}]`),
-		"absolute path":    src(`"files":[{"from":"x","to":"/x","sha256":"` + sha + `"}]`),
-		"file without sha": src(`"files":[{"from":"x","to":"x"}]`),
-		"dir with sha":     src(`"files":[{"from":"x/","to":"x/","sha256":"` + sha + `"}]`),
-		"dir to file":      src(`"files":[{"from":"x/","to":"x","sha256":"` + sha + `"}]`),
-		"bad pattern":      src(`"files":[{"from":"x","to":"x","sha256":"` + sha + `"}],"watch":{"page":"https://x","pattern":"("}`),
-		"unpinned input":   src(`"files":[{"from":"x","to":"x","sha256":"` + sha + `"}]`)[:len(src(`"files":[{"from":"x","to":"x","sha256":"`+sha+`"}]`))-1] + `,"targets":[{"name":"t","dir":".","package":"p","importPath":"p","xsd":"y"}]}`,
-		"unknown base":     src(`"files":[{"from":"x","to":"x","sha256":"` + sha + `"}]`)[:len(src(`"files":[{"from":"x","to":"x","sha256":"`+sha+`"}]`))-1] + `,"targets":[{"name":"t","dir":".","package":"p","importPath":"p","xsd":"x","base":"z"}]}`,
-		"bad override":     src(`"files":[{"from":"x","to":"x","sha256":"` + sha + `"}]`)[:len(src(`"files":[{"from":"x","to":"x","sha256":"`+sha+`"}]`))-1] + `,"targets":[{"name":"t","dir":".","package":"p","importPath":"p","xsd":"x","overrides":[{"kind":"other","name":"n","type":"t","reason":"r"}]}]}`,
+		"unknown field":                          `{"nope":1}`,
+		"http":                                   `{"sources":[{"id":"a","url":"http://x","sha256":"` + sha + `","files":[{"to":"a","sha256":"` + sha + `"}]}]}`,
+		"short sha":                              `{"sources":[{"id":"a","url":"https://x","sha256":"abc","files":[{"to":"a","sha256":"` + sha + `"}]}]}`,
+		"no files":                               src(`"files":[]`),
+		"escaping path":                          src(`"files":[{"from":"x","to":"../x","sha256":"` + sha + `"}]`),
+		"absolute path":                          src(`"files":[{"from":"x","to":"/x","sha256":"` + sha + `"}]`),
+		"file without sha":                       src(`"files":[{"from":"x","to":"x"}]`),
+		"dir with sha":                           src(`"files":[{"from":"x/","to":"x/","sha256":"` + sha + `"}]`),
+		"dir to file":                            src(`"files":[{"from":"x/","to":"x","sha256":"` + sha + `"}]`),
+		"bad pattern":                            src(`"files":[{"from":"x","to":"x","sha256":"` + sha + `"}],"watch":{"page":"https://x","pattern":"("}`),
+		"unpinned input":                         src(`"files":[{"from":"x","to":"x","sha256":"` + sha + `"}]`)[:len(src(`"files":[{"from":"x","to":"x","sha256":"`+sha+`"}]`))-1] + `,"targets":[{"name":"t","dir":".","package":"p","importPath":"p","xsd":"y"}]}`,
+		"unknown base":                           src(`"files":[{"from":"x","to":"x","sha256":"` + sha + `"}]`)[:len(src(`"files":[{"from":"x","to":"x","sha256":"`+sha+`"}]`))-1] + `,"targets":[{"name":"t","dir":".","package":"p","importPath":"p","xsd":"x","base":"z"}]}`,
+		"bad override":                           src(`"files":[{"from":"x","to":"x","sha256":"` + sha + `"}]`)[:len(src(`"files":[{"from":"x","to":"x","sha256":"`+sha+`"}]`))-1] + `,"targets":[{"name":"t","dir":".","package":"p","importPath":"p","xsd":"x","overrides":[{"kind":"other","name":"n","type":"t","reason":"r"}]}]}`,
+		"examples without a package":             src(`"files":[{"from":"x","to":"x","sha256":"` + sha + `"}]`)[:len(src(`"files":[{"from":"x","to":"x","sha256":"`+sha+`"}]`))-1] + `,"targets":[{"name":"t","dir":".","package":"p","importPath":"p","xsd":"x","examples":{"dir":"e","importPath":"p/e"}}]}`,
+		"profile examples without base examples": src(`"files":[{"from":"x","to":"x","sha256":"` + sha + `"}]`)[:len(src(`"files":[{"from":"x","to":"x","sha256":"`+sha+`"}]`))-1] + `,"targets":[{"name":"b","dir":".","package":"b","importPath":"b","xsd":"x"},{"name":"t","dir":"t","package":"p","importPath":"b/t","xsd":"x","base":"b","examples":{"dir":"e","package":"e","importPath":"b/e"}}]}`,
 	}
 	for name, doc := range tests {
 		if _, err := manifest.Parse([]byte(doc)); err == nil {

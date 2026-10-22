@@ -21,8 +21,12 @@ GOFMT_CI = $(shell GOTOOLCHAIN=go$(GO_MOD_VERSION).0 go env GOROOT)/bin/gofmt
 BIN_DIR := bin
 # Library packages: tests and coverage (exclude examples and test helpers)
 TEST_PKGS := $(shell go list ./... | grep -v '/examples' | grep -v '/interop$$' | grep -v '/interop/')
-# Coverage is measured over the library packages, whichever package's tests exercise them.
-COVER_PKGS := $(shell go list ./... | grep -v '/examples' | grep -v '/e2e$$' | grep -v '/interop$$' | grep -v '/interop/' | paste -sd, -)
+# Coverage is measured over the library packages, whichever package's tests
+# exercise them: not the example builders and programs (/examples), the
+# generator's command (internal/gen), or the test-only e2e and interop suites.
+COVER_PKGS := $(shell go list ./... | grep -v '/examples' | grep -v '/internal/gen$$' | grep -v '/e2e$$' | grep -v '/interop$$' | grep -v '/interop/' | paste -sd, -)
+# The statement coverage make coverage-gate (and CI) requires, in percent.
+COVER_MIN ?= 90
 
 all: build ## Default target: build the examples
 
@@ -83,6 +87,14 @@ coverage: ## Run tests with coverage on the library packages (writes coverage.ou
 	@go test -count=1 -race -coverprofile=coverage.out -covermode=atomic -coverpkg=$(COVER_PKGS) $(TEST_PKGS)
 	@go tool cover -func=coverage.out | tail -n1
 
+coverage-gate: coverage ## Fail if the coverage of the library packages is below COVER_MIN percent
+	@total=$$(go tool cover -func=coverage.out | awk '/^total:/ {sub("%", "", $$3); print $$3}'); \
+	if awk -v t="$$total" -v m="$(COVER_MIN)" 'BEGIN { exit !(t + 0 >= m + 0) }'; then \
+		echo "Coverage $$total% meets the gate of $(COVER_MIN)%"; \
+	else \
+		echo "Coverage $$total% is below the gate of $(COVER_MIN)%"; exit 1; \
+	fi
+
 cover: coverage ## Open coverage report in browser
 	@echo "Opening coverage report"
 	@go tool cover -html=coverage.out
@@ -99,7 +111,7 @@ test-interop: ## Run the client against the ieee20305-interop server images, pin
 
 interop: test-interop ## Alias for test-interop
 
-check: fmt fmt-check nodeps generate-verify lint lint-ci vet vuln test coverage ## Run format + generated-code check + lint + vet + vuln + test
+check: fmt fmt-check nodeps generate-verify lint lint-ci vet vuln test coverage-gate ## Run format + generated-code check + lint + vet + vuln + test + coverage gate
 
 # ── Code generation ──────────────────────────────────────────────────────────
 
