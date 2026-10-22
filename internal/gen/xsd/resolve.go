@@ -119,6 +119,59 @@ func (r *Resolved) AllAttributes(ct *ComplexType) []*Attribute {
 	return all
 }
 
+// ResolvedExtension wraps the extension schema's own types with lookup maps
+// that include both base and extension types for resolution.
+type ResolvedExtension struct {
+	*Resolved
+	BaseTypeNames map[string]bool // types that belong to the base schema
+}
+
+// ResolveExtension builds a combined type universe from the base and extension
+// schemas. The Resolved contains all types for reference resolution, and
+// BaseTypeNames tracks which types came from the base (so the emitter can
+// skip them and use imports instead).
+func ResolveExtension(eb *ExtensionBundle) (*ResolvedExtension, error) {
+	// Merge both schemas into one for resolution.
+	merged := &Schema{
+		Namespace: eb.Extension.Namespace,
+		Version:   eb.Extension.Version,
+	}
+
+	baseTypeNames := make(map[string]bool)
+
+	for _, st := range eb.Base.SimpleTypes {
+		merged.SimpleTypes = append(merged.SimpleTypes, st)
+		baseTypeNames[st.Name] = true
+	}
+	for _, ct := range eb.Base.ComplexTypes {
+		merged.ComplexTypes = append(merged.ComplexTypes, ct)
+		baseTypeNames[ct.Name] = true
+	}
+	for _, el := range eb.Base.TopElements {
+		merged.TopElements = append(merged.TopElements, el)
+	}
+
+	for _, st := range eb.Extension.SimpleTypes {
+		merged.SimpleTypes = append(merged.SimpleTypes, st)
+	}
+	for _, ct := range eb.Extension.ComplexTypes {
+		merged.ComplexTypes = append(merged.ComplexTypes, ct)
+	}
+	for _, el := range eb.Extension.TopElements {
+		merged.TopElements = append(merged.TopElements, el)
+	}
+
+	r, err := Resolve(merged)
+	if err != nil {
+		return nil, err
+	}
+
+	return &ResolvedExtension{
+		Resolved:      r,
+		BaseTypeNames: baseTypeNames,
+	}, nil
+}
+
 // IsBuiltinXSD reports whether name is an XSD builtin type.
 func IsBuiltinXSD(name string) bool {
 	return len(name) > 3 && (name[:3] == "xs:" || (len(name) > 4 && name[:4] == "xsd:"))

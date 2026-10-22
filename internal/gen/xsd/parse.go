@@ -63,6 +63,56 @@ func Parse(data []byte) (*Schema, error) {
 	return convert(&raw), nil
 }
 
+// ExtensionBundle holds a parsed extension schema alongside its base schema.
+// The extension's types may reference base types; the Base schema is needed
+// for resolution but the extension emitter only generates Go code for the
+// extension's own types.
+type ExtensionBundle struct {
+	Base      *Schema
+	Extension *Schema
+}
+
+// ParseExtension parses an extension XSD (like CSIP-AUS) that imports a
+// base schema. The extension file must be at extPath; the base schema at
+// basePath. Types from the base are available for reference resolution
+// but are not part of the extension output.
+func ParseExtension(basePath, extPath string) (*ExtensionBundle, error) {
+	base, err := ParseFile(basePath)
+	if err != nil {
+		return nil, fmt.Errorf("parse base: %w", err)
+	}
+
+	extData, err := os.ReadFile(extPath)
+	if err != nil {
+		return nil, fmt.Errorf("read extension %s: %w", extPath, err)
+	}
+	var extRaw xsdSchema
+	if err := xml.Unmarshal(extData, &extRaw); err != nil {
+		return nil, fmt.Errorf("unmarshal extension %s: %w", extPath, err)
+	}
+
+	// Process xs:include within the extension.
+	extDir := filepath.Dir(extPath)
+	for _, inc := range extRaw.Includes {
+		incPath := filepath.Join(extDir, inc.SchemaLocation)
+		incData, err := os.ReadFile(incPath)
+		if err != nil {
+			return nil, fmt.Errorf("extension include %s: %w", inc.SchemaLocation, err)
+		}
+		var incRaw xsdSchema
+		if err := xml.Unmarshal(incData, &incRaw); err != nil {
+			return nil, fmt.Errorf("unmarshal extension include %s: %w", inc.SchemaLocation, err)
+		}
+		extRaw.SimpleTypes = append(extRaw.SimpleTypes, incRaw.SimpleTypes...)
+		extRaw.ComplexTypes = append(extRaw.ComplexTypes, incRaw.ComplexTypes...)
+		extRaw.Elements = append(extRaw.Elements, incRaw.Elements...)
+	}
+
+	ext := convert(&extRaw)
+
+	return &ExtensionBundle{Base: base, Extension: ext}, nil
+}
+
 // --- Raw XSD types for encoding/xml unmarshal ---
 
 type xsdSchema struct {
@@ -70,12 +120,18 @@ type xsdSchema struct {
 	TargetNamespace string           `xml:"targetNamespace,attr"`
 	Version         string           `xml:"version,attr"`
 	Includes        []xsdInclude     `xml:"include"`
+	Imports         []xsdImport      `xml:"import"`
 	SimpleTypes     []xsdSimpleType  `xml:"simpleType"`
 	ComplexTypes    []xsdComplexType `xml:"complexType"`
 	Elements        []xsdElement     `xml:"element"`
 }
 
 type xsdInclude struct {
+	SchemaLocation string `xml:"schemaLocation,attr"`
+}
+
+type xsdImport struct {
+	Namespace      string `xml:"namespace,attr"`
 	SchemaLocation string `xml:"schemaLocation,attr"`
 }
 

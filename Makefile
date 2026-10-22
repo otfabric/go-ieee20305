@@ -4,7 +4,7 @@
 
 .DEFAULT_GOAL := help
 
-.PHONY: help all build fmt fmt-check lint lint-ci vet vuln test coverage cover fuzz check clean interop test-interop e2e nodeps generate generate-verify
+.PHONY: help all build fmt fmt-check lint lint-ci vet vuln test coverage cover fuzz check clean interop test-interop e2e nodeps generate generate-base generate-csipaus generate-verify
 help: ## This help
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z0-9_-]+:.*?## / {printf "\033[36m%-30s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
@@ -103,12 +103,21 @@ check: fmt fmt-check nodeps lint lint-ci vet vuln test coverage ## Run format + 
 
 # ── Code generation ──────────────────────────────────────────────────────────
 
-SCHEMA ?= schemas/sep.xsd
+SCHEMA     ?= schemas/sep.xsd
+CSIPAUS    ?= schemas/csipaus.xsd
 
-generate: ## Generate Go types from the IEEE 2030.5 XSD (SCHEMA=path/to/sep.xsd)
+generate: generate-base generate-csipaus ## Generate all Go types from XSD schemas
+
+generate-base: ## Generate base IEEE 2030.5 types from sep.xsd
 	@test -f "$(SCHEMA)" || { echo "Error: $(SCHEMA) not found. See schemas/README.md."; exit 1; }
-	@echo "Generating from $(SCHEMA)..."
+	@echo "Generating base types from $(SCHEMA)..."
 	@go run ./internal/gen -schema "$(SCHEMA)" -out . -pkg ieee20305
+
+generate-csipaus: ## Generate CSIP-AUS extension types from csipaus.xsd
+	@test -f "$(SCHEMA)" || { echo "Error: $(SCHEMA) not found. See schemas/README.md."; exit 1; }
+	@test -f "$(CSIPAUS)" || { echo "Skipping CSIP-AUS: $(CSIPAUS) not found."; exit 0; }
+	@echo "Generating CSIP-AUS extension types from $(CSIPAUS)..."
+	@go run ./internal/gen -base "$(SCHEMA)" -schema "$(CSIPAUS)" -out csipaus -pkg csipaus
 
 generate-verify: ## Verify that *_gen.go headers match schemas/manifest.yaml checksums
 	@echo "Verifying generated code checksums..."

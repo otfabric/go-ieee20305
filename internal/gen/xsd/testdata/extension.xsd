@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           xmlns:sep="urn:ieee:std:2030.5:ns"
+           xmlns:csipaus="urn:csipaus"
+           targetNamespace="urn:csipaus"
+           elementFormDefault="qualified"
+           version="1.0">
+
+  <xs:import namespace="urn:ieee:std:2030.5:ns" schemaLocation="minimal.xsd"/>
+
+  <!-- CSIP-AUS adds a ConnectionPoint type extending EndDevice -->
+  <xs:simpleType name="NMI">
+    <xs:annotation>
+      <xs:documentation>National Metering Identifier (10 chars)</xs:documentation>
+    </xs:annotation>
+    <xs:restriction base="xs:string">
+      <xs:length value="10"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="ExportLimitMode">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="STATIC"/>
+      <xs:enumeration value="DYNAMIC"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:complexType name="ConnectionPoint">
+    <xs:complexContent>
+      <xs:extension base="sep:EndDevice">
+        <xs:sequence>
+          <xs:element name="nmi" type="csipaus:NMI" minOccurs="0"/>
+          <xs:element name="exportLimitW" type="sep:UInt32" minOccurs="0"/>
+        </xs:sequence>
+      </xs:extension>
+    </xs:complexContent>
+  </xs:complexType>
+
+  <xs:complexType name="DERSetting">
+    <xs:complexContent>
+      <xs:extension base="sep:Resource">
+        <xs:sequence>
+          <xs:element name="exportLimitMode" type="csipaus:ExportLimitMode" minOccurs="0"/>
+          <xs:element name="maxW" type="sep:UInt32" minOccurs="0"/>
+        </xs:sequence>
+      </xs:extension>
+    </xs:complexContent>
+  </xs:complexType>
+
+</xs:schema>
