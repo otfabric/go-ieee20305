@@ -83,8 +83,13 @@ var eventSets = [functionSets]eventSet{
 		},
 		events: func(_ context.Context, _ *Agent, v any) ([]string, uint8, bool, error) {
 			p, ok := v.(*ieee20305.DERProgram)
-			if !ok || p.DERControlListLink == nil {
-				return nil, 0, ok, nil
+			if !ok {
+				return nil, 0, false, nil
+			}
+			// A program without controls keeps its primacy: it ranks the
+			// DefaultDERControls of the programs.
+			if p.DERControlListLink == nil {
+				return nil, uint8(p.Primacy), true, nil
 			}
 			return []string{p.DERControlListLink.Href}, uint8(p.Primacy), true, nil
 		},

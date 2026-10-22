@@ -824,7 +824,15 @@ func (g *gen) validateScalar(b *strings.Builder, q xsd.QName, errType string) er
 			}
 			lits[i] = lit
 		}
-		fmt.Fprintf(b, "\tswitch v {\n\tcase %s:\n\tdefault:\n\t\t%s\n\t}\n", strings.Join(lits, ", "), fail("not one of the enumerated values"))
+		subject := "v"
+		if bi.Local == "hexBinary" {
+			// A []byte type is not comparable: compare its bytes as strings.
+			subject = "string(v)"
+			for i, l := range lits {
+				lits[i] = "string(" + l + ")"
+			}
+		}
+		fmt.Fprintf(b, "\tswitch %s {\n\tcase %s:\n\tdefault:\n\t\t%s\n\t}\n", subject, strings.Join(lits, ", "), fail("not one of the enumerated values"))
 	}
 	b.WriteString("\treturn nil\n}\n\n")
 	return nil

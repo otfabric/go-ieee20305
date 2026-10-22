@@ -365,7 +365,8 @@ func (s *Server) post(ctx context.Context, w http.ResponseWriter, req *Request, 
 func (s *Server) respond(w http.ResponseWriter, p Principal, status int, doc any, head bool) error {
 	out, err := s.profile.Codec(p.Edition).Marshal(doc)
 	if err != nil {
-		return err
+		// What the server cannot encode is its own failure, not the client's.
+		return httpError(http.StatusInternalServerError, "encoding the response: %v", err)
 	}
 	w.Header().Set("Content-Type", MediaType)
 	w.Header().Set("Content-Length", strconv.Itoa(len(out)))

@@ -248,18 +248,36 @@ func New(cfg Config) (*Server, error) {
 // bootstrap creates what every server has: DeviceCapability at /dcap and
 // Time at /tm, and the EndDeviceList with in-band registration.
 func (s *Server) bootstrap(ctx context.Context) error {
-	if _, err := s.store.Get(ctx, "/dcap"); errors.Is(err, ErrNoNode) {
+	// missing reports whether the store has no node at href; another error
+	// of the store fails the bootstrap.
+	missing := func(href string) (bool, error) {
+		_, err := s.store.Get(ctx, href)
+		switch {
+		case errors.Is(err, ErrNoNode):
+			return true, nil
+		case err != nil:
+			return false, fmt.Errorf("bootstrap: %s: %w", href, err)
+		}
+		return false, nil
+	}
+	if m, err := missing("/dcap"); err != nil {
+		return err
+	} else if m {
 		dc := &ieee20305.DeviceCapability{}
 		if err := s.store.Put(ctx, &Node{Href: "/dcap", Resource: "DeviceCapability", Value: dc, Modified: s.clock()}); err != nil {
 			return err
 		}
 	}
-	if _, err := s.store.Get(ctx, "/tm"); errors.Is(err, ErrNoNode) {
+	if m, err := missing("/tm"); err != nil {
+		return err
+	} else if m {
 		if err := s.Admin().Root(ctx, "Time", "/tm", &ieee20305.Time{}); err != nil {
 			return err
 		}
 	}
-	if _, err := s.store.Get(ctx, EndDeviceListHref); errors.Is(err, ErrNoNode) && s.cfg.InBandRegistration {
+	if m, err := missing(EndDeviceListHref); err != nil {
+		return err
+	} else if m && s.cfg.InBandRegistration {
 		if err := s.Admin().Root(ctx, "EndDeviceList", EndDeviceListHref, s.newList("EndDeviceList")); err != nil {
 			return err
 		}

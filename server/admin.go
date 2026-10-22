@@ -140,6 +140,9 @@ func setLink(v any, name, href string) error {
 	var link reflect.Value
 	switch f.Kind() {
 	case reflect.Pointer:
+		if f.Type().Elem().Kind() != reflect.Struct {
+			return fmt.Errorf("%w: %T.%s is no link", ieee20305.ErrInvalid, v, name)
+		}
 		link = reflect.New(f.Type().Elem())
 		f.Set(link)
 	case reflect.Struct:
