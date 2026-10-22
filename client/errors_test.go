@@ -4,15 +4,18 @@ package client_test
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	ieee20305 "github.com/otfabric/go-ieee20305"
 	"github.com/otfabric/go-ieee20305/client"
+	"github.com/otfabric/go-ieee20305/security"
 )
 
 // The failures of a request are classified by the sentinels of package
@@ -94,8 +97,16 @@ func TestTransportErrors(t *testing.T) {
 	if !errors.Is(err, ieee20305.ErrCertificate) || ieee20305.Retryable(err) {
 		t.Errorf("unknown CA: %v", err)
 	}
-	// And a device the server does not trust.
-	c, err = client.New(client.Config{Server: srv.URL, HTTPClient: client.NewHTTPClient(other.device, p.roots)})
+	// And a device the server does not trust, over TLS 1.2 as IEEE 2030.5
+	// has it: the server refuses the certificate within the handshake. (With
+	// TLS 1.3 the refusal reaches the client after its handshake, and may
+	// show as a reset connection when the client is already writing.)
+	tls12 := httptest.NewUnstartedServer(http.NotFoundHandler())
+	tls12.TLS = security.ServerTLSConfig(p.server, p.roots)
+	tls12.TLS.MaxVersion = tls.VersionTLS12
+	tls12.StartTLS()
+	defer tls12.Close()
+	c, err = client.New(client.Config{Server: tls12.URL, HTTPClient: client.NewHTTPClient(other.device, p.roots)})
 	if err != nil {
 		t.Fatal(err)
 	}

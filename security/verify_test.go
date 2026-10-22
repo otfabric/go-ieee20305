@@ -11,7 +11,6 @@ import (
 	"crypto/x509/pkix"
 	"encoding/asn1"
 	"errors"
-	"io"
 	"io/fs"
 	"math/big"
 	"net"
@@ -344,30 +343,51 @@ func TestVerifyPeerCertificate(t *testing.T) {
 }
 
 // handshake runs a TLS handshake between client and server configurations
-// and returns the client's and the server's error.
+// over loopback TCP, and returns the client's and the server's error. TCP
+// buffers what an end writes, so that an end that fails mid-handshake
+// cannot leave the other blocked writing to it, as net.Pipe can; the
+// deadline bounds the handshake all the same.
 func handshake(t *testing.T, client, server *tls.Config) (cerr, serr error) {
 	t.Helper()
-	c, s := net.Pipe()
-	defer func() { _ = c.Close() }()
-	defer func() { _ = s.Close() }()
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = l.Close() }()
+	deadline := time.Now().Add(10 * time.Second)
 	done := make(chan error, 1)
 	go func() {
-		srv := tls.Server(s, server)
-		err := srv.Handshake()
+		s, err := l.Accept()
 		if err != nil {
-			_ = s.Close()
+			done <- err
+			return
+		}
+		defer func() { _ = s.Close() }()
+		_ = s.SetDeadline(deadline)
+		srv := tls.Server(s, server)
+		err = srv.Handshake()
+		if err == nil {
+			// With TLS 1.3 the server learns of a rejected client
+			// certificate only when the client's alert arrives: read it.
+			_, _ = srv.Read(make([]byte, 1))
 		}
 		done <- err
 	}()
+	c, err := net.Dial("tcp", l.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = c.Close() }()
+	_ = c.SetDeadline(deadline)
 	cl := tls.Client(c, client)
 	cerr = cl.Handshake()
-	if cerr != nil {
-		_ = c.Close()
-	} else {
+	if cerr == nil {
 		// Read what the server sends after the client's last flight: with
 		// TLS 1.3 its session tickets or the alert that rejects the client.
-		go func() { _, _ = io.Copy(io.Discard, cl) }()
+		_ = cl.SetReadDeadline(time.Now().Add(200 * time.Millisecond))
+		_, _ = cl.Read(make([]byte, 1))
 	}
+	_ = c.Close()
 	return cerr, <-done
 }
 
