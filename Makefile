@@ -122,9 +122,9 @@ fuzz: ## Run the fuzz targets for FUZZTIME each (default 30s)
 		go test -run '^$$' -fuzz "^$$name$$" -fuzztime $(FUZZTIME) "$$pkg" || exit 1; \
 	done
 
-test-interop: ## Run the client and the server against the ieee20305-interop images, pinned in interop/images.go (the interop module; needs Docker)
+test-interop: ## Run the client and the server against the ieee20305-interop images, pinned in interop/images.go (the interop module; needs Docker; INTEROP_TESTFLAGS=-v for every test)
 	@echo "Running interop tests"
-	@cd interop && go vet ./... && staticcheck ./... && golangci-lint run ./... && go test -race -count=1 -timeout=30m ./...
+	@cd interop && go vet ./... && staticcheck ./... && golangci-lint run ./... && go test -race -count=1 -timeout=30m $(INTEROP_TESTFLAGS) ./...
 
 interop: test-interop ## Alias for test-interop
 
