@@ -1,0 +1,328 @@
+// SPDX-License-Identifier: MIT
+
+package client
+
+import (
+	"bytes"
+	"context"
+	"crypto/tls"
+	"crypto/x509"
+	"errors"
+	"fmt"
+	"io"
+	"mime"
+	"net"
+	"net/http"
+	"net/url"
+	"strconv"
+	"strings"
+	"time"
+
+	ieee20305 "github.com/otfabric/go-ieee20305"
+	"github.com/otfabric/go-ieee20305/security"
+)
+
+// MediaType is the media type of IEEE 2030.5 XML documents.
+const MediaType = "application/sep+xml"
+
+// DefaultDeviceCapabilityPath is where a server serves its DeviceCapability
+// resource unless discovery says otherwise.
+const DefaultDeviceCapabilityPath = "/dcap"
+
+const defaultMaxResponseBytes = 1 << 20
+
+// Codec encodes and decodes documents. The functions of package ieee20305
+// are the default; csipaus.Codec reads and writes CSIP-AUS documents.
+type Codec interface {
+	Marshal(v any) ([]byte, error)
+	Unmarshal(data []byte, v any) error
+	Decode(data []byte) (any, error)
+}
+
+type baseCodec struct{}
+
+func (baseCodec) Marshal(v any) ([]byte, error)      { return ieee20305.Marshal(v) }
+func (baseCodec) Unmarshal(data []byte, v any) error { return ieee20305.Unmarshal(data, v) }
+func (baseCodec) Decode(data []byte) (any, error)    { return ieee20305.Decode(data) }
+
+// Config configures a Client.
+type Config struct {
+	// Server is the URL of the server, such as https://utility.example:8443.
+	// The hrefs of resources are resolved against it, and the client does
+	// not follow links or redirects to another scheme, host or port: its
+	// device certificate identifies it to this server only. Required; the
+	// scheme must be https.
+	Server string
+	// DeviceCapabilityPath is the path of the DeviceCapability resource;
+	// DefaultDeviceCapabilityPath when empty.
+	DeviceCapabilityPath string
+	// HTTPClient makes the requests. Its transport holds the device
+	// certificate and the CAs that verify the server: see NewHTTPClient.
+	// Required.
+	HTTPClient *http.Client
+	// Codec encodes and decodes documents; package ieee20305 when nil.
+	Codec Codec
+	// UserAgent is sent with every request when not empty.
+	UserAgent string
+	// MaxResponseBytes limits the size of a response body; 1 MiB when zero.
+	MaxResponseBytes int64
+}
+
+// Client talks to one IEEE 2030.5 server. It is safe for concurrent use.
+type Client struct {
+	server   *url.URL
+	dcap     string
+	http     *http.Client
+	codec    Codec
+	ua       string
+	maxBytes int64
+}
+
+// New returns a Client for cfg.
+func New(cfg Config) (*Client, error) {
+	u, err := url.Parse(cfg.Server)
+	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+		return nil, fmt.Errorf("%w: Server must be an https URL without credentials, query or fragment, got %q", ieee20305.ErrConfiguration, cfg.Server)
+	}
+	u.Path = strings.TrimSuffix(u.Path, "/")
+	if cfg.HTTPClient == nil {
+		return nil, fmt.Errorf("%w: HTTPClient is required: it carries the device certificate", ieee20305.ErrConfiguration)
+	}
+	c := &Client{server: u, dcap: cfg.DeviceCapabilityPath, codec: cfg.Codec, ua: cfg.UserAgent, maxBytes: cfg.MaxResponseBytes}
+	if c.dcap == "" {
+		c.dcap = DefaultDeviceCapabilityPath
+	}
+	if c.codec == nil {
+		c.codec = baseCodec{}
+	}
+	if c.maxBytes <= 0 {
+		c.maxBytes = defaultMaxResponseBytes
+	}
+	hc := *cfg.HTTPClient
+	next := hc.CheckRedirect
+	hc.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		if !c.sameOrigin(req.URL) {
+			return fmt.Errorf("%w: redirect to another server: %s", ieee20305.ErrProtocol, req.URL.Redacted())
+		}
+		if next != nil {
+			return next(req, via)
+		}
+		if len(via) >= 10 {
+			return errors.New("stopped after 10 redirects")
+		}
+		return nil
+	}
+	c.http = &hc
+	return c, nil
+}
+
+// NewHTTPClient returns an HTTP client for an IEEE 2030.5 client with the
+// device certificate and the CAs that verify the server. It sets no
+// timeout: bound each call with its context.
+func NewHTTPClient(device tls.Certificate, roots *x509.CertPool) *http.Client {
+	return &http.Client{Transport: &http.Transport{
+		Proxy:               http.ProxyFromEnvironment,
+		TLSClientConfig:     security.ClientTLSConfig(device, roots),
+		TLSHandshakeTimeout: 10 * time.Second,
+	}}
+}
+
+func (c *Client) sameOrigin(u *url.URL) bool {
+	return u.Scheme == c.server.Scheme && strings.EqualFold(u.Host, c.server.Host)
+}
+
+// Resolve returns the URL of href, which is relative to the server or an
+// absolute URL of the server.
+func (c *Client) Resolve(href string) (*url.URL, error) {
+	ref, err := url.Parse(href)
+	if err != nil {
+		return nil, fmt.Errorf("%w: href %q: %v", ieee20305.ErrProtocol, href, err)
+	}
+	base := *c.server
+	base.Path += "/"
+	u := base.ResolveReference(ref)
+	if !c.sameOrigin(u) {
+		return nil, fmt.Errorf("%w: href %q is on another server", ieee20305.ErrProtocol, href)
+	}
+	return u, nil
+}
+
+// Get retrieves the resource at href into v, a pointer to a document type
+// such as *ieee20305.EndDevice.
+func (c *Client) Get(ctx context.Context, href string, v any) error {
+	return c.get(ctx, href, nil, v)
+}
+
+// ListOptions select a page of a list resource.
+type ListOptions struct {
+	// Start is the index of the first item (the s query parameter).
+	Start uint32
+	// Limit is the maximum number of items (the l query parameter); the
+	// server's default when zero.
+	Limit uint32
+}
+
+// GetList retrieves a page of the list resource at href into v, a pointer
+// to a list document type such as *ieee20305.EndDeviceList.
+func (c *Client) GetList(ctx context.Context, href string, opts ListOptions, v any) error {
+	q := url.Values{}
+	q.Set("s", strconv.FormatUint(uint64(opts.Start), 10))
+	if opts.Limit > 0 {
+		q.Set("l", strconv.FormatUint(uint64(opts.Limit), 10))
+	}
+	return c.get(ctx, href, q, v)
+}
+
+// Fetch retrieves the resource at href and returns a pointer to its
+// document, of whatever type the server sent.
+func (c *Client) Fetch(ctx context.Context, href string) (any, error) {
+	data, err := c.body(ctx, href, nil)
+	if err != nil {
+		return nil, err
+	}
+	return c.codec.Decode(data)
+}
+
+// DeviceCapability retrieves the server's DeviceCapability resource, the
+// root of its resources.
+func (c *Client) DeviceCapability(ctx context.Context) (*ieee20305.DeviceCapability, error) {
+	var dc ieee20305.DeviceCapability
+	if err := c.Get(ctx, c.dcap, &dc); err != nil {
+		return nil, err
+	}
+	return &dc, nil
+}
+
+// Post sends v to the list resource at href and returns the href of the
+// resource the server created, from the Location header ("" if the server
+// sent none).
+func (c *Client) Post(ctx context.Context, href string, v any) (string, error) {
+	resp, _, err := c.do(ctx, http.MethodPost, href, nil, v)
+	if err != nil {
+		return "", err
+	}
+	loc := resp.Header.Get("Location")
+	if loc == "" {
+		return "", nil
+	}
+	u, err := c.Resolve(loc)
+	if err != nil {
+		return "", err
+	}
+	return u.RequestURI(), nil
+}
+
+// Put replaces the resource at href with v.
+func (c *Client) Put(ctx context.Context, href string, v any) error {
+	_, _, err := c.do(ctx, http.MethodPut, href, nil, v)
+	return err
+}
+
+// Delete deletes the resource at href.
+func (c *Client) Delete(ctx context.Context, href string) error {
+	_, _, err := c.do(ctx, http.MethodDelete, href, nil, nil)
+	return err
+}
+
+func (c *Client) get(ctx context.Context, href string, q url.Values, v any) error {
+	data, err := c.body(ctx, href, q)
+	if err != nil {
+		return err
+	}
+	return c.codec.Unmarshal(data, v)
+}
+
+func (c *Client) body(ctx context.Context, href string, q url.Values) ([]byte, error) {
+	resp, data, err := c.do(ctx, http.MethodGet, href, q, nil)
+	if err != nil {
+		return nil, err
+	}
+	if err := checkMediaType(resp.Header.Get("Content-Type")); err != nil {
+		return nil, err
+	}
+	return data, nil
+}
+
+func checkMediaType(ct string) error {
+	if ct == "" {
+		return nil
+	}
+	mt, _, err := mime.ParseMediaType(ct)
+	if err != nil {
+		return fmt.Errorf("%w: Content-Type %q: %v", ieee20305.ErrProtocol, ct, err)
+	}
+	switch mt {
+	case MediaType, "application/xml", "text/xml":
+		return nil
+	case "application/sep-exi":
+		return fmt.Errorf("%w: the server answered with EXI, which this client does not decode", ieee20305.ErrProtocol)
+	}
+	return fmt.Errorf("%w: unexpected Content-Type %q", ieee20305.ErrProtocol, ct)
+}
+
+// do sends a request and returns its successful response with the body
+// read, or the failure.
+func (c *Client) do(ctx context.Context, method, href string, q url.Values, body any) (*http.Response, []byte, error) {
+	u, err := c.Resolve(href)
+	if err != nil {
+		return nil, nil, err
+	}
+	if q != nil {
+		merged := u.Query()
+		for k, vs := range q {
+			merged[k] = vs
+		}
+		u.RawQuery = merged.Encode()
+	}
+	var reader io.Reader
+	if body != nil {
+		data, err := c.codec.Marshal(body)
+		if err != nil {
+			return nil, nil, err
+		}
+		reader = bytes.NewReader(data)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, u.String(), reader)
+	if err != nil {
+		return nil, nil, err
+	}
+	req.Header.Set("Accept", MediaType)
+	if body != nil {
+		req.Header.Set("Content-Type", MediaType)
+	}
+	if c.ua != "" {
+		req.Header.Set("User-Agent", c.ua)
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, nil, transportError(ctx, method, u, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	data, err := io.ReadAll(io.LimitReader(resp.Body, c.maxBytes+1))
+	if err != nil {
+		return nil, nil, transportError(ctx, method, u, err)
+	}
+	if int64(len(data)) > c.maxBytes {
+		return nil, nil, fmt.Errorf("%w: %s %s: response larger than %d bytes", ieee20305.ErrProtocol, method, u.Path, c.maxBytes)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		se := &ieee20305.StatusError{Method: method, Path: u.Path, StatusCode: resp.StatusCode}
+		var doc ieee20305.Error
+		if len(data) > 0 && ieee20305.Unmarshal(data, &doc) == nil {
+			se.Document = &doc
+		}
+		return nil, nil, se
+	}
+	return resp, data, nil
+}
+
+func transportError(ctx context.Context, method string, u *url.URL, err error) error {
+	var ne net.Error
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) || errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &ne) && ne.Timeout()) {
+		return fmt.Errorf("%w: %s %s: %v", ieee20305.ErrTimeout, method, u.Path, err)
+	}
+	if errors.Is(err, ieee20305.ErrProtocol) {
+		return err
+	}
+	return fmt.Errorf("ieee20305: %s %s: %w", method, u.Path, err)
+}

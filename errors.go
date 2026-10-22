@@ -57,6 +57,9 @@ type StatusError struct {
 	Path   string
 	// StatusCode is the HTTP status of the response.
 	StatusCode int
+	// Document is the Error document of the response body, when the
+	// server sent one; its ReasonCode says why the request failed.
+	Document *Error
 }
 
 func (e *StatusError) Error() string {
@@ -65,6 +68,9 @@ func (e *StatusError) Error() string {
 	title := http.StatusText(e.StatusCode)
 	if title != "" {
 		b.WriteString(" " + title)
+	}
+	if e.Document != nil {
+		fmt.Fprintf(&b, " (reason code %d)", e.Document.ReasonCode)
 	}
 	return b.String()
 }

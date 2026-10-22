@@ -4,6 +4,41 @@ Releases are cut with the `Release` workflow (semantic versioning, annotated
 tag, GitHub release); the section of the version below is the release's
 notes. Before v1.0.0 a minor release may change the API.
 
+## v0.2.0
+
+**Date:** unreleased
+**Previous release:** v0.1.0
+
+## Summary
+
+A first IEEE 2030.5 client: it reads and writes the resources of a server
+over HTTPS with mutual TLS.
+
+**Upgrade notes**
+
+- `StatusError` has a new field, `Document`. Code that builds it with unkeyed
+  fields has to be adjusted.
+
+## Changes
+
+### Added
+
+- **`client`** — `New(Config)` for one server; `DeviceCapability`, `Get`,
+  `GetList` (the `s` and `l` query parameters), `Fetch`, `Post` (returning the
+  `Location` of the created resource), `Put` and `Delete`, with the media type
+  `application/sep+xml`. Hrefs are resolved against the server, and links or
+  redirects to another server are refused, so the device certificate is only
+  ever presented to that server. A response body is limited in size (1 MiB by
+  default), EXI and other media types are refused, and failures match
+  `ErrProtocol`, `ErrTimeout` or the status sentinels. `NewHTTPClient` builds
+  the HTTP client with the device certificate.
+- **`security.ClientTLSConfig` and `security.ServerTLSConfig`** — TLS 1.2 or
+  later with mutual TLS. The cipher suite IEEE 2030.5 requires,
+  TLS_ECDHE_ECDSA_WITH_AES_128_CCM_8, is not implemented by `crypto/tls`.
+- **`csipaus.Codec`** — the CSIP-AUS codec for a client.
+- **`StatusError.Document`** — the Error document of a failed response, with
+  its reason code in the error text.
+
 ## v0.1.0
 
 **Date:** 2026-10-22

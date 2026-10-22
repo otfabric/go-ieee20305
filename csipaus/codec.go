@@ -60,3 +60,16 @@ func elementName(v any) (xml.Name, bool) {
 	}
 	return ieee20305.ElementName(v)
 }
+
+// Codec encodes and decodes CSIP-AUS documents with Marshal, Unmarshal and
+// Decode, for a client.Config.
+type Codec struct{}
+
+// Marshal is the package function Marshal.
+func (Codec) Marshal(v any) ([]byte, error) { return Marshal(v) }
+
+// Unmarshal is the package function Unmarshal.
+func (Codec) Unmarshal(data []byte, v any) error { return Unmarshal(data, v) }
+
+// Decode is the package function Decode.
+func (Codec) Decode(data []byte) (any, error) { return Decode(data) }
