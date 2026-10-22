@@ -100,6 +100,7 @@ func (a *Agent) pollFiles(ctx context.Context, fsas []*ieee20305.FunctionSetAssi
 		return nil
 	}
 	lists := map[string]bool{}
+	current := map[string]bool{}
 	for _, fsa := range fsas {
 		if fsa.FileListLink == nil || lists[fsa.FileListLink.Href] {
 			continue
@@ -116,6 +117,7 @@ func (a *Agent) pollFiles(ctx context.Context, fsas []*ieee20305.FunctionSetAssi
 		}
 		for _, f := range files {
 			key := f.GetHref() + "|" + string(f.MfVer)
+			current[key] = true
 			a.mu.Lock()
 			seen := a.files[key]
 			a.mu.Unlock()
@@ -130,6 +132,14 @@ func (a *Agent) pollFiles(ctx context.Context, fsas []*ieee20305.FunctionSetAssi
 			a.mu.Unlock()
 		}
 	}
+	// The agent remembers the Files the server still lists, no more.
+	a.mu.Lock()
+	for key := range a.files {
+		if !current[key] {
+			delete(a.files, key)
+		}
+	}
+	a.mu.Unlock()
 	return nil
 }
 

@@ -294,7 +294,36 @@ func (s *Server) createDefault(ctx context.Context, r *Request) (string, error) 
 	if owner == "" && r.Principal.Role != RoleOperator {
 		owner = r.Principal.lfdi()
 	}
-	return s.createItem(ctx, r.Node, r.Doc, owner)
+	href, err := s.createItem(ctx, r.Node, r.Doc, owner)
+	if err != nil {
+		return "", err
+	}
+	if r.Principal.Role != RoleOperator {
+		s.trim(ctx, r.Node.Href)
+	}
+	return href, nil
+}
+
+// trim deletes the oldest items of a list clients post to (LogEvents,
+// Responses, Readings) beyond Config.MaxListItems, so that a client cannot
+// grow the store without end.
+func (s *Server) trim(ctx context.Context, list string) {
+	max := s.cfg.MaxListItems
+	if max < 0 {
+		return
+	}
+	if max == 0 {
+		max = 1000
+	}
+	members, err := s.store.Members(ctx, list)
+	if err != nil || len(members) <= max {
+		return
+	}
+	for _, m := range members[:len(members)-max] {
+		if err := s.store.Delete(ctx, m.Href); err != nil && !errors.Is(err, ErrNoNode) {
+			s.log.Warn("trimming a list", "list", list, "item", m.Href, "err", err)
+		}
+	}
 }
 
 // deleteEndDevice deletes an EndDevice the client may change, and forgets
@@ -344,6 +373,9 @@ func (s *Server) loadDevices(ctx context.Context) error {
 	hrefs, err := s.store.Hrefs(ctx)
 	if err != nil {
 		return err
+	}
+	for _, h := range hrefs {
+		s.noteHref(h)
 	}
 	for _, h := range hrefs {
 		n, err := s.store.Get(ctx, h)

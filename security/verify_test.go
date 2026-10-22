@@ -21,6 +21,7 @@ import (
 	"testing"
 	"time"
 
+	ieee20305 "github.com/otfabric/go-ieee20305"
 	"github.com/otfabric/go-ieee20305/security"
 )
 
@@ -505,4 +506,50 @@ func FuzzHardwareModuleName(f *testing.F) {
 			t.Fatalf("round trip: %v, %v; want %v", h2, ok, h)
 		}
 	})
+}
+
+// Without trusted CAs, verification fails rather than trusting the system
+// roots; every failure matches ieee20305.ErrCertificate, and those of
+// crypto/x509 its error as well.
+func TestVerifyFailsClosed(t *testing.T) {
+	p, other := newPKI(t, "Test Org"), newPKI(t, "Other Org")
+	dev, _, err := security.TestDeviceCertHMN(p.ca, p.caKey, testHMN)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, o := range map[string]security.VerifyOptions{
+		"no roots":    {Usage: x509.ExtKeyUsageClientAuth},
+		"other roots": {Roots: other.pool, Usage: x509.ExtKeyUsageClientAuth},
+	} {
+		err := security.Verify([]*x509.Certificate{dev}, o)
+		if !errors.Is(err, ieee20305.ErrCertificate) {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	err = security.Verify([]*x509.Certificate{dev}, security.VerifyOptions{Roots: other.pool})
+	var unknown x509.UnknownAuthorityError
+	if !errors.As(err, &unknown) {
+		t.Errorf("the error of crypto/x509 is lost: %v", err)
+	}
+	if err := security.Verify(nil, security.VerifyOptions{Roots: p.pool}); !errors.Is(err, ieee20305.ErrCertificate) {
+		t.Errorf("no chain: %v", err)
+	}
+	if err := security.VerifyPeerCertificate(security.VerifyOptions{Roots: p.pool})([][]byte{{1}}, nil); !errors.Is(err, ieee20305.ErrCertificate) {
+		t.Errorf("garbage: %v", err)
+	}
+	if _, err := security.ParseLFDI("zz"); !errors.Is(err, ieee20305.ErrInvalid) {
+		t.Errorf("ParseLFDI: %v", err)
+	}
+	if _, err := security.ParseLFDI("00"); !errors.Is(err, ieee20305.ErrInvalid) {
+		t.Errorf("ParseLFDI of 1 byte: %v", err)
+	}
+	// A server without client CAs refuses every client.
+	srv, srvKey, err := security.TestServerCert(p.ca, p.caKey, []string{"127.0.0.1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := security.ServerTLSConfig(tlsCert(srv, srvKey), nil)
+	if err := cfg.VerifyPeerCertificate([][]byte{dev.Raw}, nil); !errors.Is(err, ieee20305.ErrCertificate) {
+		t.Errorf("a server without client CAs: %v", err)
+	}
 }

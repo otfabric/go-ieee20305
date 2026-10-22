@@ -104,6 +104,10 @@ type Agent struct {
 
 	clock schedule.Clock
 	loops [functionSets]*eventLoop
+	// ctx is the context of the agent's own work (handlers, Responses),
+	// which Close cancels.
+	ctx    context.Context
+	cancel context.CancelFunc
 
 	mu          sync.Mutex
 	state       State
@@ -159,19 +163,36 @@ func New(cfg Config) (*Agent, error) {
 	if seed == 0 {
 		seed = uint64(cfg.Identity.SFDI)
 	}
+	a.ctx, a.cancel = context.WithCancel(context.Background())
 	a.newLoops(seed)
 	return a, nil
 }
 
 // Close stops the scheduling of events and waits for the handlers. Run
 // closes the agent when it returns.
-func (a *Agent) Close() { a.closeLoops() }
+func (a *Agent) Close() {
+	a.cancel()
+	a.closeLoops()
+}
 
 // State returns what the agent knows of the server.
+//
+// The documents are copies, which the caller may keep and change.
 func (a *Agent) State() State {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	return a.state
+	st := a.state
+	st.DeviceCapability = st.DeviceCapability.Clone()
+	st.EndDevice = st.EndDevice.Clone()
+	st.Registration = st.Registration.Clone()
+	st.Time.Time = st.Time.Time.Clone()
+	if st.Assignments != nil {
+		st.Assignments = make([]*ieee20305.FunctionSetAssignments, len(a.state.Assignments))
+		for i, f := range a.state.Assignments {
+			st.Assignments[i] = f.Clone()
+		}
+	}
+	return st
 }
 
 // Start reads DeviceCapability and the server's time, finds or registers

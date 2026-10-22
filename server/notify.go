@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"path"
@@ -43,6 +44,7 @@ func (w *watchStore) Put(ctx context.Context, n *Node) error {
 	if err := w.Store.Put(ctx, n); err != nil {
 		return err
 	}
+	w.s.noteHref(n.Href)
 	w.s.changed(ctx, n.Href, n, false)
 	return nil
 }
@@ -112,9 +114,12 @@ func newNotifier(s *Server) *notifier {
 	return n
 }
 
-// close stops the workers and waits for them.
+// close stops the workers and waits for them. It stops under n.mu, so that
+// schedule, which checks n.ctx under n.mu, starts no worker after it.
 func (n *notifier) close() {
+	n.mu.Lock()
 	n.stop()
+	n.mu.Unlock()
 	n.wg.Wait()
 }
 
@@ -124,8 +129,13 @@ func (n *notifier) changed(ctx context.Context, href string, node *Node, deleted
 	if node != nil && node.Resource == "Subscription" {
 		n.index(ctx, node)
 	}
+	type candidate struct {
+		sub      *subscription
+		resource string
+		list     bool
+	}
+	var candidates []candidate
 	n.mu.Lock()
-	defer n.mu.Unlock()
 	if deleted {
 		for h, sub := range n.subs {
 			switch {
@@ -138,7 +148,25 @@ func (n *notifier) changed(ctx context.Context, href string, node *Node, deleted
 		}
 	}
 	for _, sub := range n.subs {
-		if sub.status == NotificationDefault && n.matches(ctx, sub, href) {
+		if sub.status == NotificationDefault {
+			candidates = append(candidates, candidate{sub, sub.resource, sub.list})
+		}
+	}
+	n.mu.Unlock()
+	// Matching reads the store: not under n.mu.
+	var matched []*subscription
+	for _, c := range candidates {
+		if n.matches(ctx, c.resource, c.list, href) {
+			matched = append(matched, c.sub)
+		}
+	}
+	if len(matched) == 0 {
+		return
+	}
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	for _, sub := range matched {
+		if n.subs[sub.href] == sub && sub.status == NotificationDefault {
 			sub.dirty = true
 			n.schedule(sub)
 		}
@@ -150,20 +178,19 @@ func within(href, base string) bool {
 	return href == base || strings.HasPrefix(href, strings.TrimSuffix(base, "/")+"/")
 }
 
-// matches reports whether a change of href is a change of the resource of
-// sub: the resource itself, or an item of the list it is. The caller holds
-// n.mu.
-func (n *notifier) matches(ctx context.Context, sub *subscription, href string) bool {
-	if sub.resource == href {
+// matches reports whether a change of href is a change of the subscribed
+// resource: the resource itself, or an item of the list it is.
+func (n *notifier) matches(ctx context.Context, resource string, list bool, href string) bool {
+	if resource == href {
 		return true
 	}
-	if !sub.list {
+	if !list {
 		return false
 	}
-	if path.Dir(href) == sub.resource {
+	if path.Dir(href) == resource {
 		return true
 	}
-	members, err := n.s.store.Members(ctx, sub.resource)
+	members, err := n.s.store.Members(ctx, resource)
 	if err != nil {
 		return false
 	}
@@ -194,8 +221,10 @@ func (n *notifier) index(ctx context.Context, node *Node) {
 }
 
 // schedule starts the worker of sub if it has none. The caller holds n.mu.
+// A server without a NotificationClient (whose store may hold
+// subscriptions of an earlier one) sends nothing.
 func (n *notifier) schedule(sub *subscription) {
-	if sub.running || n.ctx.Err() != nil {
+	if sub.running || n.ctx.Err() != nil || n.client == nil {
 		return
 	}
 	sub.running = true
@@ -402,6 +431,13 @@ func (s *Server) checkSubscription(ctx context.Context, r *Request) error {
 	if err != nil || u.Scheme != "https" || u.Host == "" {
 		return bad(ReasonInvalidRequest, "notificationURI %q is no https URL", sub.NotificationURI)
 	}
+	allowed := s.cfg.NotificationURIAllowed
+	if allowed == nil {
+		allowed = DefaultNotificationURIAllowed
+	}
+	if !allowed(u) {
+		return httpError(http.StatusForbidden, "notificationURI %q is not allowed", sub.NotificationURI)
+	}
 	target, err := s.store.Get(ctx, sub.SubscribedResource)
 	if err != nil || target.Value == nil || !s.canRead(r.Principal, target) {
 		return bad(ReasonInvalidRequest, "subscribedResource %q is no resource of the client", sub.SubscribedResource)
@@ -440,4 +476,24 @@ func (s *Server) updateSubscription(ctx context.Context, r *Request) error {
 		return err
 	}
 	return s.replace(ctx, r)
+}
+
+// DefaultNotificationURIAllowed is the NotificationURIAllowed of a server
+// without one: it refuses the hosts a device must not make the server
+// connect to with its certificate: localhost, and literal loopback,
+// unspecified, link-local and multicast addresses (cloud metadata services
+// are link-local). A host name is not resolved: what the names of a network
+// reach is for the operator's own NotificationURIAllowed, or its network,
+// to decide.
+func DefaultNotificationURIAllowed(u *url.URL) bool {
+	host := strings.ToLower(strings.TrimSuffix(u.Hostname(), "."))
+	if host == "" || host == "localhost" || strings.HasSuffix(host, ".localhost") {
+		return false
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return true
+	}
+	return !ip.IsLoopback() && !ip.IsUnspecified() && !ip.IsLinkLocalUnicast() &&
+		!ip.IsLinkLocalMulticast() && !ip.IsMulticast() && !ip.IsInterfaceLocalMulticast()
 }

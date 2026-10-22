@@ -317,3 +317,32 @@ func TestRole(t *testing.T) {
 		}
 	}
 }
+
+// A list clients post to keeps its newest MaxListItems items.
+func TestMaxListItems(t *testing.T) {
+	h := newHarness(t, server.Config{MaxListItems: 3}, "dev")
+	ed, err := h.srv.Admin().ProvisionDevice(context.Background(), server.DeviceSpec{LFDI: h.id("dev")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 1; i <= 5; i++ {
+		ev := examples.LogEvent(0)
+		ev.LogEventID = ieee20305.UInt16(i)
+		if status, _, _ := h.do(t, "dev", http.MethodPost, ed+"/lel", marshal(t, ev)); status != http.StatusCreated {
+			t.Fatalf("POST %d: %d", i, status)
+		}
+	}
+	ms, err := h.srv.Admin().Members(context.Background(), ed+"/lel")
+	if err != nil || len(ms) != 3 || ms[0].Value.(*ieee20305.LogEvent).LogEventID != 3 {
+		t.Errorf("%d LogEvents, %v", len(ms), err)
+	}
+	// An operator's are not capped.
+	for i := 0; i < 3; i++ {
+		if _, err := h.srv.Admin().Create(context.Background(), ed+"/lel", examples.LogEvent(0), h.lfdi("dev")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if ms, _ := h.srv.Admin().Members(context.Background(), ed+"/lel"); len(ms) != 6 {
+		t.Errorf("%d LogEvents after the operator's", len(ms))
+	}
+}

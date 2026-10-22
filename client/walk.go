@@ -49,13 +49,19 @@ func (c *Client) FetchList(ctx context.Context, href string, opts ListOptions) (
 
 // Iterate calls fn with every item of the list resource at href, a page of
 // pageSize items at a time (all the server gives when zero), until the list
-// ends or fn returns an error, which Iterate returns.
+// ends or fn returns an error, which Iterate returns. A list longer than
+// Config.MaxListItems fails with ErrProtocol.
 func (c *Client) Iterate(ctx context.Context, href string, pageSize uint32, fn func(item any) error) error {
+	return c.iterate(ctx, href, 0, pageSize, fn)
+}
+
+// iterate is Iterate from the item start.
+func (c *Client) iterate(ctx context.Context, href string, start, pageSize uint32, fn func(item any) error) error {
 	limit := pageSize
 	if limit == 0 {
 		limit = 255
 	}
-	for start := uint32(0); ; {
+	for {
 		l, err := c.FetchList(ctx, href, ListOptions{Start: start, Limit: limit})
 		if err != nil {
 			return err
@@ -67,6 +73,9 @@ func (c *Client) Iterate(ctx context.Context, href string, pageSize uint32, fn f
 			}
 		}
 		start += uint32(len(items))
+		if start > c.maxItems {
+			return fmt.Errorf("%w: %s has more than %d items", ieee20305.ErrProtocol, href, c.maxItems)
+		}
 		if len(items) == 0 || start >= listAll(l) {
 			return nil
 		}
@@ -138,12 +147,23 @@ func (c *Client) Walk(ctx context.Context, root string, opts WalkOptions, visit 
 		}
 		docs := []any{doc}
 		if l, ok := doc.(ieee20305.Lister); ok {
-			var items []any
-			if err := c.Iterate(ctx, cur.href, opts.PageSize, func(it any) error {
-				items = append(items, it)
-				return nil
-			}); err != nil {
-				return err
+			// The items of the first page, then the rest of the list.
+			items := l.ListItems()
+			if all := listAll(l); uint32(len(items)) < all && len(items) > 0 {
+				if err := c.iterate(ctx, cur.href, uint32(len(items)), opts.PageSize, func(it any) error {
+					items = append(items, it)
+					return nil
+				}); err != nil {
+					return err
+				}
+			} else if len(items) == 0 && all > 0 {
+				items = nil
+				if err := c.Iterate(ctx, cur.href, opts.PageSize, func(it any) error {
+					items = append(items, it)
+					return nil
+				}); err != nil {
+					return err
+				}
 			}
 			if err := l.SetListItems(items); err != nil {
 				return err

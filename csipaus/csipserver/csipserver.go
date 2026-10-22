@@ -75,7 +75,9 @@ func Configure(cfg server.Config) server.Config {
 func Watts(w int16) *ieee20305.ActivePower { return &ieee20305.ActivePower{Value: ieee20305.Int16(w)} }
 
 // Envelope returns a DERControl of mRID mrid that sets the limits from start
-// for d.
+// for d, created now by the local clock (set its CreationTime to that of the
+// server's Admin.Now when the two differ: it orders events of the same
+// primacy).
 func Envelope(mrid ieee20305.MRIDType, start time.Time, d time.Duration, l csipaus.Limits) *csipaus.DERControl {
 	c := &csipaus.DERControl{}
 	c.MRID = mrid
@@ -97,7 +99,7 @@ func SetDefaultLimits(ctx context.Context, a *server.Admin, program string, l cs
 		d = &csipaus.DefaultDERControl{}
 	}
 	l.Apply(&d.DERControlBase)
-	now := ieee20305.TimeType(time.Now().Unix())
+	now := ieee20305.TimeType(a.Now().Unix())
 	d.UpdatedTime = &now
 	n.Value = d
 	return a.Put(ctx, n)

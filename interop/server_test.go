@@ -108,7 +108,10 @@ func serve(t *testing.T, srv *server.Server, p *pki, gcm bool) string {
 		t.Fatal(err)
 	}
 	quiet := log.New(io.Discard, "", 0)
-	l := tlsccm.NewListener(inner, p.server, p.roots, tlsccm.Options{AllowGCM: gcm, ErrorLog: quiet})
+	l, err := tlsccm.NewListener(inner, p.server, p.roots, tlsccm.Options{AllowGCM: gcm, ErrorLog: quiet})
+	if err != nil {
+		t.Fatal(err)
+	}
 	var h http.Handler = srv
 	if os.Getenv("IEEE20305_INTEROP_TRACE") != "" {
 		h = trace(t, srv)

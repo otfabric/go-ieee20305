@@ -30,21 +30,24 @@ func notification(t *testing.T, sub string, primacy ieee20305.PrimacyType, creat
 func TestNotificationHandler(t *testing.T) {
 	var got []*ieee20305.Notification
 	fail := false
-	h := &client.NotificationHandler{
-		Handle: func(_ context.Context, n *ieee20305.Notification) error {
-			if fail {
-				return errors.New("busy")
-			}
-			got = append(got, n)
-			return nil
-		},
+	h, err := client.NewNotificationHandler(func(_ context.Context, n *ieee20305.Notification) error {
+		if fail {
+			return errors.New("busy")
+		}
+		got = append(got, n)
+		return nil
+	}, client.NotificationConfig{
 		Authorize: func(r *http.Request) error {
 			if r.Header.Get("X-Deny") != "" {
 				return errors.New("denied")
 			}
 			return nil
 		},
-		MaxBytes: 4096,
+		MaxBytes:         4096,
+		MaxSubscriptions: 2,
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 	post := func(body []byte, header ...string) int {
 		r := httptest.NewRequest(http.MethodPost, "/ntfy", bytes.NewReader(body))
@@ -97,6 +100,35 @@ func TestNotificationHandler(t *testing.T) {
 	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/ntfy", nil))
 	if w.Code != http.StatusMethodNotAllowed || w.Header().Get("Allow") != http.MethodPost {
 		t.Errorf("GET: %d", w.Code)
+	}
+}
+
+// The handler remembers MaxSubscriptions subscriptions: a third one makes
+// it forget the least recent, whose repeated content then passes again.
+func TestNotificationHandlerForgets(t *testing.T) {
+	n := 0
+	h, err := client.NewNotificationHandler(func(context.Context, *ieee20305.Notification) error {
+		n++
+		return nil
+	}, client.NotificationConfig{MaxSubscriptions: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	post := func(sub string) {
+		r := httptest.NewRequest(http.MethodPost, "/ntfy", bytes.NewReader(notification(t, sub, 1, 10)))
+		h.ServeHTTP(httptest.NewRecorder(), r)
+	}
+	post("/s/1")
+	post("/s/2")
+	post("/s/1") // a repeat: not passed on
+	post("/s/3") // forgets /s/2, the least recent
+	post("/s/1") // remembered
+	post("/s/2") // forgotten: passed on again
+	if n != 4 {
+		t.Errorf("%d notifications passed on, want 4", n)
+	}
+	if _, err := client.NewNotificationHandler(nil, client.NotificationConfig{}); !errors.Is(err, ieee20305.ErrConfiguration) {
+		t.Errorf("a handler without a function: %v", err)
 	}
 }
 

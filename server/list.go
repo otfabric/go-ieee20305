@@ -220,36 +220,30 @@ func setHref(v any, href string) {
 }
 
 // newHref allocates the href of a new resource under parent: parent/<n>
-// with the next number.
+// with the next number. The numbers in use are known from noteHref, so no
+// store is read here.
 func (s *Server) newHref(parent string) string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, ok := s.counters[parent]; !ok {
-		s.counters[parent] = s.maxChild(parent)
-	}
 	s.counters[parent]++
 	return path.Join(parent, strconv.Itoa(s.counters[parent]))
 }
 
-// maxChild returns the largest number among the hrefs parent/<n> and
-// parent/<n>/... the store holds, so that hrefs stay unique after a restart
-// with a persistent store.
-func (s *Server) maxChild(parent string) int {
-	hrefs, err := s.store.Hrefs(context.Background())
-	if err != nil {
-		return 0
-	}
-	max := 0
-	prefix := strings.TrimSuffix(parent, "/") + "/"
-	for _, h := range hrefs {
-		rest, ok := strings.CutPrefix(h, prefix)
-		if !ok {
+// noteHref records the numbers of the segments of an href the store holds,
+// so that newHref never reuses one: for /edev/3/lel/7, the counters of
+// /edev (3) and /edev/3/lel (7).
+func (s *Server) noteHref(href string) {
+	segs := strings.Split(strings.Trim(href, "/"), "/")
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i, seg := range segs {
+		n, err := strconv.Atoi(seg)
+		if err != nil || n <= 0 {
 			continue
 		}
-		rest, _, _ = strings.Cut(rest, "/")
-		if n, err := strconv.Atoi(rest); err == nil && n > max {
-			max = n
+		parent := "/" + strings.Join(segs[:i], "/")
+		if n > s.counters[parent] {
+			s.counters[parent] = n
 		}
 	}
-	return max
 }

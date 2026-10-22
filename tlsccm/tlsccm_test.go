@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	ieee20305 "github.com/otfabric/go-ieee20305"
 	"github.com/otfabric/go-ieee20305/agent"
 	"github.com/otfabric/go-ieee20305/client"
 	"github.com/otfabric/go-ieee20305/security"
@@ -66,7 +67,10 @@ func serve(t *testing.T, p pki, srv *server.Server, o tlsccm.Options) (string, f
 		t.Fatal(err)
 	}
 	o.ErrorLog = log.New(io.Discard, "", 0)
-	l := tlsccm.NewListener(inner, p.server, p.roots, o)
+	l, err := tlsccm.NewListener(inner, p.server, p.roots, o)
+	if err != nil {
+		t.Fatal(err)
+	}
 	var mu sync.Mutex
 	var suites []uint16
 	hs := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -177,7 +181,10 @@ func TestServerVerification(t *testing.T) {
 
 func TestPeerCertificatesWithoutConnection(t *testing.T) {
 	r := httptest.NewRequest(http.MethodGet, "/dcap", nil)
-	if _, err := tlsccm.PeerCertificates(r); !errors.Is(err, tlsccm.ErrNoConnection) {
+	if _, err := tlsccm.NewListener(nil, tls.Certificate{}, nil, tlsccm.Options{}); !errors.Is(err, ieee20305.ErrConfiguration) {
+		t.Errorf("NewListener without client CAs: %v", err)
+	}
+	if _, err := tlsccm.PeerCertificates(r); !errors.Is(err, tlsccm.ErrNoConnection) || !errors.Is(err, ieee20305.ErrCertificate) {
 		t.Errorf("PeerCertificates = %v", err)
 	}
 	if tlsccm.CipherSuite(r) != 0 {

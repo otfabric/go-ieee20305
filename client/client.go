@@ -23,7 +23,7 @@ import (
 )
 
 // MediaType is the media type of IEEE 2030.5 XML documents.
-const MediaType = "application/sep+xml"
+const MediaType = ieee20305.MediaType
 
 // DefaultDeviceCapabilityPath is where a server serves its DeviceCapability
 // resource unless discovery says otherwise.
@@ -56,6 +56,9 @@ type Config struct {
 	UserAgent string
 	// MaxResponseBytes limits the size of a response body; 1 MiB when zero.
 	MaxResponseBytes int64
+	// MaxListItems limits the items Iterate and Walk read of one list, as
+	// a list could claim to have any number: 100000 when zero.
+	MaxListItems uint32
 }
 
 // Client talks to one IEEE 2030.5 server. It is safe for concurrent use.
@@ -66,6 +69,7 @@ type Client struct {
 	codec    Codec
 	ua       string
 	maxBytes int64
+	maxItems uint32
 }
 
 // New returns a Client for cfg.
@@ -87,6 +91,10 @@ func New(cfg Config) (*Client, error) {
 	}
 	if c.maxBytes <= 0 {
 		c.maxBytes = defaultMaxResponseBytes
+	}
+	c.maxItems = cfg.MaxListItems
+	if c.maxItems == 0 {
+		c.maxItems = 100000
 	}
 	hc := *cfg.HTTPClient
 	next := hc.CheckRedirect

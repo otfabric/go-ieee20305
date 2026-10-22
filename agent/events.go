@@ -307,7 +307,7 @@ func (a *Agent) runLoop(l *eventLoop, ch <-chan schedule.Transition) {
 	defer close(l.done)
 	handle := l.set.handler(&a.cfg)
 	for t := range ch {
-		ctx := context.Background()
+		ctx := a.ctx
 		if handle != nil {
 			if err := handle(ctx, t); err != nil {
 				a.log.Warn("event handler failed", "function set", l.set.fs, "mRID", t.Event.MRID, "err", err)
@@ -329,12 +329,12 @@ func (a *Agent) respond(ctx context.Context, set *eventSet, t schedule.Transitio
 		return nil
 	}
 	ev = ev.Elem()
-	replyTo, _ := ev.FieldByName("ReplyTo").Interface().(*string)
+	replyTo, _ := field(ev, "ReplyTo").(*string)
 	if replyTo == nil || *replyTo == "" {
 		return nil
 	}
 	var flags []byte
-	if rr, _ := ev.FieldByName("ResponseRequired").Interface().(*ieee20305.HexBinary8); rr != nil {
+	if rr, _ := field(ev, "ResponseRequired").(*ieee20305.HexBinary8); rr != nil {
 		flags = *rr
 	}
 	send, status := schedule.ResponseRequired(flags, t)
@@ -342,12 +342,30 @@ func (a *Agent) respond(ctx context.Context, set *eventSet, t schedule.Transitio
 		return nil
 	}
 	doc := set.response()
-	r := reflect.ValueOf(doc).Elem().FieldByName("Response").Addr().Interface().(*ieee20305.Response)
+	rf := reflect.ValueOf(doc).Elem().FieldByName("Response")
+	if !rf.IsValid() || !rf.CanAddr() {
+		return nil
+	}
+	r, ok := rf.Addr().Interface().(*ieee20305.Response)
+	if !ok {
+		return nil
+	}
 	created, st := ieee20305.TimeType(t.At.Unix()), ieee20305.UInt8(status)
 	r.CreatedDateTime, r.Status = &created, &st
-	r.Subject, _ = ev.FieldByName("MRID").Interface().(ieee20305.MRIDType)
+	r.Subject, _ = field(ev, "MRID").(ieee20305.MRIDType)
 	r.EndDeviceLFDI = ieee20305.HexBinary160(a.cfg.Identity.LFDI[:])
 	return a.postResponse(ctx, pendingResponse{href: *replyTo, doc: doc})
+}
+
+// field returns the field name of the struct v (through embedding), or nil
+// when it has none: event types of profiles may lack what IEEE 2030.5's
+// have.
+func field(v reflect.Value, name string) any {
+	f := v.FieldByName(name)
+	if !f.IsValid() || !f.CanInterface() {
+		return nil
+	}
+	return f.Interface()
 }
 
 // pendingResponse is a Response the agent could not post yet.

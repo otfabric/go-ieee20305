@@ -16,7 +16,8 @@ srv, err := server.New(server.Config{PeerCertificates: tlsccm.PeerCertificates})
 inner, err := net.Listen("tcp", ":8443")
 hs := &http.Server{Handler: srv}
 tlsccm.ConfigureServer(hs)
-err = hs.Serve(tlsccm.NewListener(inner, serverCert, deviceCAs, tlsccm.Options{}))
+l, err := tlsccm.NewListener(inner, serverCert, deviceCAs, tlsccm.Options{})
+err = hs.Serve(l)
 ```
 
 Connections are TLS 1.2 on P-256 with CCM_8 only; `Options.AllowGCM` also

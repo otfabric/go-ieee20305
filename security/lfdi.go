@@ -8,6 +8,8 @@ import (
 	"encoding/hex"
 	"fmt"
 	"strings"
+
+	ieee20305 "github.com/otfabric/go-ieee20305"
 )
 
 // LFDI is a Long-Form Device Identifier: the leftmost 160 bits (20 bytes)
@@ -45,10 +47,10 @@ func (l LFDI) SFDI() SFDI {
 func ParseLFDI(s string) (LFDI, error) {
 	b, err := hex.DecodeString(s)
 	if err != nil {
-		return LFDI{}, fmt.Errorf("invalid LFDI hex: %w", err)
+		return LFDI{}, fmt.Errorf("%w: LFDI %q is not hexadecimal: %w", ieee20305.ErrInvalid, s, err)
 	}
 	if len(b) != 20 {
-		return LFDI{}, fmt.Errorf("LFDI must be 20 bytes (40 hex chars), got %d", len(b))
+		return LFDI{}, fmt.Errorf("%w: an LFDI is 20 bytes (40 hexadecimal digits), not %d", ieee20305.ErrInvalid, len(b))
 	}
 	var lfdi LFDI
 	copy(lfdi[:], b)

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+	"time"
 
 	ieee20305 "github.com/otfabric/go-ieee20305"
 )
@@ -179,3 +180,6 @@ func (a *Admin) Document(resource string) any { return a.s.newList(resource) }
 func (a *Admin) Members(ctx context.Context, list string) ([]*Node, error) {
 	return a.s.store.Members(ctx, list)
 }
+
+// Now returns the time of the server's Clock.
+func (a *Admin) Now() time.Time { return a.s.clock() }

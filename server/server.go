@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"sync"
 	"time"
 
@@ -97,6 +98,11 @@ type Config struct {
 	// certificate of the server as its client certificate. Without one the
 	// server takes no subscriptions.
 	NotificationClient *http.Client
+	// NotificationURIAllowed decides whether the server sends the
+	// notifications of a subscription to its notificationURI, which a
+	// device chooses: DefaultNotificationURIAllowed when nil. A refused
+	// subscription is answered 403.
+	NotificationURIAllowed func(u *url.URL) bool
 	// NotificationWorkers bounds the notifications sent at once: 16 when
 	// zero.
 	NotificationWorkers int
@@ -112,6 +118,14 @@ type Config struct {
 	// OnResponse, when set, is called with each new Response a client
 	// posts, and its href.
 	OnResponse func(ctx context.Context, href string, response any)
+	// MaxListItems caps the lists clients post to, such as LogEvents,
+	// Responses and the Readings of mirrors: the oldest items beyond it are
+	// deleted. 1000 when zero; no cap when negative. An operator's posts
+	// are not capped.
+	MaxListItems int
+	// EventRetention is how long after its end the server keeps an event in
+	// its scheduler (not in its store): 24 hours when zero.
+	EventRetention time.Duration
 	// FlowPolicy answers the FlowReservationRequests of devices: GrantAll
 	// when nil.
 	FlowPolicy FlowPolicy
@@ -141,6 +155,10 @@ type Server struct {
 	devices  map[string]deviceInfo // by LFDI
 	closed   bool
 
+	// listLocks serialize the deduplicating creations in a list (Responses,
+	// mirrors) and the readings of a device's mirrors.
+	listLocks keyLocks
+
 	// regMu serializes the creation of EndDevices, so that a device that
 	// posts its EndDevice twice at once gets one.
 	regMu sync.Mutex
@@ -168,9 +186,6 @@ func New(cfg Config) (*Server, error) {
 	if s.store == nil {
 		s.store = NewMemStore(s.profile.Clone)
 	}
-	s.notifier = newNotifier(s)
-	s.events = newEvents(s)
-	s.store = &watchStore{Store: s.store, s: s}
 	if s.clock == nil {
 		s.clock = time.Now
 	}
@@ -207,7 +222,14 @@ func New(cfg Config) (*Server, error) {
 		}
 		s.hooks[id] = h.over(s.hooks[id])
 	}
+	// What runs in the background starts last, and stops if the server
+	// cannot start.
+	s.notifier = newNotifier(s)
+	s.events = newEvents(s)
+	s.store = &watchStore{Store: s.store, s: s}
 	if err := s.bootstrap(context.Background()); err != nil {
+		s.events.close()
+		s.notifier.close()
 		return nil, err
 	}
 	return s, nil

@@ -24,7 +24,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
-	"errors"
+	"fmt"
 	"log"
 	"net"
 	"net/http"
@@ -32,6 +32,7 @@ import (
 
 	"github.com/GRIDAPPSD/ieee-2030_5-core-go/pkg/sep2tls"
 	"github.com/GRIDAPPSD/ieee-2030_5-core-go/pkg/sep2tls/gotls"
+	ieee20305 "github.com/otfabric/go-ieee20305"
 	"github.com/otfabric/go-ieee20305/security"
 )
 
@@ -137,13 +138,12 @@ func NewHTTPClient(device tls.Certificate, roots *x509.CertPool, o Options) *htt
 // NewListener returns a listener of TLS connections with CCM_8 on inner,
 // for a server with the server certificate whose clients one of clientCAs
 // issued. A connection is accepted once its handshake succeeds; a failure
-// goes to Options.ErrorLog.
-func NewListener(inner net.Listener, server tls.Certificate, clientCAs *x509.CertPool, o Options) net.Listener {
-	l, err := sep2tls.WrapCCMListenerWithTimeout(gotls.NewListener(inner, ServerConfig(server, clientCAs, o)), o.ErrorLog, o.timeout())
-	if err != nil {
-		panic(err) // the timeout is never negative
+// goes to Options.ErrorLog. clientCAs is required.
+func NewListener(inner net.Listener, server tls.Certificate, clientCAs *x509.CertPool, o Options) (net.Listener, error) {
+	if clientCAs == nil {
+		return nil, fmt.Errorf("%w: tlsccm: a listener needs the CAs of its clients", ieee20305.ErrConfiguration)
 	}
-	return l
+	return sep2tls.WrapCCMListenerWithTimeout(gotls.NewListener(inner, ServerConfig(server, clientCAs, o)), o.ErrorLog, o.timeout())
 }
 
 type connKey struct{}
@@ -166,7 +166,7 @@ func ConfigureServer(srv *http.Server) {
 // ErrNoConnection is returned by PeerCertificates for a request that did
 // not come over a connection of NewListener (served by a server that
 // ConfigureServer prepared).
-var ErrNoConnection = errors.New("tlsccm: the request came over no CCM_8 connection")
+var ErrNoConnection = fmt.Errorf("%w: tlsccm: the request came over no CCM_8 connection", ieee20305.ErrCertificate)
 
 // PeerCertificates returns the certificate chain of the client of a
 // request: for server.Config.PeerCertificates. A request over crypto/tls

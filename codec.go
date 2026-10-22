@@ -8,6 +8,9 @@ import (
 	sepxml "github.com/otfabric/go-ieee20305/internal/xml"
 )
 
+// MediaType is the media type of IEEE 2030.5 XML documents.
+const MediaType = "application/sep+xml"
+
 // Codec encodes and decodes IEEE 2030.5 documents. StandardCodec is the one
 // of this package; a profile package such as csipaus has its own.
 type Codec interface {

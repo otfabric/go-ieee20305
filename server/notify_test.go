@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync"
 	"testing"
@@ -34,7 +35,7 @@ func TestNoNotificationClient(t *testing.T) {
 }
 
 func TestNotSubscribable(t *testing.T) {
-	h := newHarness(t, server.Config{NotificationClient: &http.Client{}}, "dev")
+	h := newHarness(t, server.Config{NotificationClient: &http.Client{}, NotificationURIAllowed: allowAll}, "dev")
 	ctx := context.Background()
 	ed, err := h.srv.Admin().ProvisionDevice(ctx, server.DeviceSpec{LFDI: h.id("dev")})
 	if err != nil {
@@ -69,7 +70,7 @@ func TestSubscriptionsAfterRestart(t *testing.T) {
 	}))
 	defer sink.Close()
 	store := server.NewMemStore(nil)
-	cfg := server.Config{Store: store, NotificationClient: sink.Client(), NotificationRetryDelay: time.Millisecond}
+	cfg := server.Config{Store: store, NotificationClient: sink.Client(), NotificationRetryDelay: time.Millisecond, NotificationURIAllowed: allowAll}
 	h := newHarness(t, cfg, "dev")
 	ctx := context.Background()
 	ed, err := h.srv.Admin().ProvisionDevice(ctx, server.DeviceSpec{LFDI: h.id("dev")})
@@ -110,5 +111,38 @@ func TestSubscriptionsAfterRestart(t *testing.T) {
 	defer mu.Unlock()
 	if len(bodies) == 0 || !strings.Contains(bodies[len(bodies)-1], "<status>1</status>") {
 		t.Errorf("notifications %q", bodies)
+	}
+}
+
+func TestDefaultNotificationURIAllowed(t *testing.T) {
+	for raw, want := range map[string]bool{
+		"https://device.example:8443/ntfy": true,
+		"https://192.168.1.20/ntfy":        true,
+		"https://[2001:db8::1]/ntfy":       true,
+		"https://localhost/ntfy":           false,
+		"https://a.localhost./ntfy":        false,
+		"https://127.0.0.1/ntfy":           false,
+		"https://[::1]/ntfy":               false,
+		"https://0.0.0.0/ntfy":             false,
+		"https://169.254.169.254/latest":   false,
+		"https://[fe80::1]/ntfy":           false,
+		"https://224.0.0.251/ntfy":         false,
+	} {
+		u, err := url.Parse(raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := server.DefaultNotificationURIAllowed(u); got != want {
+			t.Errorf("%s: %v", raw, got)
+		}
+	}
+	// A server with the default refuses a subscription to loopback.
+	h := newHarness(t, server.Config{NotificationClient: &http.Client{}}, "dev")
+	ed, err := h.srv.Admin().ProvisionDevice(context.Background(), server.DeviceSpec{LFDI: h.id("dev")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status, _, _ := h.do(t, "dev", http.MethodPost, ed+"/sub", marshal(t, subscription(ed+"/fsa", "https://127.0.0.1/n"))); status != http.StatusForbidden {
+		t.Errorf("a subscription to loopback: %d", status)
 	}
 }

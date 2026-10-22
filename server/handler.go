@@ -16,7 +16,7 @@ import (
 )
 
 // MediaType is the media type of IEEE 2030.5 XML documents.
-const MediaType = "application/sep+xml"
+const MediaType = ieee20305.MediaType
 
 // Query is the paging and selection of a request, from the parameters its
 // method takes in the WADL.

@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"net/http"
 	"path"
-	"sync"
 
 	ieee20305 "github.com/otfabric/go-ieee20305"
 	"github.com/otfabric/go-ieee20305/security"
@@ -19,10 +18,6 @@ import (
 // UsagePointListHref is where the server keeps the UsagePoints of the
 // mirrors devices post, unless the DeviceCapability links another.
 const UsagePointListHref = "/upt"
-
-// mirrorMu serializes the creation of mirrors and their readings, so that
-// the same mRID gets one resource.
-var mirrorMu sync.Mutex
 
 // createMirror is the POST of a MirrorUsagePoint: the server keeps it, and
 // a UsagePoint it mirrors to, with the MeterReadings of the
@@ -40,8 +35,10 @@ func (s *Server) createMirror(ctx context.Context, r *Request) (string, error) {
 	if !s.canPost(r.Principal, r.Node) {
 		return "", httpError(http.StatusForbidden, "%s is not the client's", r.Node.Href)
 	}
-	mirrorMu.Lock()
-	defer mirrorMu.Unlock()
+	// One mirror per mRID and device: creations in the list are serialized,
+	// and so are the readings of a device.
+	defer s.listLocks.lock(r.Node.Href)()
+	defer s.listLocks.lock("mirror:" + lfdi)()
 	readings := mup.MirrorMeterReading
 	mup.MirrorMeterReading = nil
 	members, err := s.store.Members(ctx, r.Node.Href)
@@ -124,8 +121,7 @@ func (s *Server) postMirrorReadings(ctx context.Context, r *Request) (string, er
 	if !s.canChange(r.Principal, r.Node) {
 		return "", httpError(http.StatusForbidden, "%s is not the client's", r.Node.Href)
 	}
-	mirrorMu.Lock()
-	defer mirrorMu.Unlock()
+	defer s.listLocks.lock("mirror:" + r.Node.Owner)()
 	switch doc := r.Doc.(type) {
 	case *ieee20305.MirrorMeterReading:
 		return s.mirrorReading(ctx, r.Node, doc)
@@ -144,7 +140,7 @@ func (s *Server) postMirrorReadings(ctx context.Context, r *Request) (string, er
 // its UsagePoint: the MeterReading of its mRID (created if new) with its
 // ReadingType, its latest Reading, and its MirrorReadingSets as
 // ReadingSets with their Readings. It returns the href of the
-// MeterReading. The caller holds mirrorMu.
+// MeterReading. The caller holds the mirror lock of the device.
 func (s *Server) mirrorReading(ctx context.Context, mup *Node, mmr *ieee20305.MirrorMeterReading) (string, error) {
 	m, ok := mup.Value.(*ieee20305.MirrorUsagePoint)
 	if !ok {
@@ -215,6 +211,7 @@ func (s *Server) mirrorReading(ctx context.Context, mup *Node, mmr *ieee20305.Mi
 				return "", err
 			}
 		}
+		s.trim(ctx, rList.Href)
 	}
 	return mr, nil
 }

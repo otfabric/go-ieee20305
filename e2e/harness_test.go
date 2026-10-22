@@ -10,6 +10,7 @@ import (
 	"log"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"sync"
 	"testing"
 
@@ -90,6 +91,10 @@ func newEnvWrapped(t testing.TB, cfg server.Config, wrap func(http.Handler) http
 
 func newEnvFull(t testing.TB, p *pki, cfg server.Config, wrap func(http.Handler) http.Handler) *env {
 	t.Helper()
+	if cfg.NotificationURIAllowed == nil {
+		// Devices here listen on loopback.
+		cfg.NotificationURIAllowed = func(*url.URL) bool { return true }
+	}
 	if cfg.NotificationClient == nil {
 		// The server notifies with a certificate of its own, as a client.
 		cfg.NotificationClient = client.NewHTTPClient(p.device(t, "server notifications"), p.roots)

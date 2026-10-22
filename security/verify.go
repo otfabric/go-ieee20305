@@ -9,6 +9,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	ieee20305 "github.com/otfabric/go-ieee20305"
 )
 
 var (
@@ -138,7 +140,9 @@ func HardwareModuleName(c *x509.Certificate) (HMN, bool) {
 
 // VerifyOptions are the options of Verify.
 type VerifyOptions struct {
-	// Roots are the trusted CAs. Nil uses the system roots.
+	// Roots are the trusted CAs: the CAs of the IEEE 2030.5 PKI. Required:
+	// a nil pool fails verification rather than falling back to the
+	// system roots, which would let any publicly trusted certificate in.
 	Roots *x509.CertPool
 	// Intermediates are CAs that may complete the chain besides the
 	// certificates that follow the leaf in the chain itself.
@@ -162,9 +166,14 @@ type VerifyOptions struct {
 // subject alternative name of IEEE 2030.5 certificates when that name holds
 // only RFC 4108 HardwareModuleName otherNames besides DNS names and IP
 // addresses. Every other unhandled critical extension fails verification.
+//
+// Its errors match ieee20305.ErrCertificate.
 func Verify(chain []*x509.Certificate, o VerifyOptions) error {
 	if len(chain) == 0 || chain[0] == nil {
-		return errors.New("security: no peer certificate")
+		return fmt.Errorf("%w: no peer certificate", ieee20305.ErrCertificate)
+	}
+	if o.Roots == nil {
+		return fmt.Errorf("%w: no trusted CAs to verify the peer with", ieee20305.ErrCertificate)
 	}
 	var inter *x509.CertPool
 	if o.Intermediates != nil {
@@ -175,7 +184,7 @@ func Verify(chain []*x509.Certificate, o VerifyOptions) error {
 	certs := make([]*x509.Certificate, len(chain))
 	for i, c := range chain {
 		if c == nil {
-			return fmt.Errorf("security: nil certificate at position %d of the chain", i)
+			return fmt.Errorf("%w: nil certificate at position %d of the chain", ieee20305.ErrCertificate, i)
 		}
 		certs[i] = tolerateHMN(c)
 		if i > 0 {
@@ -193,16 +202,16 @@ func Verify(chain []*x509.Certificate, o VerifyOptions) error {
 		opts.CurrentTime = o.Now()
 	}
 	if _, err := leaf.Verify(opts); err != nil {
-		return fmt.Errorf("security: %w", err)
+		return certError(err)
 	}
 	if o.ServerName != "" && (len(leaf.DNSNames) > 0 || len(leaf.IPAddresses) > 0) {
 		if err := leaf.VerifyHostname(o.ServerName); err != nil {
-			return fmt.Errorf("security: %w", err)
+			return certError(err)
 		}
 	}
 	if o.PinnedLFDI != nil {
 		if got := CertificateLFDI(leaf); got != *o.PinnedLFDI {
-			return fmt.Errorf("security: certificate LFDI %s, want %s", got, o.PinnedLFDI)
+			return fmt.Errorf("%w: certificate LFDI %s, want %s", ieee20305.ErrCertificate, got, o.PinnedLFDI)
 		}
 	}
 	return nil
@@ -247,13 +256,13 @@ func indexOID(oids []asn1.ObjectIdentifier, oid asn1.ObjectIdentifier) int {
 func VerifyPeerCertificate(o VerifyOptions) func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
 	return func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
 		if len(rawCerts) == 0 {
-			return errors.New("security: no peer certificate")
+			return fmt.Errorf("%w: no peer certificate", ieee20305.ErrCertificate)
 		}
 		chain := make([]*x509.Certificate, len(rawCerts))
 		for i, raw := range rawCerts {
 			c, err := x509.ParseCertificate(raw)
 			if err != nil {
-				return fmt.Errorf("security: peer certificate %d: %w", i, err)
+				return fmt.Errorf("%w: peer certificate %d: %w", ieee20305.ErrCertificate, i, err)
 			}
 			chain[i] = c
 		}
@@ -264,4 +273,11 @@ func VerifyPeerCertificate(o VerifyOptions) func(rawCerts [][]byte, _ [][]*x509.
 // Equal reports whether h and o name the same hardware module.
 func (h HMN) Equal(o HMN) bool {
 	return h.Type.Equal(o.Type) && bytes.Equal(h.SerialNumber, o.SerialNumber)
+}
+
+// certError wraps an error of crypto/x509 so that it matches both
+// ieee20305.ErrCertificate and what crypto/x509 returned (such as an
+// x509.UnknownAuthorityError).
+func certError(err error) error {
+	return fmt.Errorf("%w: %w", ieee20305.ErrCertificate, err)
 }

@@ -28,8 +28,10 @@ import (
 type events struct {
 	s     *Server
 	sched *schedule.Scheduler
-	stop  func()
 	done  chan struct{}
+
+	mu        sync.Mutex
+	lastPrune time.Time
 }
 
 // clockFunc is the schedule.Clock of a server: its Clock for the time, and
@@ -49,8 +51,7 @@ func newEvents(s *Server) *events {
 	}
 	e := &events{s: s, done: make(chan struct{})}
 	e.sched = schedule.New(schedule.Options{Clock: clock, Conflicts: func(a, b schedule.Event) bool { return false }})
-	ch, stop := e.sched.Subscribe()
-	e.stop = stop
+	ch, _ := e.sched.Subscribe()
 	go e.run(ch)
 	return e
 }
@@ -120,6 +121,30 @@ func (e *events) changed(href string, node *Node, deleted bool) {
 	}
 	ev.MRID = href // unique on the server, unlike mRIDs
 	e.sched.Upsert(ev)
+	e.prune()
+}
+
+// prune forgets, at most once a minute, the events that ended longer than
+// EventRetention ago: their status no longer changes, and the scheduler of
+// a long-running server would otherwise grow without end.
+func (e *events) prune() {
+	now := e.s.clock()
+	e.mu.Lock()
+	if now.Sub(e.lastPrune) < time.Minute {
+		e.mu.Unlock()
+		return
+	}
+	e.lastPrune = now
+	e.mu.Unlock()
+	retention := e.s.cfg.EventRetention
+	if retention <= 0 {
+		retention = 24 * time.Hour
+	}
+	for _, ev := range e.sched.Events() {
+		if ev.End().Add(retention).Before(now) {
+			e.sched.Remove(ev.MRID)
+		}
+	}
 }
 
 // changed is told of every change of the store.
@@ -217,9 +242,6 @@ func (s *Server) getCurrentDERProgram(ctx context.Context, r *Request) (any, err
 	return best, nil
 }
 
-// responseMu serializes the deduplication of Responses.
-var responseMu sync.Mutex
-
 // createResponse is the POST of a Response (of any subtype) to a
 // ResponseList: of a device the client acts for, once per subject, device
 // and status — a repeated Response gets the href of the first.
@@ -236,25 +258,36 @@ func (s *Server) createResponse(ctx context.Context, r *Request) (string, error)
 	if !s.acts(r.Principal, lfdi.String()) {
 		return "", httpError(http.StatusForbidden, "a Response of device %s", lfdi)
 	}
-	responseMu.Lock()
-	defer responseMu.Unlock()
-	members, err := s.store.Members(ctx, r.Node.Href)
+	href, created, err := s.storeResponse(ctx, r, resp, lfdi.String())
 	if err != nil {
 		return "", err
 	}
-	for _, m := range members {
-		if old := responseOf(m.Value); old != nil && sameResponse(old, resp) {
-			return m.Href, nil
-		}
-	}
-	href, err := s.createItem(ctx, r.Node, r.Doc, lfdi.String())
-	if err != nil {
-		return "", err
-	}
-	if s.cfg.OnResponse != nil {
+	// The callback runs after the lock of the list: it may be slow, or post
+	// a Response itself.
+	if created && s.cfg.OnResponse != nil {
 		s.cfg.OnResponse(ctx, href, r.Doc)
 	}
 	return href, nil
+}
+
+// storeResponse stores a Response in its list unless the list has it, and
+// returns its href and whether it is new.
+func (s *Server) storeResponse(ctx context.Context, r *Request, resp *ieee20305.Response, owner string) (string, bool, error) {
+	defer s.listLocks.lock(r.Node.Href)()
+	members, err := s.store.Members(ctx, r.Node.Href)
+	if err != nil {
+		return "", false, err
+	}
+	for _, m := range members {
+		if old := responseOf(m.Value); old != nil && sameResponse(old, resp) {
+			return m.Href, false, nil
+		}
+	}
+	href, err := s.createItem(ctx, r.Node, r.Doc, owner)
+	if err == nil {
+		s.trim(ctx, r.Node.Href)
+	}
+	return href, err == nil, err
 }
 
 // responseOf returns the Response a document is or embeds, or nil.

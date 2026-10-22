@@ -70,7 +70,7 @@ func TestNotifications(t *testing.T) {
 			}
 			c, ed, lfdi := env.provisioned(t, "device-1", edition)
 			box := &inbox{}
-			url := env.listen(t, &client.NotificationHandler{Handle: box.handle, Codec: edition.Codec()})
+			url := env.listen(t, notificationHandler(t, box.handle, client.NotificationConfig{Codec: edition.Codec()}))
 			sub, err := c.Subscribe(ctx, ed+"/sub", "/derp", url+"/ntfy", 10)
 			if err != nil {
 				t.Fatal(err)
@@ -182,9 +182,9 @@ func TestUndeliverable(t *testing.T) {
 	env := newEnv(t, server.Config{NotificationAttempts: 2, NotificationRetryDelay: time.Millisecond})
 	ctx := context.Background()
 	c, ed, lfdi := env.provisioned(t, "device-1", ieee20305.Edition2023)
-	failing := env.listen(t, &client.NotificationHandler{Handle: func(context.Context, *ieee20305.Notification) error {
+	failing := env.listen(t, notificationHandler(t, func(context.Context, *ieee20305.Notification) error {
 		return errors.New("full")
-	}})
+	}, client.NotificationConfig{}))
 	sub, err := c.Subscribe(ctx, ed+"/sub", ed+"/fsa", failing, 1)
 	if err != nil {
 		t.Fatal(err)
@@ -219,7 +219,7 @@ func TestNotificationStorm(t *testing.T) {
 	var mu sync.Mutex
 	seen := map[string]int{}
 	var disorder error
-	url := env.listen(t, &client.NotificationHandler{Handle: func(_ context.Context, n *ieee20305.Notification) error {
+	url := env.listen(t, notificationHandler(t, func(_ context.Context, n *ieee20305.Notification) error {
 		p, ok := n.Resource.Value.(*ieee20305.DERProgram)
 		if !ok || p.Description == nil {
 			return nil
@@ -235,7 +235,7 @@ func TestNotificationStorm(t *testing.T) {
 		}
 		seen[n.SubscriptionURI] = v
 		return nil
-	}})
+	}, client.NotificationConfig{}))
 	var subs []string
 	for d := 0; d < devices; d++ {
 		c, ed, _ := env.provisioned(t, fmt.Sprintf("device-%d", d), ieee20305.Edition2023)
@@ -283,4 +283,14 @@ func TestNotificationStorm(t *testing.T) {
 	eventually(t, "the goroutines to end", func() bool {
 		return runtime.NumGoroutine() <= base+10
 	})
+}
+
+// notificationHandler returns a NotificationHandler of handle.
+func notificationHandler(t *testing.T, handle func(context.Context, *ieee20305.Notification) error, cfg client.NotificationConfig) *client.NotificationHandler {
+	t.Helper()
+	h, err := client.NewNotificationHandler(handle, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return h
 }
