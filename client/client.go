@@ -106,6 +106,9 @@ func New(cfg Config) (*Client, error) {
 	return c, nil
 }
 
+// Codec returns the codec of the client's documents.
+func (c *Client) Codec() Codec { return c.codec }
+
 // NewHTTPClient returns an HTTP client for an IEEE 2030.5 client with the
 // device certificate and the CAs that verify the server. It sets no
 // timeout: bound each call with its context.

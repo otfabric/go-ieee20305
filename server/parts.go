@@ -47,7 +47,7 @@ func (s *Server) partPath(resource string) string {
 func (s *Server) newParts(resource, href string, v any, owner string) ([]*Node, error) {
 	var parts []*Node
 	now := s.clock()
-	for _, p := range itemParts[resource] {
+	for _, p := range append(itemParts[resource], s.profile.Parts[resource]...) {
 		if _, ok := s.resources[p]; !ok {
 			continue // not a resource of the profile
 		}

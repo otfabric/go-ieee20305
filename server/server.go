@@ -35,6 +35,10 @@ type Profile struct {
 	Derives func(elem, of string) bool
 	// Resources are resources the profile adds to those of the WADL.
 	Resources []ieee20305.ResourceSpec
+	// Parts are the resources the profile adds to the parts of a resource
+	// (see Admin.Create), by WADL resource ID: the ConnectionPoint of an
+	// EndDevice in CSIP-AUS, say.
+	Parts map[string][]string
 }
 
 // StandardProfile serves the documents of package ieee20305.
@@ -224,7 +228,7 @@ func (s *Server) bootstrap(ctx context.Context) error {
 		}
 	}
 	if _, err := s.store.Get(ctx, EndDeviceListHref); errors.Is(err, ErrNoNode) && s.cfg.InBandRegistration {
-		if err := s.Admin().Root(ctx, "EndDeviceList", EndDeviceListHref, &ieee20305.EndDeviceList{}); err != nil {
+		if err := s.Admin().Root(ctx, "EndDeviceList", EndDeviceListHref, s.newList("EndDeviceList")); err != nil {
 			return err
 		}
 	}

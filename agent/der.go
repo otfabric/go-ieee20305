@@ -18,14 +18,14 @@ func (a *Agent) pollDefault(ctx context.Context) error {
 	if a.cfg.OnDefaultDERControl == nil || p == nil || p.DefaultDERControlLink == nil {
 		return nil
 	}
-	var d ieee20305.DefaultDERControl
-	if err := a.c.Get(ctx, p.DefaultDERControlLink.Href, &d); err != nil {
+	d, err := a.c.Fetch(ctx, p.DefaultDERControlLink.Href)
+	if err != nil {
 		if isNotFound(err) {
 			return nil
 		}
 		return err
 	}
-	out, err := ieee20305.Marshal(&d)
+	out, err := a.c.Codec().Marshal(d)
 	if err != nil {
 		return err
 	}
@@ -36,5 +36,5 @@ func (a *Agent) pollDefault(ctx context.Context) error {
 	if same {
 		return nil
 	}
-	return a.cfg.OnDefaultDERControl(ctx, &d)
+	return a.cfg.OnDefaultDERControl(ctx, d)
 }

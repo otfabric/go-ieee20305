@@ -7,7 +7,6 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	ieee20305 "github.com/otfabric/go-ieee20305"
@@ -19,43 +18,55 @@ import (
 func AllConflict(a, b Event) bool { return true }
 
 // DERConflicts reports whether two DERControl events conflict: they set at
-// least one opMod* control of DERControlBase in common. An event whose Value
-// is not a DERControl conflicts with everything.
+// least one opMod* control of DERControlBase in common, including those a
+// profile adds (such as the limits of CSIP-AUS). An event whose Value is
+// not a DERControl conflicts with everything.
 func DERConflicts(a, b Event) bool {
-	x, y := derControl(a.Value), derControl(b.Value)
+	x, y := opMods(a.Value), opMods(b.Value)
 	if x == nil || y == nil {
 		return true
 	}
-	va, vb := reflect.ValueOf(&x.DERControlBase).Elem(), reflect.ValueOf(&y.DERControlBase).Elem()
-	for _, i := range opModFields() {
-		if !va.Field(i).IsNil() && !vb.Field(i).IsNil() {
+	for name := range x {
+		if y[name] {
 			return true
 		}
 	}
 	return false
 }
 
-// opModFields returns the indexes of the opMod* fields of DERControlBase.
-var opModFields = sync.OnceValue(func() []int {
-	t := reflect.TypeFor[ieee20305.DERControlBase]()
-	var idx []int
+// opMods returns the names of the opMod* controls a DERControl (of package
+// ieee20305 or of a profile, with a DERControlBase field) sets, or nil for
+// another value.
+func opMods(v any) map[string]bool {
+	rv := reflect.ValueOf(v)
+	if rv.Kind() == reflect.Pointer {
+		if rv.IsNil() {
+			return nil
+		}
+		rv = rv.Elem()
+	}
+	if rv.Kind() != reflect.Struct {
+		return nil
+	}
+	base := rv.FieldByName("DERControlBase")
+	if !base.IsValid() || base.Kind() != reflect.Struct {
+		return nil
+	}
+	set := map[string]bool{}
+	collectOpMods(base, set)
+	return set
+}
+
+func collectOpMods(v reflect.Value, set map[string]bool) {
+	t := v.Type()
 	for i := range t.NumField() {
 		f := t.Field(i)
-		if strings.HasPrefix(f.Name, "OpMod") && f.Type.Kind() == reflect.Pointer {
-			idx = append(idx, i)
+		switch {
+		case f.Anonymous && f.Type.Kind() == reflect.Struct:
+			collectOpMods(v.Field(i), set)
+		case strings.HasPrefix(f.Name, "OpMod") && f.Type.Kind() == reflect.Pointer && !v.Field(i).IsNil():
+			set[f.Name] = true
 		}
-	}
-	return idx
-})
-
-func derControl(v any) *ieee20305.DERControl {
-	switch x := v.(type) {
-	case *ieee20305.DERControl:
-		return x
-	case ieee20305.DERControl:
-		return &x
-	default:
-		return nil
 	}
 }
 
@@ -147,7 +158,16 @@ func FromEvent(v any, primacy uint8, program string) (Event, error) {
 	case ieee20305.SupplyInterruptionOverride:
 		return fromOverride(&x, v, primacy, program), nil
 	default:
-		return Event{}, fmt.Errorf("%w: schedule: %T is not an event", ieee20305.ErrInvalid, v)
+		// An event of a profile, such as the DERControl of CSIP-AUS, which
+		// embeds RandomizableEvent or Event.
+		switch emb := embedded(v).(type) {
+		case *ieee20305.RandomizableEvent:
+			re = emb
+		case *ieee20305.Event:
+			ev = emb
+		default:
+			return Event{}, fmt.Errorf("%w: schedule: %T is not an event", ieee20305.ErrInvalid, v)
+		}
 	}
 	var e Event
 	if re != nil {
@@ -178,6 +198,25 @@ func FromEvent(v any, primacy uint8, program string) (Event, error) {
 	e.Status = st
 	e.Value = v
 	return e, nil
+}
+
+// embedded returns a pointer to the RandomizableEvent or Event a pointer
+// to a struct embeds, or nil.
+func embedded(v any) any {
+	rv := reflect.ValueOf(v)
+	if rv.Kind() != reflect.Pointer || rv.IsNil() || rv.Elem().Kind() != reflect.Struct {
+		return nil
+	}
+	for _, name := range []string{"RandomizableEvent", "Event"} {
+		f := rv.Elem().FieldByName(name)
+		if f.IsValid() && f.CanAddr() {
+			switch p := f.Addr().Interface().(type) {
+			case *ieee20305.RandomizableEvent, *ieee20305.Event:
+				return p
+			}
+		}
+	}
+	return nil
 }
 
 func fromOverride(x *ieee20305.SupplyInterruptionOverride, v any, primacy uint8, program string) Event {

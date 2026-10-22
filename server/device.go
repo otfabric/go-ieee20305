@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"path"
+	"reflect"
 
 	ieee20305 "github.com/otfabric/go-ieee20305"
 	"github.com/otfabric/go-ieee20305/security"
@@ -152,16 +153,27 @@ func (s *Server) setDevice(lfdi security.LFDI, d deviceInfo) {
 
 // newEndDevice creates the EndDevice of the device lfdi, from the template
 // tmpl, with its resources, and returns its href. The caller holds regMu.
-func (s *Server) newEndDevice(ctx context.Context, lfdi security.LFDI, tmpl *ieee20305.EndDevice) (string, error) {
+func (s *Server) newEndDevice(ctx context.Context, lfdi security.LFDI, tmpl any) (string, error) {
 	if _, err := s.store.Get(ctx, EndDeviceListHref); errors.Is(err, ErrNoNode) {
-		if err := s.Admin().Root(ctx, "EndDeviceList", EndDeviceListHref, &ieee20305.EndDeviceList{}); err != nil {
+		if err := s.Admin().Root(ctx, "EndDeviceList", EndDeviceListHref, s.newList("EndDeviceList")); err != nil {
 			return "", err
 		}
 	}
-	ed := &ieee20305.EndDevice{}
-	if tmpl != nil {
-		ed = tmpl.Clone()
+	// The EndDevice of the profile, such as that of CSIP-AUS, from the
+	// template of either type.
+	doc := s.newList("EndDevice")
+	switch {
+	case tmpl == nil || reflect.ValueOf(tmpl).IsNil():
+	case reflect.TypeOf(tmpl) == reflect.TypeOf(doc):
+		doc = s.profile.Clone(tmpl)
+	case baseEndDevice(tmpl) != nil && baseEndDevice(doc) != nil:
+		*baseEndDevice(doc) = *baseEndDevice(tmpl).Clone()
 	}
+	ed := baseEndDevice(doc)
+	if ed == nil {
+		return "", fmt.Errorf("%w: the profile's EndDevice is no EndDevice", ieee20305.ErrConfiguration)
+	}
+	ed.Href = nil
 	ed.SFDI = ieee20305.SFDIType(lfdi.SFDI())
 	l := ieee20305.HexBinary160(lfdi[:])
 	ed.LFDI = &l
@@ -172,7 +184,24 @@ func (s *Server) newEndDevice(ctx context.Context, lfdi security.LFDI, tmpl *iee
 	if err != nil {
 		return "", err
 	}
-	return s.createItem(ctx, list, ed, lfdi.String())
+	return s.createItem(ctx, list, doc, lfdi.String())
+}
+
+// baseEndDevice returns the EndDevice of IEEE 2030.5 a document is or
+// embeds (as a profile's EndDevice does), or nil.
+func baseEndDevice(v any) *ieee20305.EndDevice {
+	if ed, ok := v.(*ieee20305.EndDevice); ok {
+		return ed
+	}
+	rv := reflect.ValueOf(v)
+	if rv.Kind() != reflect.Pointer || rv.IsNil() || rv.Elem().Kind() != reflect.Struct {
+		return nil
+	}
+	f := rv.Elem().FieldByName("EndDevice")
+	if !f.IsValid() || f.Type() != reflect.TypeOf(ieee20305.EndDevice{}) {
+		return nil
+	}
+	return f.Addr().Interface().(*ieee20305.EndDevice)
 }
 
 // newList returns an empty document of the resource (a list, mostly).
@@ -197,8 +226,8 @@ func (s *Server) newList(resource string) any {
 //
 // The sFDI must be that of the lFDI.
 func (s *Server) createEndDevice(ctx context.Context, r *Request) (string, error) {
-	ed, ok := r.Doc.(*ieee20305.EndDevice)
-	if !ok || r.Node.Href != EndDeviceListHref {
+	ed := baseEndDevice(r.Doc)
+	if ed == nil || r.Node.Href != EndDeviceListHref {
 		return s.createDefault(ctx, r)
 	}
 	var lfdi security.LFDI
@@ -247,7 +276,7 @@ func (s *Server) createEndDevice(ctx context.Context, r *Request) (string, error
 			info.ManagedBy = known.ManagedBy
 		}
 	}
-	href, err := s.newEndDevice(ctx, lfdi, ed)
+	href, err := s.newEndDevice(ctx, lfdi, r.Doc)
 	if err != nil {
 		return "", err
 	}
@@ -300,8 +329,8 @@ func (s *Server) operatorOnly(ctx context.Context, r *Request) error {
 
 // updateEndDevice is the PUT of an EndDevice: its sFDI and lFDI stay.
 func (s *Server) updateEndDevice(ctx context.Context, r *Request) error {
-	if ed, ok := r.Doc.(*ieee20305.EndDevice); ok && r.Principal.Role != RoleOperator {
-		if old, ok := r.Node.Value.(*ieee20305.EndDevice); ok {
+	if ed := baseEndDevice(r.Doc); ed != nil && r.Principal.Role != RoleOperator {
+		if old := baseEndDevice(r.Node.Value); old != nil {
 			ed.SFDI, ed.LFDI = old.SFDI, old.LFDI
 		}
 	}

@@ -371,12 +371,15 @@ func (a *Agent) Active(fs FunctionSet) []any {
 	return out
 }
 
-// ActiveDERControls returns the DERControls active now, in order of
-// precedence.
+// ActiveDERControls returns the DERControls of IEEE 2030.5 active now, in
+// order of precedence. (Those of a profile, such as CSIP-AUS, are in
+// Active(DER).)
 func (a *Agent) ActiveDERControls() []*ieee20305.DERControl {
 	var out []*ieee20305.DERControl
 	for _, v := range a.Active(DER) {
-		out = append(out, v.(*ieee20305.DERControl))
+		if c, ok := v.(*ieee20305.DERControl); ok {
+			out = append(out, c)
+		}
 	}
 	return out
 }

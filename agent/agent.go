@@ -82,8 +82,10 @@ type Config struct {
 	Readings         func(ctx context.Context) ([]ieee20305.MirrorMeterReading, error)
 	PostRate         time.Duration
 	// OnDefaultDERControl is called with the DefaultDERControl of the
-	// DERProgram of highest precedence when it changes.
-	OnDefaultDERControl func(ctx context.Context, d *ieee20305.DefaultDERControl) error
+	// DERProgram of highest precedence when it changes: an
+	// *ieee20305.DefaultDERControl, or that of the profile of the codec of
+	// the Client, such as *csipaus.DefaultDERControl.
+	OnDefaultDERControl func(ctx context.Context, d any) error
 	// Clock is the clock of the events: the local clock corrected to the
 	// server's when nil.
 	Clock schedule.Clock

@@ -204,10 +204,10 @@ func TestDefaultDERControlAndCurrentProgram(t *testing.T) {
 	d := newDERSite(t)
 	var mu sync.Mutex
 	var defaults []*ieee20305.DefaultDERControl
-	a, lfdi := newAgent(t, d.env, "device-1", agent.Config{OnDefaultDERControl: func(_ context.Context, dd *ieee20305.DefaultDERControl) error {
+	a, lfdi := newAgent(t, d.env, "device-1", agent.Config{OnDefaultDERControl: func(_ context.Context, dd any) error {
 		mu.Lock()
 		defer mu.Unlock()
-		defaults = append(defaults, dd)
+		defaults = append(defaults, dd.(*ieee20305.DefaultDERControl))
 		return nil
 	}})
 	d.device(t, lfdi)

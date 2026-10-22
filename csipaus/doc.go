@@ -14,5 +14,9 @@
 // packages. CSIP-AUS v1.3 profiles IEEE 2030.5-2018, so Marshal does not
 // write the schemaVer attribute of IEEE 2030.5-2023.
 //
+// Limits are the site limits CSIP-AUS adds to DERControlBase. Package
+// csipserver configures a server for CSIP-AUS, and package csipclient reads
+// and writes the ConnectionPoint of a device.
+//
 // The *_gen.go files are generated; do not edit them.
 package csipaus

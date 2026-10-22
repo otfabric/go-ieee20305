@@ -141,8 +141,44 @@ func TestDERConflicts(t *testing.T) {
 			t.Errorf("%d: got %v, want %v", i, got, tt.want)
 		}
 	}
-	if n := len(opModFields()); n < 30 {
-		t.Errorf("only %d opMod fields", n)
+	// A DERControl of a profile, whose DERControlBase embeds that of
+	// IEEE 2030.5 and adds controls.
+	type base struct {
+		ieee20305.DERControlBase
+		OpModExpLimW *ieee20305.ActivePower
+	}
+	type profileControl struct {
+		ieee20305.RandomizableEvent
+		DERControlBase base
+	}
+	exp := &profileControl{DERControlBase: base{OpModExpLimW: &ieee20305.ActivePower{}}}
+	connect := &profileControl{}
+	connect.DERControlBase.OpModConnect = new(bool)
+	for i, tt := range []struct {
+		a, b any
+		want bool
+	}{
+		{exp, exp, true},
+		{exp, connect, false},
+		{connect, derc("OpModConnect"), true},
+		{&struct{ DERControlBase int }{}, exp, true},
+		{(*profileControl)(nil), exp, true},
+	} {
+		if got := DERConflicts(Event{Value: tt.a}, Event{Value: tt.b}); got != tt.want {
+			t.Errorf("profile %d: got %v, want %v", i, got, tt.want)
+		}
+	}
+	// Its events are events.
+	exp.MRID = ieee20305.MRIDType{1}
+	if ev, err := FromEvent(exp, 1, "p"); err != nil || ev.MRID != exp.MRID.String() {
+		t.Errorf("FromEvent of a profile DERControl: %+v, %v", ev, err)
+	}
+	type message struct{ ieee20305.Event }
+	if _, err := FromEvent(&message{Event: ieee20305.Event{}}, 1, "p"); err == nil {
+		t.Error("FromEvent of an event without mRID")
+	}
+	if _, err := FromEvent(&struct{ X int }{}, 1, "p"); err == nil {
+		t.Error("FromEvent of a struct without event")
 	}
 }
 
