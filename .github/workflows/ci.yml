@@ -46,3 +46,21 @@ jobs:
         run: make generate-check
       - name: Test against the official examples and schemas
         run: go test -count=1 -race . ./csipaus ./internal/...
+
+  # Runs the client against IEEE 2030.5 servers implemented by others: the
+  # images of github.com/otfabric/ieee20305-interop, pinned by digest in
+  # interop/images.go. Envoy is the one server this client can reach today;
+  # GridAPPS-D offers only TLS_ECDHE_ECDSA_WITH_AES_128_CCM_8.
+  interop:
+    name: Interop
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      GOWORK: "off"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Interop suite
+        run: make test-interop

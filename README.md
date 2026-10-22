@@ -89,7 +89,7 @@ make build
 # Run the end-to-end tests
 make e2e
 
-# Run the interop suite against reference implementations (needs Docker)
+# Run the client against the ieee20305-interop server images (needs Docker)
 make interop
 ```
 

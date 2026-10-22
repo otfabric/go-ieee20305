@@ -93,7 +93,7 @@ fuzz: ## Run the fuzz targets for FUZZTIME each (default 30s)
 	@echo "Fuzzing (FUZZTIME=$(FUZZTIME))"
 	@echo "No fuzz targets defined yet"
 
-test-interop: ## Run the interop suite against reference implementations (needs Docker)
+test-interop: ## Run the client against the ieee20305-interop server images, pinned in interop/images.go (needs Docker)
 	@echo "Running interop tests"
 	@go test -tags=interop -count=1 -timeout=20m ./interop/...
 
