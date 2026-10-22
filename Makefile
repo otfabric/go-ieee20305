@@ -91,7 +91,7 @@ cover: coverage ## Open coverage report in browser
 FUZZTIME ?= 30s
 fuzz: ## Run the fuzz targets for FUZZTIME each (default 30s)
 	@echo "Fuzzing (FUZZTIME=$(FUZZTIME))"
-	@echo "No fuzz targets defined yet"
+	@go test -run '^$$' -fuzz '^FuzzHardwareModuleName$$' -fuzztime $(FUZZTIME) ./security/
 
 test-interop: ## Run the client against the ieee20305-interop server images, pinned in interop/images.go (needs Docker)
 	@echo "Running interop tests"

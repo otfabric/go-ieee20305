@@ -8,6 +8,7 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/asn1"
 	"errors"
 	"math/big"
 	"net"
@@ -144,6 +145,72 @@ func TestDeviceCert(ca *x509.Certificate, caKey *ecdsa.PrivateKey, commonName st
 		return nil, nil, err
 	}
 	return cert, key, nil
+}
+
+// TestDeviceCertHMN generates a device (client) certificate signed by the
+// given CA whose only subject alternative name is the critical
+// HardwareModuleName h, as in IEEE 2030.5 device certificates.
+func TestDeviceCertHMN(ca *x509.Certificate, caKey *ecdsa.PrivateKey, h HMN) (*x509.Certificate, *ecdsa.PrivateKey, error) {
+	return testCertHMN(ca, caKey, h, x509.ExtKeyUsageClientAuth)
+}
+
+// TestServerCertHMN generates a server certificate signed by the given CA
+// whose only subject alternative name is the critical HardwareModuleName h,
+// as in IEEE 2030.5 server certificates: it names no host.
+func TestServerCertHMN(ca *x509.Certificate, caKey *ecdsa.PrivateKey, h HMN) (*x509.Certificate, *ecdsa.PrivateKey, error) {
+	return testCertHMN(ca, caKey, h, x509.ExtKeyUsageServerAuth)
+}
+
+func testCertHMN(ca *x509.Certificate, caKey *ecdsa.PrivateKey, h HMN, usage x509.ExtKeyUsage) (*x509.Certificate, *ecdsa.PrivateKey, error) {
+	san, err := MarshalHMNSAN(h)
+	if err != nil {
+		return nil, nil, err
+	}
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return nil, nil, err
+	}
+	serial, err := randomSerial()
+	if err != nil {
+		return nil, nil, err
+	}
+	template := &x509.Certificate{
+		SerialNumber:          serial,
+		NotBefore:             time.Now().Add(-1 * time.Hour),
+		NotAfter:              time.Now().Add(365 * 24 * time.Hour),
+		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageKeyAgreement,
+		ExtKeyUsage:           []x509.ExtKeyUsage{usage},
+		BasicConstraintsValid: true,
+		ExtraExtensions:       []pkix.Extension{{Id: oidSubjectAltName, Critical: true, Value: san}},
+	}
+	der, err := x509.CreateCertificate(rand.Reader, template, ca, &key.PublicKey, caKey)
+	if err != nil {
+		return nil, nil, err
+	}
+	cert, err := x509.ParseCertificate(der)
+	if err != nil {
+		return nil, nil, err
+	}
+	return cert, key, nil
+}
+
+// MarshalHMNSAN returns the DER of a subject alternative name extension
+// value that holds only the HardwareModuleName h.
+func MarshalHMNSAN(h HMN) ([]byte, error) {
+	inner, err := asn1.Marshal(hmnASN1{HWType: h.Type, HWSerialNum: h.SerialNumber})
+	if err != nil {
+		return nil, err
+	}
+	typeID, err := asn1.Marshal(oidHardwareModuleName)
+	if err != nil {
+		return nil, err
+	}
+	value, err := asn1.Marshal(asn1.RawValue{Class: asn1.ClassContextSpecific, Tag: 0, IsCompound: true, Bytes: inner})
+	if err != nil {
+		return nil, err
+	}
+	otherName := asn1.RawValue{Class: asn1.ClassContextSpecific, Tag: tagOtherName, IsCompound: true, Bytes: append(typeID, value...)}
+	return asn1.Marshal([]asn1.RawValue{otherName})
 }
 
 func randomSerial() (*big.Int, error) {
