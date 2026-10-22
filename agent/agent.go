@@ -97,6 +97,9 @@ type Config struct {
 	Clock schedule.Clock
 	// Seed seeds the randomization of the events: the SFDI when zero.
 	Seed uint64
+	// Metrics receives the agent's polls, events and Responses; none when
+	// nil.
+	Metrics Metrics
 	// Logger receives the agent's log (see ieee20305.Logger); none when
 	// nil.
 	Logger ieee20305.Logger
@@ -160,6 +163,9 @@ func New(cfg Config) (*Agent, error) {
 	}
 	a := &Agent{cfg: cfg, c: cfg.Client, log: cfg.Logger, files: map[string]bool{}}
 	a.log = ieee20305.ComponentLogger(cfg.Logger, "agent")
+	if a.cfg.Metrics == nil {
+		a.cfg.Metrics = NopMetrics{}
+	}
 	a.clock = cfg.Clock
 	if a.clock == nil {
 		a.clock = offsetClock{a}
@@ -372,7 +378,10 @@ func (a *Agent) Run(ctx context.Context) error {
 		if err := sleep(ctx, wait); err != nil {
 			return err
 		}
-		if err := a.poll(ctx); err != nil {
+		start := time.Now()
+		err := a.poll(ctx)
+		a.cfg.Metrics.OnPoll(time.Since(start), err)
+		if err != nil {
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}

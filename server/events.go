@@ -68,6 +68,10 @@ func (e *events) run(ch <-chan schedule.Transition) {
 		if t.Received() || t.To == schedule.Completed {
 			continue
 		}
+		if em, ok := e.s.metrics.(EventMetrics); ok {
+			name, _ := e.s.profile.ElementName(t.Event.Value)
+			em.OnEventTransition(name.Local, t.From, t.To)
+		}
 		if err := e.setStatus(context.Background(), t.Event.MRID, t.To, t.At); err != nil && !errors.Is(err, ErrNoNode) && !errors.Is(err, ieee20305.ErrClosed) {
 			e.s.log.Errorf("updating the status of event %s: %v", t.Event.MRID, err)
 		}

@@ -109,6 +109,7 @@ type notifier struct {
 type subscription struct {
 	href     string
 	resource string // the subscribed href
+	kind     string // its WADL resource
 	list     bool
 	uri      string
 	limit    uint32
@@ -225,6 +226,10 @@ func (n *notifier) index(ctx context.Context, node *Node) {
 	}
 	target, err := n.s.store.Get(ctx, doc.SubscribedResource)
 	list := err == nil && isList(target.Value)
+	kind := ""
+	if err == nil {
+		kind = target.Resource
+	}
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	sub := n.subs[node.Href]
@@ -232,7 +237,7 @@ func (n *notifier) index(ctx context.Context, node *Node) {
 		sub = &subscription{href: node.Href}
 		n.subs[node.Href] = sub
 	}
-	sub.resource, sub.list, sub.uri, sub.limit, sub.owner = doc.SubscribedResource, list, doc.NotificationURI, uint32(doc.Limit), node.Owner
+	sub.resource, sub.kind, sub.list, sub.uri, sub.limit, sub.owner = doc.SubscribedResource, kind, list, doc.NotificationURI, uint32(doc.Limit), node.Owner
 }
 
 // schedule starts the worker of sub if it has none. The caller holds n.mu.
@@ -260,7 +265,22 @@ func (n *notifier) work(sub *subscription) {
 		}
 		sub.dirty = false
 		n.mu.Unlock()
+		start := time.Now()
 		err := n.deliver(sub, status)
+		if nm, ok := n.s.metrics.(NotificationMetrics); ok && !errors.Is(err, context.Canceled) {
+			delivered := err
+			if errors.Is(err, errCancelled) {
+				delivered = nil
+			}
+			nm.OnNotification(sub.kind, time.Since(start), delivered)
+			if status != NotificationDefault || err != nil {
+				cancelled := status
+				if cancelled == NotificationDefault {
+					cancelled = NotificationCancelled
+				}
+				nm.OnSubscriptionCancelled(sub.kind, uint8(cancelled))
+			}
+		}
 		if status != NotificationDefault || err != nil {
 			if err != nil && !errors.Is(err, errCancelled) && n.ctx.Err() == nil {
 				n.s.log.Warnf("cancelling subscription %s: its notifications fail: %v", sub.href, err)

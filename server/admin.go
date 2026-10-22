@@ -47,6 +47,9 @@ func (a *Admin) Delete(ctx context.Context, href string) error {
 // Create creates an item of the list at list, owned by owner (an LFDI, or
 // empty for every client), and returns its href.
 func (a *Admin) Create(ctx context.Context, list string, v any, owner string) (string, error) {
+	if rv := reflect.ValueOf(v); !rv.IsValid() || (rv.Kind() == reflect.Pointer && rv.IsNil()) {
+		return "", fmt.Errorf("%w: no document to create in %s", ieee20305.ErrInvalid, list)
+	}
 	n, err := a.s.store.Get(ctx, list)
 	if err != nil {
 		return "", fmt.Errorf("%s: %w", list, err)

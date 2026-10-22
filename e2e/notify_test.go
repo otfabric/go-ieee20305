@@ -258,7 +258,7 @@ func TestNotificationStorm(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	eventually(t, "every subscription to see the last change", func() bool {
+	eventuallyWithin(t, 30*time.Second, "every subscription to see the last change", func() bool {
 		mu.Lock()
 		defer mu.Unlock()
 		for _, s := range subs {

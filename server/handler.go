@@ -76,10 +76,13 @@ func parseQuery(r *http.Request, allowed []string) (Query, error) {
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	start := time.Now()
+	s.metrics.OnRequest(r.Method)
 	rec := &statusWriter{ResponseWriter: w, status: http.StatusOK}
 	p := Principal{Edition: s.cfg.DefaultEdition}
 	defer func() {
-		s.log.Debugf("%s %s from %s: %d in %v", r.Method, r.URL.Path, p.LFDI, rec.status, time.Since(start))
+		d := time.Since(start)
+		s.metrics.OnResponse(r.Method, rec.resource, rec.status, d)
+		s.log.Debugf("%s %s from %s: %d in %v", r.Method, r.URL.Path, p.LFDI, rec.status, d)
 	}()
 	if s.isClosed() {
 		http.Error(rec, "server closed", http.StatusServiceUnavailable)
@@ -95,10 +98,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// statusWriter records the status of a response.
+// statusWriter records the status of a response, and the WADL resource of
+// its target.
 type statusWriter struct {
 	http.ResponseWriter
-	status int
+	status   int
+	resource string
 }
 
 func (w *statusWriter) WriteHeader(status int) {
@@ -113,6 +118,9 @@ func (s *Server) serve(ctx context.Context, w http.ResponseWriter, r *http.Reque
 	}
 	if err != nil {
 		return err
+	}
+	if sw, ok := w.(*statusWriter); ok {
+		sw.resource = node.Resource
 	}
 	spec, ok := s.resources[node.Resource]
 	if !ok {

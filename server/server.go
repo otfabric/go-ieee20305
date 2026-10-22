@@ -131,6 +131,10 @@ type Config struct {
 	// FlowPolicy answers the FlowReservationRequests of devices: GrantAll
 	// when nil.
 	FlowPolicy FlowPolicy
+	// Metrics receives the requests of the server (and, when it is one, its
+	// notifications and event transitions), to count and time them; none
+	// when nil.
+	Metrics Metrics
 	// Hooks override or extend the handling of resources, by WADL resource
 	// ID; they run before the built-in function sets.
 	Hooks map[string]Hooks
@@ -151,6 +155,7 @@ type Server struct {
 	resources map[string]ieee20305.ResourceSpec
 	hooks     map[string]Hooks
 	notifier  *notifier
+	metrics   Metrics
 	events    *events
 
 	mu       sync.Mutex
@@ -193,6 +198,10 @@ func New(cfg Config) (*Server, error) {
 		s.clock = time.Now
 	}
 	s.log = ieee20305.ComponentLogger(cfg.Logger, "server")
+	s.metrics = cfg.Metrics
+	if s.metrics == nil {
+		s.metrics = NopMetrics{}
+	}
 	if s.cfg.MaxRequestBytes <= 0 {
 		s.cfg.MaxRequestBytes = 1 << 20
 	}

@@ -308,6 +308,7 @@ func (a *Agent) runLoop(l *eventLoop, ch <-chan schedule.Transition) {
 	handle := l.set.handler(&a.cfg)
 	for t := range ch {
 		ctx := a.ctx
+		a.cfg.Metrics.OnEvent(l.set.fs, t)
 		if handle != nil {
 			if err := handle(ctx, t); err != nil {
 				a.log.Warnf("%v: the handler of event %s failed: %v", l.set.fs, t.Event.MRID, err)
@@ -354,7 +355,7 @@ func (a *Agent) respond(ctx context.Context, set *eventSet, t schedule.Transitio
 	r.CreatedDateTime, r.Status = &created, &st
 	r.Subject, _ = field(ev, "MRID").(ieee20305.MRIDType)
 	r.EndDeviceLFDI = ieee20305.HexBinary160(a.cfg.Identity.LFDI[:])
-	return a.postResponse(ctx, pendingResponse{href: *replyTo, doc: doc})
+	return a.postResponse(ctx, pendingResponse{href: *replyTo, doc: doc, fs: set.fs, status: status})
 }
 
 // field returns the field name of the struct v (through embedding), or nil
@@ -370,8 +371,10 @@ func field(v reflect.Value, name string) any {
 
 // pendingResponse is a Response the agent could not post yet.
 type pendingResponse struct {
-	href string
-	doc  any
+	href   string
+	doc    any
+	fs     FunctionSet
+	status uint8
 }
 
 // maxPending bounds the Responses the agent keeps to send again.
@@ -381,7 +384,9 @@ const maxPending = 1000
 // poll (the server stores a Response once, so sending one twice is
 // harmless).
 func (a *Agent) postResponse(ctx context.Context, r pendingResponse) error {
-	if _, err := a.c.Post(ctx, r.href, r.doc); err != nil {
+	_, err := a.c.Post(ctx, r.href, r.doc)
+	a.cfg.Metrics.OnResponse(r.fs, r.status, err)
+	if err != nil {
 		if rejected(err) {
 			a.log.Warnf("the server refused a Response to %s, dropped: %v", r.href, err)
 			return err

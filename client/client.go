@@ -67,6 +67,9 @@ type Config struct {
 	// stores it once (go-ieee20305's server does so for EndDevices,
 	// Responses and mirrors).
 	RetryPOST bool
+	// Metrics receives the client's requests, to count and time them; none
+	// when nil.
+	Metrics Metrics
 	// Logger receives the client's log (see ieee20305.Logger): a Debug
 	// line per request. None when nil.
 	Logger ieee20305.Logger
@@ -86,6 +89,7 @@ type Client struct {
 	maxItems uint32
 	log      ieee20305.Logger
 	retry    ieee20305.RetryPolicy
+	metrics  Metrics
 	// retryPOST is Config.RetryPOST.
 	retryPOST bool
 }
@@ -111,7 +115,10 @@ func New(cfg Config) (*Client, error) {
 		c.maxBytes = defaultMaxResponseBytes
 	}
 	c.log = ieee20305.ComponentLogger(cfg.Logger, "client")
-	c.retry, c.retryPOST = cfg.RetryPolicy, cfg.RetryPOST
+	c.retry, c.retryPOST, c.metrics = cfg.RetryPolicy, cfg.RetryPOST, cfg.Metrics
+	if c.metrics == nil {
+		c.metrics = NopMetrics{}
+	}
 	if c.retry == nil {
 		c.retry = ieee20305.NoRetry()
 	}
@@ -310,6 +317,19 @@ func (c *Client) do(ctx context.Context, method, href string, q url.Values, body
 			return nil, nil, fmt.Errorf("%w: %s %s: %w", ieee20305.ErrInvalid, method, u.Path, err)
 		}
 	}
+	start := time.Now()
+	c.metrics.OnRequest(method, u.Path)
+	resp, out, err := c.attempts(ctx, method, u, data)
+	if err != nil {
+		c.metrics.OnError(method, u.Path, time.Since(start), err)
+	} else {
+		c.metrics.OnResponse(method, u.Path, resp.StatusCode, time.Since(start))
+	}
+	return resp, out, err
+}
+
+// attempts sends a request, again as the RetryPolicy says.
+func (c *Client) attempts(ctx context.Context, method string, u *url.URL, data []byte) (*http.Response, []byte, error) {
 	// A request is sent again only when it is safe to: a GET, HEAD, PUT
 	// or DELETE, or a POST with RetryPOST.
 	idempotent := method != http.MethodPost || c.retryPOST
@@ -321,6 +341,9 @@ func (c *Client) do(ctx context.Context, method, href string, q url.Values, body
 		retry, wait := c.retry.ShouldRetry(attempt, err)
 		if !retry {
 			return nil, nil, err
+		}
+		if am, ok := c.metrics.(AttemptMetrics); ok {
+			am.OnRetry(method, u.Path, attempt, err, wait)
 		}
 		c.log.Debugf("%s %s: attempt %d failed, again in %v: %v", method, u.Path, attempt+1, wait, err)
 		t := time.NewTimer(wait)
