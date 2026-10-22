@@ -436,13 +436,18 @@ func TestTLSConfigsServerName(t *testing.T) {
 
 // TestInsecureSkipVerifyConfined makes sure that ClientTLSConfig, which
 // verifies the chain itself, is the only code that turns off the
-// verification of crypto/tls.
+// verification of crypto/tls; and ClientConfig of the tlsccm module, which
+// does the same for the TLS of CCM_8 (its tests check that it refuses a
+// server of another CA).
 func TestInsecureSkipVerifyConfined(t *testing.T) {
 	root, err := filepath.Abs("..")
 	if err != nil {
 		t.Fatal(err)
 	}
-	allowed := filepath.Join(root, "security", "tls.go")
+	allowed := map[string]bool{
+		filepath.Join(root, "security", "tls.go"):  true,
+		filepath.Join(root, "tlsccm", "tlsccm.go"): true,
+	}
 	var found []string
 	err = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -454,7 +459,7 @@ func TestInsecureSkipVerifyConfined(t *testing.T) {
 			}
 			return nil
 		}
-		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") || path == allowed {
+		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") || allowed[path] {
 			return nil
 		}
 		b, err := os.ReadFile(path)
@@ -470,7 +475,7 @@ func TestInsecureSkipVerifyConfined(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(found) > 0 {
-		t.Errorf("InsecureSkipVerify outside security/tls.go: %v", found)
+		t.Errorf("InsecureSkipVerify outside security/tls.go and tlsccm/tlsccm.go: %v", found)
 	}
 }
 

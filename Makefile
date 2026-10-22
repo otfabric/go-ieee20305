@@ -4,7 +4,7 @@
 
 .DEFAULT_GOAL := help
 
-.PHONY: help all build fmt fmt-check lint lint-ci vet vuln test coverage cover fuzz check clean interop test-interop e2e nodeps download schemas generate generate-verify generate-check check-updates
+.PHONY: help all build fmt fmt-check lint lint-ci vet vuln test coverage cover fuzz check clean interop test-interop test-tlsccm e2e nodeps download schemas generate generate-verify generate-check check-updates
 help: ## This help
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z0-9_-]+:.*?## / {printf "\033[36m%-30s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
@@ -122,7 +122,11 @@ test-interop: ## Run the client against the ieee20305-interop server images, pin
 
 interop: test-interop ## Alias for test-interop
 
-check: fmt fmt-check nodeps generate-verify lint lint-ci vet vuln test coverage-gate ## Run format + generated-code check + lint + vet + vuln + test + coverage gate
+test-tlsccm: ## Vet, lint and test the tlsccm module (CCM_8, Go 1.26.8 and dependencies of its own)
+	@echo "Testing the tlsccm module"
+	@cd tlsccm && go vet ./... && staticcheck ./... && golangci-lint run ./... && govulncheck ./... && go test -count=1 -race ./...
+
+check: fmt fmt-check nodeps generate-verify lint lint-ci vet vuln test coverage-gate test-tlsccm ## Run format + generated-code check + lint + vet + vuln + test + coverage gate + the tlsccm module
 
 # ── Code generation ──────────────────────────────────────────────────────────
 
