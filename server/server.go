@@ -88,6 +88,19 @@ type Config struct {
 	// PollRate is the pollRate of DeviceCapability, in seconds; 900 when
 	// zero.
 	PollRate uint32
+	// NotificationClient sends the notifications of subscriptions, with the
+	// certificate of the server as its client certificate. Without one the
+	// server takes no subscriptions.
+	NotificationClient *http.Client
+	// NotificationWorkers bounds the notifications sent at once: 16 when
+	// zero.
+	NotificationWorkers int
+	// NotificationAttempts is the number of attempts to deliver a
+	// notification before the server cancels its subscription, the first
+	// retry after NotificationRetryDelay, doubled after each: 5 and 1s
+	// when zero.
+	NotificationAttempts   int
+	NotificationRetryDelay time.Duration
 	// Hooks override or extend the handling of resources, by WADL resource
 	// ID; they run before the built-in function sets.
 	Hooks map[string]Hooks
@@ -106,6 +119,7 @@ type Server struct {
 	log       *slog.Logger
 	resources map[string]ieee20305.ResourceSpec
 	hooks     map[string]Hooks
+	notifier  *notifier
 
 	mu       sync.Mutex
 	counters map[string]int        // per list or parent: the last id allocated
@@ -139,6 +153,8 @@ func New(cfg Config) (*Server, error) {
 	if s.store == nil {
 		s.store = NewMemStore(s.profile.Clone)
 	}
+	s.notifier = newNotifier(s)
+	s.store = &watchStore{Store: s.store, n: s.notifier}
 	if s.clock == nil {
 		s.clock = time.Now
 	}
@@ -200,15 +216,19 @@ func (s *Server) bootstrap(ctx context.Context) error {
 			return err
 		}
 	}
-	return s.loadDevices(ctx)
+	if err := s.loadDevices(ctx); err != nil {
+		return err
+	}
+	return s.notifier.loadSubscriptions(ctx)
 }
 
-// Close stops what the server runs in the background. The handler answers
-// 503 after Close.
+// Close stops what the server runs in the background, such as the
+// delivery of notifications. The handler answers 503 after Close.
 func (s *Server) Close() error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.closed = true
+	s.mu.Unlock()
+	s.notifier.close()
 	return nil
 }
 
@@ -218,7 +238,8 @@ func (s *Server) isClosed() bool {
 	return s.closed
 }
 
-// Store returns the store of the server.
+// Store returns the store of the server. Changes made through it notify
+// the subscriptions of the resources.
 func (s *Server) Store() Store { return s.store }
 
 type discardHandler struct{}

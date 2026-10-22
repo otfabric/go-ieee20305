@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	ieee20305 "github.com/otfabric/go-ieee20305"
 	examples "github.com/otfabric/go-ieee20305/internal/examples/ieee20305"
@@ -175,7 +176,7 @@ func seedAll(t testing.TB, h *harness, owner string) {
 func TestConformance(t *testing.T) {
 	for _, edition := range []ieee20305.Edition{ieee20305.Edition2023, ieee20305.Edition2018} {
 		t.Run(edition.String(), func(t *testing.T) {
-			h := newHarness(t, server.Config{DefaultEdition: edition}, "dev")
+			h := newHarness(t, server.Config{DefaultEdition: edition, NotificationClient: &http.Client{}, NotificationRetryDelay: time.Millisecond}, "dev")
 			seedAll(t, h, h.lfdi("dev"))
 			// An operator, who may use every method the server supports.
 			op, err := security.ParseLFDI(h.lfdi("dev"))
@@ -195,6 +196,11 @@ func TestConformance(t *testing.T) {
 						v := examples.Element(m.Request, 1)
 						if v == nil {
 							t.Fatalf("%s %s: no example of %s", m.Method, spec.ID, m.Request)
+						}
+						if sub, ok := v.(*ieee20305.Subscription); ok {
+							// A subscription of a resource there is, sent
+							// where no one listens.
+							sub.SubscribedResource, sub.NotificationURI, sub.Encoding = "/edev", "https://127.0.0.1:1/ntfy", 0
 						}
 						if ed, ok := v.(*ieee20305.EndDevice); ok {
 							// The sFDI of an EndDevice is that of its lFDI.

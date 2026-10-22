@@ -157,6 +157,14 @@ func (s *Server) device(lfdi string) deviceInfo {
 	return s.devices[lfdi]
 }
 
+// knownDevice returns what the server knows of the device lfdi.
+func (s *Server) knownDevice(lfdi string) (deviceInfo, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	d, ok := s.devices[lfdi]
+	return d, ok
+}
+
 func (s *Server) setDevice(lfdi security.LFDI, d deviceInfo) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

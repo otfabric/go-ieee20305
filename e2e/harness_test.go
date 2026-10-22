@@ -6,6 +6,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/tls"
 	"crypto/x509"
+	"net/http"
 	"net/http/httptest"
 	"testing"
 
@@ -47,11 +48,21 @@ type env struct {
 	pki *pki
 	srv *server.Server
 	url string
+	// clients are the HTTP clients of the clients of the server.
+	clients []*http.Client
 }
 
 func newEnv(t testing.TB, cfg server.Config) *env {
 	t.Helper()
-	p := newPKI(t)
+	return newEnvPKI(t, newPKI(t), cfg)
+}
+
+func newEnvPKI(t testing.TB, p *pki, cfg server.Config) *env {
+	t.Helper()
+	if cfg.NotificationClient == nil {
+		// The server notifies with a certificate of its own, as a client.
+		cfg.NotificationClient = client.NewHTTPClient(p.device(t, "server notifications"), p.roots)
+	}
 	srv, err := server.New(cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -73,9 +84,26 @@ func newEnv(t testing.TB, cfg server.Config) *env {
 // client returns a client of the server with the certificate of device.
 func (e *env) client(t testing.TB, device tls.Certificate, codec client.Codec) *client.Client {
 	t.Helper()
-	c, err := client.New(client.Config{Server: e.url, HTTPClient: client.NewHTTPClient(device, e.pki.roots), Codec: codec})
+	hc := client.NewHTTPClient(device, e.pki.roots)
+	e.clients = append(e.clients, hc)
+	c, err := client.New(client.Config{Server: e.url, HTTPClient: hc, Codec: codec})
 	if err != nil {
 		t.Fatal(err)
 	}
 	return c
+}
+
+// listen serves h over TLS with client certificates, as a device serves its
+// NotificationHandler, and returns its URL.
+func (e *env) listen(t testing.TB, h http.Handler) string {
+	t.Helper()
+	cert, key, err := security.TestServerCert(e.pki.ca, e.pki.key, []string{"127.0.0.1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewUnstartedServer(h)
+	ts.TLS = security.ServerTLSConfig(tls.Certificate{Certificate: [][]byte{cert.Raw}, PrivateKey: key, Leaf: cert}, e.pki.roots)
+	ts.StartTLS()
+	t.Cleanup(ts.Close)
+	return ts.URL
 }

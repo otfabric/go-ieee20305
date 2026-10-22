@@ -15,4 +15,12 @@
 // the EndDevice of a device with its resources. With
 // Config.InBandRegistration, an unknown device registers itself by posting
 // its EndDevice, and Admin.Register registers it later.
+//
+// With Config.NotificationClient, devices subscribe to resources and lists:
+// every change made through the server, Admin or Store marks the
+// subscriptions of the resource, and a worker per subscription posts the
+// resource as it is then. Bursts of changes coalesce into the latest state,
+// which arrives at least once and never before an older one. Delivery is
+// retried with backoff, and the subscription cancelled when it keeps
+// failing.
 package server
