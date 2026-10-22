@@ -105,9 +105,16 @@ cover: coverage ## Open coverage report in browser
 
 # Duration each fuzz target runs. Override with FUZZTIME=... (e.g. FUZZTIME=5m).
 FUZZTIME ?= 30s
+# The fuzz targets, as <package>:<target>.
+FUZZ_TARGETS := ./server:FuzzHandler
+
 fuzz: ## Run the fuzz targets for FUZZTIME each (default 30s)
 	@echo "Fuzzing (FUZZTIME=$(FUZZTIME))"
-	@echo "No fuzz targets defined yet"
+	@for t in $(FUZZ_TARGETS); do \
+		pkg=$${t%%:*}; name=$${t##*:}; \
+		echo "$$pkg $$name"; \
+		go test -run '^$$' -fuzz "^$$name$$" -fuzztime $(FUZZTIME) "$$pkg" || exit 1; \
+	done
 
 test-interop: ## Run the client against the ieee20305-interop server images, pinned in interop/images.go (needs Docker)
 	@echo "Running interop tests"
