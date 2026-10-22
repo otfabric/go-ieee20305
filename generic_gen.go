@@ -7957,6 +7957,8 @@ func (v *DERCurveList) SetListItems(items []any) error {
 			out = append(out, *x)
 		case DERCurve:
 			out = append(out, x)
+		case *DERCurveControlType:
+			out = append(out, x.DERCurve)
 		default:
 			return fmt.Errorf("item %d of DERCurveList is a %T, not a DERCurve", i, it)
 		}
@@ -9166,6 +9168,18 @@ func (v *ResponseList) SetListItems(items []any) error {
 			out = append(out, *x)
 		case Response:
 			out = append(out, x)
+		case *DERControlResponse:
+			out = append(out, x.Response)
+		case *DefaultDERControlResponse:
+			out = append(out, x.Response)
+		case *DrResponse:
+			out = append(out, x.Response)
+		case *FlowReservationResponseResponse:
+			out = append(out, x.Response)
+		case *PriceResponse:
+			out = append(out, x.Response)
+		case *TextResponse:
+			out = append(out, x.Response)
 		default:
 			return fmt.Errorf("item %d of ResponseList is a %T, not a Response", i, it)
 		}

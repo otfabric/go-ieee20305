@@ -288,6 +288,13 @@ func TestResponseDeduplication(t *testing.T) {
 	if again, err := c.Post(ctx, d.responses, r); err != nil || again != first {
 		t.Errorf("again: %q, %v", again, err)
 	}
+	// The list holds the DERControlResponse as a Response.
+	var list ieee20305.ResponseList
+	if err := c.GetList(ctx, d.responses, client0(), &list); err != nil || len(list.Response) != 1 {
+		t.Errorf("the ResponseList: %+v, %v", list.Response, err)
+	} else if *list.Response[0].Status != st {
+		t.Errorf("status %d in the list, want %d", *list.Response[0].Status, st)
+	}
 	other := security.CertificateLFDI(d.env.pki.device(t, "device-2").Leaf)
 	r.EndDeviceLFDI = ieee20305.HexBinary160(other[:])
 	if _, err := c.Post(ctx, d.responses, r); err == nil {

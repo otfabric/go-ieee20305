@@ -5,6 +5,27 @@ tag, GitHub release). The section of the version below, up to the `---` that
 ends it, is the release's notes. Before v1.0.0 a minor release may change the
 API.
 
+## v0.5.1
+
+**Date:** 2026-10-23  
+**Previous release:** v0.5.0
+
+### Summary
+
+A fix of the server, found by ieee20305ctl: a device that read a
+ResponseList it had answered got 500.
+
+### Fixed
+
+- **Lists of derived items** — the generated `SetListItems` of a list takes
+  the types derived from its item type, by the base they embed: a
+  ResponseList holds the DERControlResponses, DrResponses, PriceResponses
+  and TextResponses devices post (as Responses), and a DERCurveList its
+  DERCurveControlTypes. The server answered every GET of such a list with
+  500. Fixed in the generator; `e2e` reads a ResponseList after a Response.
+
+---
+
 ## v0.5.0
 
 **Date:** 2026-10-23  

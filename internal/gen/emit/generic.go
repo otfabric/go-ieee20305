@@ -308,6 +308,12 @@ func (g *gen) listMethods(b *strings.Builder, q xsd.QName) error {
 	}
 	name, item := GoName(q.Local), localType(f)
 	u32 := g.basePrefix() + "UInt32"
+	// A list holds the types derived from its item type too, by the base
+	// they embed: a ResponseList the DERControlResponses devices post.
+	var derived strings.Builder
+	for _, d := range g.derivedTypes(f.typ) {
+		fmt.Fprintf(&derived, "\t\tcase *%[1]s:\n\t\t\tout = append(out, x.%[2]s)\n", GoName(d.Local), GoName(f.typ.Local))
+	}
 	fmt.Fprintf(b, `// ListItems returns pointers to the items of the list.
 func (v *%[1]s) ListItems() []any {
 	out := make([]any, len(v.%[2]s))
@@ -327,7 +333,7 @@ func (v *%[1]s) SetListItems(items []any) error {
 			out = append(out, *x)
 		case %[3]s:
 			out = append(out, x)
-		default:
+%[6]s		default:
 			return fmt.Errorf("item %%d of %[1]s is a %%T, not a %[3]s", i, it)
 		}
 	}
@@ -347,8 +353,21 @@ func (v *%[1]s) SetListCounts(all, results uint32) {
 	v.Results = %[5]s(results)
 }
 
-`, name, f.goName, item, f.xmlName, u32)
+`, name, f.goName, item, f.xmlName, u32, derived.String())
 	return nil
+}
+
+// derivedTypes returns the complex types emitted in this package that
+// derive from q, other than q, in name order.
+func (g *gen) derivedTypes(q xsd.QName) []xsd.QName {
+	var out []xsd.QName
+	for t := range g.set.ComplexTypes {
+		if t != q && g.owned[t] && t.Local != q.Local && g.isStruct(t) && g.derivesFrom(t, q.Local) {
+			out = append(out, t)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Local < out[j].Local })
+	return out
 }
 
 // derivations emits the base of every struct type and the type of every
