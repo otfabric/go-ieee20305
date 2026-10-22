@@ -6,7 +6,7 @@ notes. Before v1.0.0 a minor release may change the API.
 
 ## v0.2.0
 
-**Date:** unreleased
+**Date:** 2026-10-22
 **Previous release:** v0.1.0
 
 ## Summary
