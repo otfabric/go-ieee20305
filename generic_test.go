@@ -77,3 +77,18 @@ func TestCloneDoesNotAlias(t *testing.T) {
 		t.Error("CloneExtensions")
 	}
 }
+
+func TestHref(t *testing.T) {
+	var ed ieee20305.EndDevice
+	if ed.GetHref() != "" {
+		t.Error("an href without one")
+	}
+	ed.SetHref("/edev/1")
+	var h ieee20305.Hrefer = &ed
+	if h.GetHref() != "/edev/1" || *ed.Href != "/edev/1" {
+		t.Errorf("GetHref = %q", h.GetHref())
+	}
+	if (*ieee20305.Resource)(nil).GetHref() != "" {
+		t.Error("GetHref of nil")
+	}
+}

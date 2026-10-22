@@ -177,6 +177,10 @@ func fieldInt(v any, name string) int64 {
 
 // setHref sets the href of a document (the attribute of Resource).
 func setHref(v any, href string) {
+	if h, ok := v.(ieee20305.Hrefer); ok {
+		h.SetHref(href)
+		return
+	}
 	rv := reflect.ValueOf(v)
 	if rv.Kind() != reflect.Pointer || rv.IsNil() {
 		return
