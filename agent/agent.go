@@ -180,24 +180,10 @@ func (a *Agent) State() State {
 // server has not registered the device yet, and client.ErrPINMismatch
 // when the PIN is not the device's.
 func (a *Agent) Start(ctx context.Context) error {
-	dc, err := a.c.DeviceCapability(ctx)
+	ed, err := a.endDevice(ctx)
 	if err != nil {
 		return err
 	}
-	ts, err := a.c.Time(ctx)
-	if err != nil {
-		return err
-	}
-	if dc.EndDeviceListLink == nil {
-		return fmt.Errorf("%w: the DeviceCapability has no EndDeviceListLink", ieee20305.ErrProtocol)
-	}
-	ed, _, err := a.c.Register(ctx, dc.EndDeviceListLink.Href, a.cfg.Identity)
-	if err != nil {
-		return err
-	}
-	a.mu.Lock()
-	a.state.DeviceCapability, a.state.Time, a.state.EndDevice = dc, ts, ed
-	a.mu.Unlock()
 	reg, err := a.c.Registration(ctx, ed)
 	if err != nil {
 		return err
@@ -216,6 +202,47 @@ func (a *Agent) Start(ctx context.Context) error {
 		}
 	}
 	return a.poll(ctx)
+}
+
+// endDevice returns the device's EndDevice: after DeviceCapability, the
+// server's time and the registration of the EndDevice, or, when the agent
+// has one and waits for the server to register the device, the EndDevice
+// read again, so that waiting costs the server one request per poll.
+func (a *Agent) endDevice(ctx context.Context) (*ieee20305.EndDevice, error) {
+	st := a.State()
+	if st.EndDevice != nil && st.Registration == nil && st.EndDevice.GetHref() != "" {
+		var ed ieee20305.EndDevice
+		err := a.c.Get(ctx, st.EndDevice.GetHref(), &ed)
+		if err == nil {
+			a.mu.Lock()
+			a.state.EndDevice = &ed
+			a.mu.Unlock()
+			return &ed, nil
+		}
+		if !isNotFound(err) {
+			return nil, err
+		}
+		// The EndDevice is gone: start over.
+	}
+	dc, err := a.c.DeviceCapability(ctx)
+	if err != nil {
+		return nil, err
+	}
+	ts, err := a.c.Time(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if dc.EndDeviceListLink == nil {
+		return nil, fmt.Errorf("%w: the DeviceCapability has no EndDeviceListLink", ieee20305.ErrProtocol)
+	}
+	ed, _, err := a.c.Register(ctx, dc.EndDeviceListLink.Href, a.cfg.Identity)
+	if err != nil {
+		return nil, err
+	}
+	a.mu.Lock()
+	a.state.DeviceCapability, a.state.Time, a.state.EndDevice = dc, ts, ed
+	a.mu.Unlock()
+	return ed, nil
 }
 
 // poll reads the device's FunctionSetAssignments and hands them to

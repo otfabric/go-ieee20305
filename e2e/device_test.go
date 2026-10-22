@@ -231,3 +231,24 @@ func TestAgentConfig(t *testing.T) {
 		t.Errorf("Start without EndDeviceList: %v", err)
 	}
 }
+
+// An agent that waits for registration reads its EndDevice again; when the
+// operator removed it, the agent registers anew.
+func TestAgentEndDeviceRemoved(t *testing.T) {
+	env := newEnv(t, server.Config{InBandRegistration: true})
+	a, lfdi := newAgent(t, env, "device-1", agent.Config{})
+	run(t, a)
+	admin := env.srv.Admin()
+	eventually(t, "the EndDevice", func() bool { return admin.EndDevice(lfdi) == "/edev/1" })
+	if err := admin.RemoveDevice(context.Background(), lfdi); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, "a new EndDevice", func() bool { return admin.EndDevice(lfdi) == "/edev/2" })
+	if err := admin.Register(context.Background(), lfdi, 0); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, "the registration", func() bool { return a.State().Registration != nil })
+	if a.State().EndDevice.GetHref() != "/edev/2" {
+		t.Errorf("EndDevice %q", a.State().EndDevice.GetHref())
+	}
+}

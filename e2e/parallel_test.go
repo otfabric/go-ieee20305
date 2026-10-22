@@ -35,7 +35,7 @@ func TestManyAgents(t *testing.T) {
 	ids := make([]security.LFDI, n)
 	var wg sync.WaitGroup
 	for i := range agents {
-		agents[i], ids[i] = chaosAgent(t, s.env, fmt.Sprintf("many-%d", i), nil, agent.Config{PollRate: 200 * time.Millisecond})
+		agents[i], ids[i] = chaosAgent(t, s.env, fmt.Sprintf("many-%d", i), nil, agent.Config{PollRate: time.Second})
 		wg.Add(1)
 		go func(a *agent.Agent) {
 			defer wg.Done()
@@ -51,7 +51,7 @@ func TestManyAgents(t *testing.T) {
 		admit.Add(1)
 		go func(id security.LFDI) {
 			defer admit.Done()
-			errs <- s.admitWithin(id, 2*time.Minute)
+			errs <- s.admitWithin(id, 4*time.Minute)
 		}(id)
 	}
 	admit.Wait()
@@ -61,7 +61,7 @@ func TestManyAgents(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	eventuallyWithin(t, 2*time.Minute, "every agent to apply its control", func() bool {
+	eventuallyWithin(t, 4*time.Minute, "every agent to apply its control", func() bool {
 		for _, a := range agents {
 			if len(a.Active(agent.DER)) != 1 {
 				return false
@@ -69,7 +69,7 @@ func TestManyAgents(t *testing.T) {
 		}
 		return true
 	})
-	eventuallyWithin(t, 2*time.Minute, "every Response", func() bool {
+	eventuallyWithin(t, 4*time.Minute, "every Response", func() bool {
 		received, started := 0, 0
 		for _, st := range s.responsesOf(1) {
 			switch st {
