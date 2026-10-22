@@ -3,19 +3,19 @@
 package interop
 
 // The ieee20305-interop images the suite runs against, pinned by the digests
-// of release v0.1.0 (its manifest.json). The environment variable named
+// of release v0.2.0 (its manifest.json; container contract 0.3). The environment variable named
 // beside each overrides it, for example with a locally built image.
 const (
 	// EnvoyImage is ANU Envoy v2.5.0, an IEEE 2030.5 / CSIP-AUS server.
 	// Override: IEEE20305_INTEROP_ENVOY_IMAGE.
-	EnvoyImage = "ghcr.io/otfabric/ieee20305-interop-envoy@sha256:7c3369535b105c164ef0c19be51fc54e4f98e74ea5871ff88d5629b2426ed04a"
+	EnvoyImage = "ghcr.io/otfabric/ieee20305-interop-envoy@sha256:2dd3587071de81d7b96a7dbf65bf414a06a643a32f5d785b42ba7ebb0cb04d2d"
 	// GridAPPSDImage is the GridAPPS-D server v0.18.0 and client v0.1.0.
 	// Override: IEEE20305_INTEROP_GRIDAPPSD_IMAGE.
-	GridAPPSDImage = "ghcr.io/otfabric/ieee20305-interop-gridappsd@sha256:df21dc9441a64e52c09cd8275a317b8fce3f40597328742b0cae0e66d12ccfee"
+	GridAPPSDImage = "ghcr.io/otfabric/ieee20305-interop-gridappsd@sha256:7b04e6c482df6536d15ba06e17e4c317a68031cabeed54cc03bc5b395f5b8d68"
 	// Py20305Image is the client of py2030_5 v0.16.0.
 	// Override: IEEE20305_INTEROP_PY20305_IMAGE.
-	Py20305Image = "ghcr.io/otfabric/ieee20305-interop-py20305@sha256:0c2258d613331e3e76ab61beafe880c25629997524be108ec6b6b68a33f9954e"
+	Py20305Image = "ghcr.io/otfabric/ieee20305-interop-py20305@sha256:de29e6bd5da56d33199e5e73bc11aa2bd48e4c05c2bacc5c42796e81940045f2"
 	// EPRIImage is the client of the EPRI IEEE 2030.5 client v0.2.11.
 	// Override: IEEE20305_INTEROP_EPRI_IMAGE.
-	EPRIImage = "ghcr.io/otfabric/ieee20305-interop-epri@sha256:8110f679c2e0704004a3747b96fb2eeea5d6d29e20443f21a755ddaff15764d9"
+	EPRIImage = "ghcr.io/otfabric/ieee20305-interop-epri@sha256:f11a38feee6d971d0027bc9b24ca1b3bc4373018c168fa29c3b902b9c322188f"
 )
