@@ -4,10 +4,17 @@ package discovery
 
 import (
 	"errors"
+	"fmt"
 	"net"
 	"net/netip"
 	"sync"
+
+	ieee20305 "github.com/otfabric/go-ieee20305"
 )
+
+// errClosed is the error of the use of something of this package after it
+// was closed: it matches ieee20305.ErrClosed and net.ErrClosed.
+var errClosed = fmt.Errorf("%w: discovery: %w", ieee20305.ErrClosed, net.ErrClosed)
 
 // mDNS group addresses and port (RFC 6762).
 var (
@@ -108,7 +115,7 @@ func (t *multicastTransport) ReadPacket() ([]byte, netip.AddrPort, error) {
 	case p := <-t.packets:
 		return p.data, p.src, nil
 	case <-t.done:
-		return nil, netip.AddrPort{}, net.ErrClosed
+		return nil, netip.AddrPort{}, errClosed
 	}
 }
 
@@ -137,7 +144,7 @@ func (t *multicastTransport) WritePacket(data []byte, dst netip.AddrPort) error 
 		}
 		return errors.Join(errs...)
 	}
-	return errors.New("discovery: no socket for the address family of " + dst.String())
+	return fmt.Errorf("%w: discovery: no socket for the address family of %s", ieee20305.ErrConfiguration, dst)
 }
 
 func (t *multicastTransport) Close() error {

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 )
 
 // Categories of failure reported by an IEEE 2030.5 server. An *Error
@@ -19,6 +20,12 @@ var (
 	ErrUnauthorized = errors.New("ieee20305: unauthorized")
 	ErrForbidden    = errors.New("ieee20305: forbidden")
 	ErrNotFound     = errors.New("ieee20305: not found")
+	// ErrConflict is a 409: the request conflicts with the state of the
+	// resource.
+	ErrConflict = errors.New("ieee20305: conflict")
+	// ErrServer is a 5xx: the server failed. Retryable reports whether
+	// sending the request again may succeed.
+	ErrServer = errors.New("ieee20305: server error")
 )
 
 // Categories of failure that are not an answer from a server.
@@ -40,13 +47,15 @@ var (
 	ErrProtocol = errors.New("ieee20305: protocol error")
 	// ErrClosed is matched by the use of something after it was closed.
 	ErrClosed = errors.New("ieee20305: closed")
+	// ErrUnavailable is matched by a server that cannot be reached or does
+	// not serve now: a refused or reset connection, a host name that does
+	// not resolve, a 503 or a 429. Sending again later may succeed.
+	ErrUnavailable = errors.New("ieee20305: unavailable")
+	// ErrCanceled is matched by a call whose context was canceled.
+	ErrCanceled = errors.New("ieee20305: canceled")
 	// ErrCertificate is matched by a failure in certificate validation,
 	// LFDI/SFDI derivation, or mutual TLS setup.
 	ErrCertificate = errors.New("ieee20305: certificate error")
-	// ErrSchedule is matched by a conflict in event scheduling: an
-	// overlap that cannot be resolved, a primacy conflict, or a
-	// randomization that falls outside allowed bounds.
-	ErrSchedule = errors.New("ieee20305: schedule conflict")
 )
 
 // StatusError is a non-success HTTP response from an IEEE 2030.5 server. The
@@ -60,6 +69,9 @@ type StatusError struct {
 	// Document is the Error document of the response body, when the
 	// server sent one; its ReasonCode says why the request failed.
 	Document *Error
+	// RetryAfter is the delay the server asked for (the Retry-After header
+	// of a 503 or 429), or zero.
+	RetryAfter time.Duration
 }
 
 func (e *StatusError) Error() string {
@@ -86,8 +98,37 @@ func (e *StatusError) Is(target error) bool {
 		return target == ErrForbidden
 	case http.StatusNotFound:
 		return target == ErrNotFound
+	case http.StatusConflict:
+		return target == ErrConflict
+	case http.StatusServiceUnavailable, http.StatusTooManyRequests:
+		return target == ErrUnavailable || (e.StatusCode >= 500 && target == ErrServer)
 	}
-	return false
+	return e.StatusCode >= 500 && target == ErrServer
+}
+
+// Retryable reports whether sending the request of err again may succeed:
+// the server was unavailable, failed (5xx) or did not answer in time. It is
+// false for an answer that sending again cannot change (another 4xx), a
+// response that breaks the protocol, a certificate that does not verify, a
+// configuration error, and a canceled call. The request must be one that is
+// safe to send twice: see the RetryPolicy of the client.
+func Retryable(err error) bool {
+	switch {
+	case err == nil, errors.Is(err, ErrCanceled), errors.Is(err, ErrCertificate),
+		errors.Is(err, ErrConfiguration), errors.Is(err, ErrClosed), errors.Is(err, ErrProtocol):
+		return false
+	}
+	return errors.Is(err, ErrUnavailable) || errors.Is(err, ErrServer) || errors.Is(err, ErrTimeout)
+}
+
+// RetryAfter returns the delay a server asked for in the StatusError of
+// err, or zero.
+func RetryAfter(err error) time.Duration {
+	var se *StatusError
+	if errors.As(err, &se) {
+		return se.RetryAfter
+	}
+	return 0
 }
 
 // ValidationError reports a field that violates the IEEE 2030.5 schema.

@@ -354,12 +354,7 @@ func (s *Server) respond(w http.ResponseWriter, p Principal, status int, doc any
 
 // fail answers with the status of err: an Error document for a 400.
 func (s *Server) fail(w http.ResponseWriter, p Principal, err error) {
-	var he *HTTPError
-	if !errors.As(err, &he) {
-		s.log.Error("request failed", "err", err)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
-		return
-	}
+	he := asHTTPError(err)
 	if he.Status >= 500 {
 		s.log.Error("request failed", "err", err)
 	}
@@ -373,6 +368,37 @@ func (s *Server) fail(w http.ResponseWriter, p Principal, err error) {
 		}
 	}
 	w.WriteHeader(he.Status)
+}
+
+// asHTTPError returns the HTTPError of err: the one in its chain, or the
+// status of the sentinel it matches (a hook may return ErrNotFound,
+// ErrForbidden, ErrInvalid, ErrConflict, ...), or 500.
+func asHTTPError(err error) *HTTPError {
+	var he *HTTPError
+	if errors.As(err, &he) {
+		if he.Status == 0 {
+			c := *he
+			c.Status = http.StatusInternalServerError
+			return &c
+		}
+		return he
+	}
+	status := http.StatusInternalServerError
+	switch {
+	case errors.Is(err, ieee20305.ErrNotFound):
+		status = http.StatusNotFound
+	case errors.Is(err, ieee20305.ErrForbidden):
+		status = http.StatusForbidden
+	case errors.Is(err, ieee20305.ErrUnauthorized):
+		status = http.StatusUnauthorized
+	case errors.Is(err, ieee20305.ErrBadRequest), errors.Is(err, ieee20305.ErrInvalid):
+		status = http.StatusBadRequest
+	case errors.Is(err, ieee20305.ErrConflict):
+		status = http.StatusConflict
+	case errors.Is(err, ieee20305.ErrUnavailable):
+		status = http.StatusServiceUnavailable
+	}
+	return &HTTPError{Status: status, Reason: ReasonInvalidRequest, Err: err}
 }
 
 // isList reports whether a document is a list.

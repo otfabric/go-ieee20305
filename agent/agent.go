@@ -27,6 +27,10 @@ import (
 	"github.com/otfabric/go-ieee20305/schedule"
 )
 
+// ErrNotStarted is matched by a call that needs what Start reads from the
+// server (the EndDevice, DeviceCapability) before the agent has it.
+var ErrNotStarted = errors.New("agent: not started")
+
 // Config configures an Agent.
 type Config struct {
 	// Client talks to the server, with the certificate of the device.
@@ -201,6 +205,9 @@ func (a *Agent) State() State {
 // server has not registered the device yet, and client.ErrPINMismatch
 // when the PIN is not the device's.
 func (a *Agent) Start(ctx context.Context) error {
+	if a.ctx.Err() != nil {
+		return fmt.Errorf("%w: agent", ieee20305.ErrClosed)
+	}
 	ed, err := a.endDevice(ctx)
 	if err != nil {
 		return err
@@ -332,7 +339,7 @@ func (a *Agent) Run(ctx context.Context) error {
 		if err == nil {
 			break
 		}
-		if errors.Is(err, client.ErrPINMismatch) {
+		if errors.Is(err, client.ErrPINMismatch) || errors.Is(err, ieee20305.ErrClosed) {
 			return err
 		}
 		wait := delay
@@ -378,7 +385,10 @@ func (a *Agent) Run(ctx context.Context) error {
 // Log posts a LogEvent of the device to its LogEventList.
 func (a *Agent) Log(ctx context.Context, ev *ieee20305.LogEvent) (string, error) {
 	ed := a.State().EndDevice
-	if ed == nil || ed.LogEventListLink == nil {
+	if ed == nil {
+		return "", ErrNotStarted
+	}
+	if ed.LogEventListLink == nil {
 		return "", fmt.Errorf("%w: the device has no LogEventList", ieee20305.ErrProtocol)
 	}
 	return a.c.Post(ctx, ed.LogEventListLink.Href, ev)
@@ -387,7 +397,10 @@ func (a *Agent) Log(ctx context.Context, ev *ieee20305.LogEvent) (string, error)
 // PutDeviceStatus puts the DeviceStatus of the device.
 func (a *Agent) PutDeviceStatus(ctx context.Context, st *ieee20305.DeviceStatus) error {
 	ed := a.State().EndDevice
-	if ed == nil || ed.DeviceStatusLink == nil {
+	if ed == nil {
+		return ErrNotStarted
+	}
+	if ed.DeviceStatusLink == nil {
 		return fmt.Errorf("%w: the device has no DeviceStatus", ieee20305.ErrProtocol)
 	}
 	return a.c.Put(ctx, ed.DeviceStatusLink.Href, st)
@@ -396,7 +409,10 @@ func (a *Agent) PutDeviceStatus(ctx context.Context, st *ieee20305.DeviceStatus)
 // PutPowerStatus puts the PowerStatus of the device.
 func (a *Agent) PutPowerStatus(ctx context.Context, st *ieee20305.PowerStatus) error {
 	ed := a.State().EndDevice
-	if ed == nil || ed.PowerStatusLink == nil {
+	if ed == nil {
+		return ErrNotStarted
+	}
+	if ed.PowerStatusLink == nil {
 		return fmt.Errorf("%w: the device has no PowerStatus", ieee20305.ErrProtocol)
 	}
 	return a.c.Put(ctx, ed.PowerStatusLink.Href, st)

@@ -4,7 +4,7 @@ package server
 
 import (
 	"context"
-	"errors"
+	"fmt"
 	"sort"
 	"sync"
 	"time"
@@ -12,8 +12,9 @@ import (
 	ieee20305 "github.com/otfabric/go-ieee20305"
 )
 
-// ErrNoNode is returned by a Store for an href it does not hold.
-var ErrNoNode = errors.New("server: no such resource")
+// ErrNoNode is returned by a Store for an href it does not hold. It
+// matches ieee20305.ErrNotFound.
+var ErrNoNode = fmt.Errorf("%w: server: no such resource", ieee20305.ErrNotFound)
 
 // Node is a resource of the server: its href, its WADL resource, its value
 // and who may read it.
@@ -103,7 +104,7 @@ func (s *memStore) Get(_ context.Context, href string) (*Node, error) {
 
 func (s *memStore) Put(_ context.Context, n *Node) error {
 	if n == nil || n.Href == "" {
-		return errors.New("server: a node needs an href")
+		return fmt.Errorf("%w: server: a node needs an href", ieee20305.ErrInvalid)
 	}
 	c := copyNode(n, s.clone)
 	s.mu.Lock()

@@ -122,7 +122,7 @@ func (c *Client) Registration(ctx context.Context, ed *ieee20305.EndDevice) (*ie
 // matches ErrPINMismatch.
 func CheckPIN(r *ieee20305.Registration, pin uint32) error {
 	if uint32(r.PIN) != pin {
-		return fmt.Errorf("%w: the server has %d", ErrPINMismatch, r.PIN)
+		return ErrPINMismatch
 	}
 	return nil
 }

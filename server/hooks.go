@@ -85,6 +85,13 @@ func (e *HTTPError) Error() string {
 
 func (e *HTTPError) Unwrap() error { return e.Err }
 
+// Is matches the sentinel of package ieee20305 for its status, as a
+// StatusError of a client does: ErrNotFound for a 404, ErrServer for a
+// 5xx, and so on.
+func (e *HTTPError) Is(target error) bool {
+	return (&ieee20305.StatusError{StatusCode: e.Status}).Is(target)
+}
+
 func httpError(status int, format string, a ...any) *HTTPError {
 	return &HTTPError{Status: status, Err: fmt.Errorf(format, a...)}
 }

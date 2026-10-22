@@ -16,6 +16,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	ieee20305 "github.com/otfabric/go-ieee20305"
@@ -106,7 +107,7 @@ func New(cfg Config) (*Client, error) {
 			return next(req, via)
 		}
 		if len(via) >= 10 {
-			return errors.New("stopped after 10 redirects")
+			return fmt.Errorf("%w: stopped after 10 redirects", ieee20305.ErrProtocol)
 		}
 		return nil
 	}
@@ -285,13 +286,13 @@ func (c *Client) do(ctx context.Context, method, href string, q url.Values, body
 	if body != nil {
 		data, err := c.codec.Marshal(body)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, fmt.Errorf("%w: %s %s: %w", ieee20305.ErrInvalid, method, u.Path, err)
 		}
 		reader = bytes.NewReader(data)
 	}
 	req, err := http.NewRequestWithContext(ctx, method, u.String(), reader)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("%w: %s %s: %w", ieee20305.ErrInvalid, method, u.Path, err)
 	}
 	req.Header.Set("Accept", MediaType)
 	if body != nil {
@@ -313,23 +314,86 @@ func (c *Client) do(ctx context.Context, method, href string, q url.Values, body
 		return nil, nil, fmt.Errorf("%w: %s %s: response larger than %d bytes", ieee20305.ErrProtocol, method, u.Path, c.maxBytes)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		se := &ieee20305.StatusError{Method: method, Path: u.Path, StatusCode: resp.StatusCode}
-		var doc ieee20305.Error
-		if len(data) > 0 && ieee20305.Unmarshal(data, &doc) == nil {
-			se.Document = &doc
+		se := &ieee20305.StatusError{Method: method, Path: u.Path, StatusCode: resp.StatusCode,
+			RetryAfter: retryAfter(resp.Header.Get("Retry-After"), time.Now())}
+		if len(data) > 0 {
+			if v, err := c.codec.Decode(data); err == nil {
+				if doc, ok := v.(*ieee20305.Error); ok {
+					se.Document = doc
+				}
+			}
 		}
 		return nil, nil, se
 	}
 	return resp, data, nil
 }
 
+// transportError classifies the failure of a request that got no answer,
+// keeping err in the chain (errors.As finds a *tls.CertificateVerificationError,
+// a *net.OpError, ...):
+//
+//   - a canceled context: ErrCanceled;
+//   - a deadline or a network timeout: ErrTimeout;
+//   - a certificate that does not verify, either way: ErrCertificate;
+//   - a connection refused or reset, a host that does not resolve:
+//     ErrUnavailable;
+//   - a redirect or an answer the client refused: ErrProtocol.
 func transportError(ctx context.Context, method string, u *url.URL, err error) error {
-	var ne net.Error
-	if errors.Is(ctx.Err(), context.DeadlineExceeded) || errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &ne) && ne.Timeout()) {
-		return fmt.Errorf("%w: %s %s: %v", ieee20305.ErrTimeout, method, u.Path, err)
-	}
-	if errors.Is(err, ieee20305.ErrProtocol) {
+	wrap := func(kind error) error { return fmt.Errorf("%w: %s %s: %w", kind, method, u.Path, err) }
+	var (
+		ne        net.Error
+		dnsErr    *net.DNSError
+		opErr     *net.OpError
+		verifyErr *tls.CertificateVerificationError
+		alert     tls.AlertError
+		unknownCA x509.UnknownAuthorityError
+		invalid   x509.CertificateInvalidError
+		hostname  x509.HostnameError
+	)
+	switch {
+	case errors.Is(err, ieee20305.ErrProtocol), errors.Is(err, ieee20305.ErrCertificate):
 		return err
+	case errors.Is(ctx.Err(), context.Canceled) || errors.Is(err, context.Canceled):
+		return wrap(ieee20305.ErrCanceled)
+	case errors.Is(ctx.Err(), context.DeadlineExceeded) || errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &ne) && ne.Timeout()):
+		return wrap(ieee20305.ErrTimeout)
+	case errors.As(err, &verifyErr), errors.As(err, &unknownCA), errors.As(err, &invalid), errors.As(err, &hostname),
+		errors.As(err, &alert) && (alert == 42 || alert == 43 || alert == 44 || alert == 45 || alert == 46 || alert == 48 || alert == 116):
+		// Alerts: bad_certificate, unsupported_certificate,
+		// certificate_revoked, certificate_expired,
+		// certificate_unknown, unknown_ca, certificate_required.
+		return wrap(ieee20305.ErrCertificate)
+	case errors.As(err, &opErr) && opErr.Op == "remote error" && remoteCertAlert(opErr.Err):
+		// An alert the server sent: crypto/tls reports it as a
+		// *net.OpError of an unexported type.
+		return wrap(ieee20305.ErrCertificate)
+	case errors.As(err, &dnsErr), errors.Is(err, syscall.ECONNREFUSED), errors.Is(err, syscall.ECONNRESET),
+		errors.Is(err, io.EOF), errors.Is(err, io.ErrUnexpectedEOF), errors.As(err, &opErr):
+		return wrap(ieee20305.ErrUnavailable)
 	}
 	return fmt.Errorf("ieee20305: %s %s: %w", method, u.Path, err)
+}
+
+// remoteCertAlert reports whether the alert a peer sent is about a
+// certificate, by its text (the type crypto/tls gives it is unexported).
+func remoteCertAlert(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "certificate") || strings.Contains(msg, "unknown ca")
+}
+
+// retryAfter parses a Retry-After header: seconds, or an HTTP date.
+func retryAfter(v string, now time.Time) time.Duration {
+	if v == "" {
+		return 0
+	}
+	if secs, err := strconv.Atoi(strings.TrimSpace(v)); err == nil && secs > 0 {
+		return time.Duration(secs) * time.Second
+	}
+	if t, err := http.ParseTime(v); err == nil && t.After(now) {
+		return t.Sub(now)
+	}
+	return 0
 }

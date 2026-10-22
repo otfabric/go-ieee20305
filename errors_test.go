@@ -4,9 +4,11 @@ package ieee20305_test
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	ieee20305 "github.com/otfabric/go-ieee20305"
 )
@@ -108,5 +110,46 @@ func TestStandardCodec(t *testing.T) {
 		t.Errorf("Decode: %v", err)
 	} else if _, ok := v.(*ieee20305.Time); !ok {
 		t.Errorf("Decode = %T", v)
+	}
+}
+
+func TestRetryable(t *testing.T) {
+	status := func(code int) error {
+		return &ieee20305.StatusError{Method: http.MethodGet, Path: "/x", StatusCode: code, RetryAfter: 3 * time.Second}
+	}
+	for _, c := range []struct {
+		name  string
+		err   error
+		retry bool
+		is    error
+	}{
+		{"500", status(500), true, ieee20305.ErrServer},
+		{"502", status(502), true, ieee20305.ErrServer},
+		{"503", status(503), true, ieee20305.ErrUnavailable},
+		{"429", status(429), true, ieee20305.ErrUnavailable},
+		{"409", status(409), false, ieee20305.ErrConflict},
+		{"404", status(404), false, ieee20305.ErrNotFound},
+		{"timeout", fmt.Errorf("%w: x", ieee20305.ErrTimeout), true, ieee20305.ErrTimeout},
+		{"unavailable", fmt.Errorf("%w: x", ieee20305.ErrUnavailable), true, ieee20305.ErrUnavailable},
+		{"canceled", fmt.Errorf("%w: %w", ieee20305.ErrCanceled, ieee20305.ErrTimeout), false, ieee20305.ErrCanceled},
+		{"certificate", fmt.Errorf("%w: x", ieee20305.ErrCertificate), false, ieee20305.ErrCertificate},
+		{"protocol", fmt.Errorf("%w: %w", ieee20305.ErrProtocol, ieee20305.ErrServer), false, ieee20305.ErrProtocol},
+		{"configuration", ieee20305.ErrConfiguration, false, ieee20305.ErrConfiguration},
+		{"closed", ieee20305.ErrClosed, false, ieee20305.ErrClosed},
+		{"other", errors.New("x"), false, nil},
+		{"nil", nil, false, nil},
+	} {
+		if got := ieee20305.Retryable(c.err); got != c.retry {
+			t.Errorf("%s: Retryable = %v", c.name, got)
+		}
+		if c.is != nil && !errors.Is(c.err, c.is) {
+			t.Errorf("%s: does not match %v", c.name, c.is)
+		}
+	}
+	if ieee20305.RetryAfter(status(503)) != 3*time.Second || ieee20305.RetryAfter(errors.New("x")) != 0 {
+		t.Error("RetryAfter")
+	}
+	if errors.Is(status(404), ieee20305.ErrServer) || errors.Is(status(500), ieee20305.ErrUnavailable) {
+		t.Error("a status matches the wrong category")
 	}
 }

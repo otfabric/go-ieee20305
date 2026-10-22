@@ -33,6 +33,9 @@ const (
 	NotificationResourceDeleted ieee20305.UInt8 = 4
 )
 
+// errClosed is the error of a change of the store of a closed server.
+var errClosed = fmt.Errorf("%w: server", ieee20305.ErrClosed)
+
 // watchStore is the store of a server: it tells the server of every
 // change, for its events and notifications.
 type watchStore struct {
@@ -41,6 +44,9 @@ type watchStore struct {
 }
 
 func (w *watchStore) Put(ctx context.Context, n *Node) error {
+	if w.s.isClosed() {
+		return errClosed
+	}
 	if err := w.Store.Put(ctx, n); err != nil {
 		return err
 	}
@@ -50,6 +56,9 @@ func (w *watchStore) Put(ctx context.Context, n *Node) error {
 }
 
 func (w *watchStore) Delete(ctx context.Context, href string) error {
+	if w.s.isClosed() {
+		return errClosed
+	}
 	if err := w.Store.Delete(ctx, href); err != nil {
 		return err
 	}
@@ -58,6 +67,9 @@ func (w *watchStore) Delete(ctx context.Context, href string) error {
 }
 
 func (w *watchStore) AddMember(ctx context.Context, list, member string) error {
+	if w.s.isClosed() {
+		return errClosed
+	}
 	if err := w.Store.AddMember(ctx, list, member); err != nil {
 		return err
 	}
@@ -66,6 +78,9 @@ func (w *watchStore) AddMember(ctx context.Context, list, member string) error {
 }
 
 func (w *watchStore) RemoveMember(ctx context.Context, list, member string) error {
+	if w.s.isClosed() {
+		return errClosed
+	}
 	if err := w.Store.RemoveMember(ctx, list, member); err != nil {
 		return err
 	}
@@ -390,7 +405,7 @@ func (n *notifier) post(uri string, body []byte) error {
 	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<16))
 	_ = resp.Body.Close()
 	if resp.StatusCode/100 != 2 {
-		return fmt.Errorf("POST %s: %s", uri, resp.Status)
+		return &ieee20305.StatusError{Method: http.MethodPost, Path: uri, StatusCode: resp.StatusCode}
 	}
 	return nil
 }

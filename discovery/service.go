@@ -3,7 +3,6 @@
 package discovery
 
 import (
-	"errors"
 	"fmt"
 	"net"
 	"net/netip"
@@ -13,6 +12,8 @@ import (
 	"strings"
 
 	"github.com/otfabric/go-ieee20305/internal/dnsmsg"
+
+	ieee20305 "github.com/otfabric/go-ieee20305"
 )
 
 // ServiceType is the DNS-SD service type of IEEE 2030.5 servers.
@@ -45,7 +46,7 @@ const (
 
 // ErrNoDcap is matched by the error of DcapURL when the service has no
 // usable dcap key.
-var ErrNoDcap = errors.New("discovery: no dcap path in the TXT record")
+var ErrNoDcap = fmt.Errorf("%w: discovery: no dcap path in the TXT record", ieee20305.ErrProtocol)
 
 // Service is an IEEE 2030.5 server announced with DNS-SD.
 type Service struct {
@@ -88,19 +89,19 @@ func (s Service) DcapURL() (string, error) {
 	if v, ok := s.TXT[KeyHTTPS]; ok {
 		p, err := strconv.Atoi(v)
 		if err != nil {
-			return "", fmt.Errorf("discovery: https=%q is not a port", v)
+			return "", fmt.Errorf("%w: discovery: https=%q is not a port", ieee20305.ErrProtocol, v)
 		}
 		scheme, port = "https", p
 	}
 	if port < 1 || port > 0xffff {
-		return "", fmt.Errorf("discovery: %s port %d out of range", scheme, port)
+		return "", fmt.Errorf("%w: discovery: %s port %d out of range", ieee20305.ErrProtocol, scheme, port)
 	}
 	host := strings.TrimSuffix(s.Host, ".")
 	if a, ok := preferredAddr(s.Addrs); ok {
 		host = a.String()
 	}
 	if host == "" {
-		return "", errors.New("discovery: service has neither a host nor an address")
+		return "", fmt.Errorf("%w: discovery: service has neither a host nor an address", ieee20305.ErrProtocol)
 	}
 	base := url.URL{Scheme: scheme, Host: net.JoinHostPort(host, strconv.Itoa(port))}
 	return base.ResolveReference(ref).String(), nil

@@ -8,6 +8,7 @@ import (
 	"crypto/x509"
 	"encoding/xml"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -488,5 +489,44 @@ func TestPeerCertificateErrorsAndLogging(t *testing.T) {
 	srv2.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/tm", nil))
 	if w.Code != http.StatusBadGateway || !strings.Contains(log.String(), "upstream") {
 		t.Errorf("a 5xx hook error: %d, log %q", w.Code, log.String())
+	}
+}
+
+// A hook's error answers with the status of its kind: an HTTPError's own,
+// or that of the sentinel of package ieee20305 it matches; 500 otherwise.
+func TestHookErrors(t *testing.T) {
+	var hookErr error
+	h := newHarness(t, server.Config{Hooks: map[string]server.Hooks{
+		"Time": {Get: func(context.Context, *server.Request) (any, error) { return nil, hookErr }},
+	}}, "dev")
+	for _, c := range []struct {
+		err    error
+		status int
+	}{
+		{fmt.Errorf("%w: gone", ieee20305.ErrNotFound), http.StatusNotFound},
+		{server.ErrNoNode, http.StatusNotFound},
+		{ieee20305.ErrForbidden, http.StatusForbidden},
+		{ieee20305.ErrUnauthorized, http.StatusUnauthorized},
+		{&ieee20305.ValidationError{Field: "x", Reason: "y"}, http.StatusBadRequest},
+		{ieee20305.ErrConflict, http.StatusConflict},
+		{ieee20305.ErrUnavailable, http.StatusServiceUnavailable},
+		{&server.HTTPError{Err: errors.New("no status")}, http.StatusInternalServerError},
+		{&server.HTTPError{Status: http.StatusTeapot}, http.StatusTeapot},
+		{errors.New("plain"), http.StatusInternalServerError},
+	} {
+		hookErr = c.err
+		if status, _, _ := h.do(t, "dev", http.MethodGet, "/tm", nil); status != c.status {
+			t.Errorf("%v: %d, want %d", c.err, status, c.status)
+		}
+	}
+	he := &server.HTTPError{Status: http.StatusNotFound}
+	if !errors.Is(he, ieee20305.ErrNotFound) || errors.Is(he, ieee20305.ErrServer) ||
+		!errors.Is(&server.HTTPError{Status: 502}, ieee20305.ErrServer) {
+		t.Error("HTTPError does not match the sentinels of its status")
+	}
+	// Changes after Close fail with ErrClosed.
+	_ = h.srv.Close()
+	if err := h.srv.Admin().Root(context.Background(), "DERProgramList", "/derp", &ieee20305.DERProgramList{}); !errors.Is(err, ieee20305.ErrClosed) {
+		t.Errorf("a change after Close: %v", err)
 	}
 }

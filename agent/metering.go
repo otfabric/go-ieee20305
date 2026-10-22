@@ -15,7 +15,10 @@ import (
 // href. The agent sets its deviceLFDI.
 func (a *Agent) Mirror(ctx context.Context, mup *ieee20305.MirrorUsagePoint) (string, error) {
 	dc := a.State().DeviceCapability
-	if dc == nil || dc.MirrorUsagePointListLink == nil {
+	if dc == nil {
+		return "", ErrNotStarted
+	}
+	if dc.MirrorUsagePointListLink == nil {
 		return "", fmt.Errorf("%w: the server has no MirrorUsagePointList", ieee20305.ErrProtocol)
 	}
 	mup.DeviceLFDI = ieee20305.HexBinary160(a.cfg.Identity.LFDI[:])
@@ -146,7 +149,10 @@ func (a *Agent) pollFiles(ctx context.Context, fsas []*ieee20305.FunctionSetAssi
 // PutFileStatus puts the FileStatus of the device.
 func (a *Agent) PutFileStatus(ctx context.Context, st *ieee20305.FileStatus) error {
 	ed := a.State().EndDevice
-	if ed == nil || ed.FileStatusLink == nil {
+	if ed == nil {
+		return ErrNotStarted
+	}
+	if ed.FileStatusLink == nil {
 		return fmt.Errorf("%w: the device has no FileStatus", ieee20305.ErrProtocol)
 	}
 	return a.c.Put(ctx, ed.FileStatusLink.Href, st)
@@ -157,7 +163,10 @@ func (a *Agent) PutFileStatus(ctx context.Context, st *ieee20305.FileStatus) err
 // of the FlowReservation function set (OnFlowReservation).
 func (a *Agent) RequestFlowReservation(ctx context.Context, req *ieee20305.FlowReservationRequest) (string, error) {
 	ed := a.State().EndDevice
-	if ed == nil || ed.FlowReservationRequestListLink == nil {
+	if ed == nil {
+		return "", ErrNotStarted
+	}
+	if ed.FlowReservationRequestListLink == nil {
 		return "", fmt.Errorf("%w: the device has no FlowReservationRequestList", ieee20305.ErrProtocol)
 	}
 	return a.c.Post(ctx, ed.FlowReservationRequestListLink.Href, req)

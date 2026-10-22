@@ -215,20 +215,35 @@ func TestAgentConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer a.Close()
 	ctx := context.Background()
-	if _, err := a.Log(ctx, examples.LogEvent(0)); !errors.Is(err, ieee20305.ErrProtocol) {
+	if _, err := a.Log(ctx, examples.LogEvent(0)); !errors.Is(err, agent.ErrNotStarted) {
 		t.Errorf("Log before Start: %v", err)
 	}
-	if err := a.PutDeviceStatus(ctx, examples.DeviceStatus(0)); !errors.Is(err, ieee20305.ErrProtocol) {
+	if err := a.PutDeviceStatus(ctx, examples.DeviceStatus(0)); !errors.Is(err, agent.ErrNotStarted) {
 		t.Errorf("PutDeviceStatus before Start: %v", err)
 	}
-	if err := a.PutPowerStatus(ctx, examples.PowerStatus(0)); !errors.Is(err, ieee20305.ErrProtocol) {
+	if err := a.PutPowerStatus(ctx, examples.PowerStatus(0)); !errors.Is(err, agent.ErrNotStarted) {
 		t.Errorf("PutPowerStatus before Start: %v", err)
+	}
+	if err := a.PutFileStatus(ctx, examples.FileStatus(0)); !errors.Is(err, agent.ErrNotStarted) {
+		t.Errorf("PutFileStatus before Start: %v", err)
+	}
+	if _, err := a.RequestFlowReservation(ctx, examples.FlowReservationRequest(0)); !errors.Is(err, agent.ErrNotStarted) {
+		t.Errorf("RequestFlowReservation before Start: %v", err)
+	}
+	if _, err := a.Mirror(ctx, examples.MirrorUsagePoint(0)); !errors.Is(err, agent.ErrNotStarted) {
+		t.Errorf("Mirror before Start: %v", err)
 	}
 	// Without an EndDeviceList the server cannot register the device.
 	if err := a.Start(ctx); !errors.Is(err, ieee20305.ErrProtocol) {
 		t.Errorf("Start without EndDeviceList: %v", err)
+	}
+	a.Close()
+	if err := a.Start(ctx); !errors.Is(err, ieee20305.ErrClosed) {
+		t.Errorf("Start after Close: %v", err)
+	}
+	if err := a.Run(ctx); !errors.Is(err, ieee20305.ErrClosed) {
+		t.Errorf("Run after Close: %v", err)
 	}
 }
 

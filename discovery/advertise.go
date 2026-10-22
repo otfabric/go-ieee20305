@@ -15,6 +15,8 @@ import (
 	"time"
 
 	"github.com/otfabric/go-ieee20305/internal/dnsmsg"
+
+	ieee20305 "github.com/otfabric/go-ieee20305"
 )
 
 // TTLs of the records of an advertisement (RFC 6762, section 10): records
@@ -152,7 +154,7 @@ func (a *Advertisement) send(m *dnsmsg.Message, dst netip.AddrPort) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.closed {
-		return net.ErrClosed
+		return errClosed
 	}
 	return a.sendLocked(m, dst)
 }
@@ -322,10 +324,10 @@ func legacyRecords(rs []dnsmsg.Resource) []dnsmsg.Resource {
 // completeService checks s and fills in its defaults.
 func completeService(s Service, ifi *net.Interface) (Service, error) {
 	if s.Instance == "" {
-		return s, errors.New("discovery: service without an instance name")
+		return s, fmt.Errorf("%w: discovery: service without an instance name", ieee20305.ErrConfiguration)
 	}
 	if s.Port < 1 || s.Port > 0xffff {
-		return s, fmt.Errorf("discovery: service port %d out of range", s.Port)
+		return s, fmt.Errorf("%w: discovery: service port %d out of range", ieee20305.ErrConfiguration, s.Port)
 	}
 	if dcap := s.TXT[KeyDcap]; !strings.HasPrefix(dcap, "/") {
 		return s, fmt.Errorf("%w: dcap=%q", ErrNoDcap, dcap)
@@ -337,7 +339,7 @@ func completeService(s Service, ifi *net.Interface) (Service, error) {
 	if s.Host == "" {
 		h, err := os.Hostname()
 		if err != nil {
-			return s, fmt.Errorf("discovery: host name: %w", err)
+			return s, fmt.Errorf("%w: discovery: host name: %w", ieee20305.ErrConfiguration, err)
 		}
 		s.Host, _, _ = strings.Cut(h, ".")
 	}
@@ -353,7 +355,7 @@ func completeService(s Service, ifi *net.Interface) (Service, error) {
 		s.Addrs = addrs
 	}
 	if len(s.Addrs) == 0 {
-		return s, errors.New("discovery: no address to advertise")
+		return s, fmt.Errorf("%w: discovery: no address to advertise", ieee20305.ErrConfiguration)
 	}
 	subs := make([]string, 0, len(s.Subtypes))
 	for _, sub := range s.Subtypes {
@@ -362,7 +364,7 @@ func completeService(s Service, ifi *net.Interface) (Service, error) {
 	s.Subtypes = subs
 	s.Removed = false
 	if _, err := (&dnsmsg.Message{Answers: records(s)}).Encode(); err != nil {
-		return s, fmt.Errorf("discovery: service cannot be advertised: %w", err)
+		return s, fmt.Errorf("%w: discovery: service cannot be advertised: %w", ieee20305.ErrConfiguration, err)
 	}
 	return s, nil
 }
