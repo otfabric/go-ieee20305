@@ -200,8 +200,8 @@ The behaviour of a device on a client.
 
 ```go
 func New(cfg Config) (*Agent, error)
-func (a *Agent) Run(ctx context.Context) error   // until ctx ends or a permanent error
-func (a *Agent) Start(ctx context.Context) error // register, then poll in the background
+func (a *Agent) Run(ctx context.Context) error   // register, then poll until ctx ends or a permanent error
+func (a *Agent) Start(ctx context.Context) error // only register: DeviceCapability, time, EndDevice, PIN, FSAs
 func (a *Agent) Close()
 ```
 

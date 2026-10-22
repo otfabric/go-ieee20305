@@ -31,8 +31,10 @@
 //	defer a.Close()
 //	return a.Run(ctx)
 //
-// Start does the registration and returns, leaving the polling to run in
-// the background; Active and Events report the events of a function set.
+// Run registers the device (retrying until the server has), then polls
+// until ctx ends. Start does only the registration, for a caller that wants
+// to know it succeeded first; Active and Events report the events of a
+// function set while Run polls.
 // With Config.NotificationURI and NotificationHandler, the agent subscribes
 // to its programs and polls less. Config.Backoff, Logger and Metrics are
 // the plug points of the module (see OBSERVABILITY.md).
