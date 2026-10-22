@@ -4,7 +4,7 @@ go 1.26.8
 
 require (
 	github.com/GRIDAPPSD/ieee-2030_5-core-go v0.27.0
-	github.com/otfabric/go-ieee20305 v0.2.0
+	github.com/otfabric/go-ieee20305 v0.4.0
 )
 
 require (
