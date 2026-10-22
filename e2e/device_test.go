@@ -53,8 +53,14 @@ func run(t *testing.T, a *agent.Agent) <-chan error {
 
 func newAgent(t *testing.T, env *env, name string, cfg agent.Config) (*agent.Agent, security.LFDI) {
 	t.Helper()
+	return newAgentIn(t, env, name, ieee20305.Edition2023, cfg)
+}
+
+// newAgentIn is newAgent with a client of an edition.
+func newAgentIn(t *testing.T, env *env, name string, edition ieee20305.Edition, cfg agent.Config) (*agent.Agent, security.LFDI) {
+	t.Helper()
 	dev := env.pki.device(t, name)
-	cfg.Client = env.client(t, dev, nil)
+	cfg.Client = env.client(t, dev, edition.Codec())
 	cfg.Identity = client.IdentityOf(dev.Leaf)
 	if cfg.PollRate == 0 {
 		cfg.PollRate = 20 * time.Millisecond

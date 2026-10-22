@@ -25,7 +25,8 @@ func (a *Admin) Get(ctx context.Context, href string) (*Node, error) {
 	return a.s.store.Get(ctx, href)
 }
 
-// Put stores n, setting the href of its value.
+// Put stores n, setting the href of its value. The EventStatus of an event
+// stays the server's, unless n cancels it (use CancelEvent).
 func (a *Admin) Put(ctx context.Context, n *Node) error {
 	if _, ok := a.s.resources[n.Resource]; !ok {
 		return fmt.Errorf("%w: %s is no resource", ieee20305.ErrInvalid, n.Resource)
@@ -36,7 +37,7 @@ func (a *Admin) Put(ctx context.Context, n *Node) error {
 	if n.Modified.IsZero() {
 		n.Modified = a.s.clock()
 	}
-	return a.s.store.Put(ctx, n)
+	return a.s.putNode(ctx, n)
 }
 
 // Delete deletes the node at href and those created in it.

@@ -78,3 +78,66 @@ func TestEventRetention(t *testing.T) {
 		t.Errorf("events %v", got)
 	}
 }
+
+// A write of an event from a stale copy keeps the status the server keeps;
+// a cancellation is written.
+func TestEventStatusKept(t *testing.T) {
+	s, err := New(Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s.Close() }()
+	ctx := context.Background()
+	a := s.Admin()
+	if err := a.Root(ctx, "DERProgramList", "/derp", &ieee20305.DERProgramList{}); err != nil {
+		t.Fatal(err)
+	}
+	prog, err := a.Create(ctx, "/derp", &ieee20305.DERProgram{}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := &ieee20305.DERControl{}
+	c.MRID = ieee20305.MRIDType{1}
+	c.Interval = ieee20305.DateTimeInterval{Start: ieee20305.TimeType(time.Now().Unix()), Duration: 3600}
+	href, err := a.Create(ctx, prog+"/derc", c, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	status := func() ieee20305.UInt8 {
+		n, err := a.Get(ctx, href)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return n.Value.(*ieee20305.DERControl).EventStatus.CurrentStatus
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for status() != 1 {
+		if time.Now().After(deadline) {
+			t.Fatal("the control did not become active")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	// The stale copy: status 0.
+	stale := c.Clone()
+	stale.Description = ptrString32("changed")
+	if err := a.Put(ctx, &Node{Href: href, Resource: "DERControl", Value: stale}); err != nil {
+		t.Fatal(err)
+	}
+	n, _ := a.Get(ctx, href)
+	if got := n.Value.(*ieee20305.DERControl); got.EventStatus.CurrentStatus != 1 || got.Description == nil {
+		t.Errorf("after a stale write: status %d, description %v", got.EventStatus.CurrentStatus, got.Description)
+	}
+	cancelled := stale.Clone()
+	cancelled.EventStatus.CurrentStatus = 2
+	if err := a.Put(ctx, &Node{Href: href, Resource: "DERControl", Value: cancelled}); err != nil {
+		t.Fatal(err)
+	}
+	if status() != 2 {
+		t.Errorf("a cancellation by Put: status %d", status())
+	}
+}
+
+func ptrString32(s string) *ieee20305.String32 {
+	v := ieee20305.String32(s)
+	return &v
+}

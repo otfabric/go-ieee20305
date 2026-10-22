@@ -66,7 +66,13 @@ func (e *eventSite) event(t *testing.T, list string, ev *ieee20305.Event, v any,
 }
 
 func TestEventFunctionSets(t *testing.T) {
-	d := &eventSite{derSite: &derSite{statuses: map[string][]uint8{}}}
+	for _, e := range []ieee20305.Edition{ieee20305.Edition2023, ieee20305.Edition2018} {
+		t.Run(e.String(), func(t *testing.T) { eventFunctionSets(t, e) })
+	}
+}
+
+func eventFunctionSets(t *testing.T, edition ieee20305.Edition) {
+	d := &eventSite{derSite: &derSite{statuses: map[string][]uint8{}, edition: edition}}
 	d.env = newEnv(t, server.Config{OnResponse: func(_ context.Context, _ string, r any) {
 		var resp *ieee20305.Response
 		switch r := r.(type) {
@@ -104,13 +110,13 @@ func TestEventFunctionSets(t *testing.T) {
 			return nil
 		}
 	}
-	a, lfdi := newAgent(t, d.env, "device-1", agent.Config{
+	a, lfdi := newAgentIn(t, d.env, "device-1", edition, agent.Config{
 		OnEndDeviceControl:           record(agent.DRLC),
 		OnTextMessage:                record(agent.Messaging),
 		OnTimeTariffInterval:         record(agent.Pricing),
 		OnSupplyInterruptionOverride: record(agent.Prepayment),
 	})
-	if _, err := d.admin.ProvisionDevice(ctx, server.DeviceSpec{LFDI: lfdi, Register: true}); err != nil {
+	if _, err := d.admin.ProvisionDevice(ctx, server.DeviceSpec{LFDI: lfdi, Register: true, Edition: edition}); err != nil {
 		t.Fatal(err)
 	}
 	d.lfdi = lfdi

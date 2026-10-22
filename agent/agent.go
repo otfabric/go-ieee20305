@@ -57,6 +57,14 @@ type Config struct {
 	// OnAssignments is called with the device's FunctionSetAssignments each
 	// time the agent reads them.
 	OnAssignments func(ctx context.Context, fsas []*ieee20305.FunctionSetAssignments) error
+	// NotificationURI makes the agent subscribe to the lists it polls (its
+	// FunctionSetAssignments, programs and events): the https URL of its
+	// NotificationHandler, which the application serves over TLS. The
+	// agent polls as soon as a notification comes, and while subscribed
+	// otherwise every SubscribedPollRate (4 times the poll rate when
+	// zero). A server that takes no subscriptions is polled as usual.
+	NotificationURI    string
+	SubscribedPollRate time.Duration
 	// OnDERControl is called with every transition of the DERControls of
 	// the device's DERPrograms: their receipt, start, end, cancellation
 	// and supersession, as a schedule.Scheduler with randomization and
@@ -124,6 +132,13 @@ type Agent struct {
 	lastDefault []byte
 	files       map[string]bool
 	pending     []pendingResponse
+
+	// watched are the lists the last poll read, which the agent subscribes
+	// to; subs are its subscriptions, by subscribed href.
+	watched     map[string]bool
+	subs        map[string]string
+	noSubscribe bool
+	wake        chan struct{}
 }
 
 // State is what an agent knows of the server.
@@ -161,7 +176,8 @@ func New(cfg Config) (*Agent, error) {
 	if cfg.Backoff.Max <= 0 {
 		cfg.Backoff.Max = 5 * time.Minute
 	}
-	a := &Agent{cfg: cfg, c: cfg.Client, log: cfg.Logger, files: map[string]bool{}}
+	a := &Agent{cfg: cfg, c: cfg.Client, log: cfg.Logger, files: map[string]bool{},
+		subs: map[string]string{}, wake: make(chan struct{}, 1)}
 	a.log = ieee20305.ComponentLogger(cfg.Logger, "agent")
 	if a.cfg.Metrics == nil {
 		a.cfg.Metrics = NopMetrics{}
@@ -285,7 +301,11 @@ func (a *Agent) endDevice(ctx context.Context) (*ieee20305.EndDevice, error) {
 func (a *Agent) poll(ctx context.Context) error {
 	ed := a.State().EndDevice
 	var fsas []*ieee20305.FunctionSetAssignments
+	a.mu.Lock()
+	a.watched = map[string]bool{}
+	a.mu.Unlock()
 	if ed.FunctionSetAssignmentsListLink != nil {
+		a.watch(ed.FunctionSetAssignmentsListLink.Href)
 		err := a.c.Iterate(ctx, ed.FunctionSetAssignmentsListLink.Href, 0, func(it any) error {
 			if f, ok := it.(*ieee20305.FunctionSetAssignments); ok {
 				fsas = append(fsas, f)
@@ -313,6 +333,7 @@ func (a *Agent) poll(ctx context.Context) error {
 	if err := a.pollFiles(ctx, fsas); err != nil {
 		return err
 	}
+	a.subscribe(ctx)
 	a.retryResponses(ctx)
 	return a.pollDefault(ctx)
 }
@@ -373,9 +394,10 @@ func (a *Agent) Run(ctx context.Context) error {
 		defer wg.Done()
 		a.mirror(ctx)
 	}()
+	defer a.unsubscribe()
 	wait, failures := a.pollRate(), 0
 	for {
-		if err := sleep(ctx, wait); err != nil {
+		if err := a.sleepOrWake(ctx, wait); err != nil {
 			return err
 		}
 		start := time.Now()
@@ -395,6 +417,9 @@ func (a *Agent) Run(ctx context.Context) error {
 			continue
 		}
 		wait, failures = a.pollRate(), 0
+		if a.subscribed() {
+			wait = a.subscribedPollRate()
+		}
 	}
 }
 

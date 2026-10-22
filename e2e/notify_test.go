@@ -206,6 +206,9 @@ func TestNotificationStorm(t *testing.T) {
 	base := runtime.NumGoroutine()
 	pki := newPKI(t)
 	notifications := client.NewHTTPClient(pki.device(t, "server notifications"), pki.roots)
+	// All the subscribers are behind one host: keep a connection per
+	// worker, as a server notifying one aggregator would.
+	notifications.Transport.(*http.Transport).MaxIdleConnsPerHost = 32
 	env := newEnvPKI(t, pki, server.Config{NotificationWorkers: 32, NotificationClient: notifications})
 	ctx := context.Background()
 	a := env.srv.Admin()
@@ -258,7 +261,8 @@ func TestNotificationStorm(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	eventuallyWithin(t, 30*time.Second, "every subscription to see the last change", func() bool {
+	// Generous: the race detector, and the other packages tested at once.
+	eventuallyWithin(t, time.Minute, "every subscription to see the last change", func() bool {
 		mu.Lock()
 		defer mu.Unlock()
 		for _, s := range subs {

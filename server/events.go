@@ -80,6 +80,7 @@ func (e *events) run(ch <-chan schedule.Transition) {
 
 // setStatus sets the currentStatus of the event at href, if it differs.
 func (e *events) setStatus(ctx context.Context, href string, to schedule.Status, at time.Time) error {
+	defer e.s.listLocks.lock("node:" + href)()
 	n, err := e.s.store.Get(ctx, href)
 	if err != nil {
 		return err
@@ -91,6 +92,22 @@ func (e *events) setStatus(ctx context.Context, href string, to schedule.Status,
 	st.CurrentStatus, st.DateTime = ieee20305.UInt8(to), ieee20305.TimeType(at.Unix())
 	n.Modified = e.s.clock()
 	return e.s.store.Put(ctx, n)
+}
+
+// putNode stores n as a client or the operator changes it: under the lock
+// of its href, keeping the EventStatus the server keeps of an event, unless
+// n cancels it (the writer's copy of the status may be stale).
+func (s *Server) putNode(ctx context.Context, n *Node) error {
+	defer s.listLocks.lock("node:" + n.Href)()
+	if st := eventStatus(n.Value); st != nil {
+		cancel := st.CurrentStatus == ieee20305.UInt8(schedule.Cancelled) || st.CurrentStatus == ieee20305.UInt8(schedule.CancelledRandom)
+		if old, err := s.store.Get(ctx, n.Href); err == nil && !cancel {
+			if ost := eventStatus(old.Value); ost != nil {
+				*st = *ost
+			}
+		}
+	}
+	return s.store.Put(ctx, n)
 }
 
 // eventStatus returns the EventStatus of an event, or nil.
@@ -161,6 +178,7 @@ func (s *Server) changed(ctx context.Context, href string, node *Node, deleted b
 // when randomized, so that clients end an active event after a random
 // delay.
 func (a *Admin) CancelEvent(ctx context.Context, href string, randomized bool) error {
+	defer a.s.listLocks.lock("node:" + href)()
 	n, err := a.s.store.Get(ctx, href)
 	if err != nil {
 		return err

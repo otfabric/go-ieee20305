@@ -23,6 +23,7 @@ type derSite struct {
 	env       *env
 	admin     *server.Admin
 	lfdi      security.LFDI
+	edition   ieee20305.Edition
 	fsaDerp   string
 	responses string
 
@@ -32,14 +33,21 @@ type derSite struct {
 
 func newDERSite(t *testing.T) *derSite {
 	t.Helper()
+	return newDERSiteWith(t, server.Config{})
+}
+
+// newDERSiteWith is newDERSite with a server of cfg.
+func newDERSiteWith(t *testing.T, cfg server.Config) *derSite {
+	t.Helper()
 	d := &derSite{statuses: map[string][]uint8{}}
-	d.env = newEnv(t, server.Config{OnResponse: func(_ context.Context, _ string, r any) {
+	cfg.OnResponse = func(_ context.Context, _ string, r any) {
 		resp := r.(*ieee20305.DERControlResponse)
 		d.mu.Lock()
 		defer d.mu.Unlock()
 		key := string(resp.Subject)
 		d.statuses[key] = append(d.statuses[key], uint8(*resp.Status))
-	}})
+	}
+	d.env = newEnv(t, cfg)
 	ctx := context.Background()
 	d.admin = d.env.srv.Admin()
 	must := func(err error) {
@@ -62,7 +70,7 @@ func (d *derSite) device(t *testing.T, lfdi security.LFDI) {
 	t.Helper()
 	ctx := context.Background()
 	d.lfdi = lfdi
-	if _, err := d.admin.ProvisionDevice(ctx, server.DeviceSpec{LFDI: lfdi, Register: true}); err != nil {
+	if _, err := d.admin.ProvisionDevice(ctx, server.DeviceSpec{LFDI: lfdi, Register: true, Edition: d.edition}); err != nil {
 		t.Fatal(err)
 	}
 	fsa, err := d.admin.AssignFSA(ctx, lfdi, examples.FunctionSetAssignments(0))
@@ -133,10 +141,17 @@ func has(statuses []uint8, want ...uint8) bool {
 // A DERControl runs its course: the server marks it active, the agent
 // applies it and responds received, started and completed.
 func TestDERControlLifecycle(t *testing.T) {
+	for _, e := range []ieee20305.Edition{ieee20305.Edition2023, ieee20305.Edition2018} {
+		t.Run(e.String(), func(t *testing.T) { derControlLifecycle(t, e) })
+	}
+}
+
+func derControlLifecycle(t *testing.T, edition ieee20305.Edition) {
 	d := newDERSite(t)
+	d.edition = edition
 	var mu sync.Mutex
 	var transitions []schedule.Transition
-	a, lfdi := newAgent(t, d.env, "device-1", agent.Config{OnDERControl: func(_ context.Context, tr schedule.Transition) error {
+	a, lfdi := newAgentIn(t, d.env, "device-1", edition, agent.Config{OnDERControl: func(_ context.Context, tr schedule.Transition) error {
 		mu.Lock()
 		defer mu.Unlock()
 		transitions = append(transitions, tr)

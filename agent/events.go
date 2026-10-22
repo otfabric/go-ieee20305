@@ -231,6 +231,7 @@ func (a *Agent) pollEvents(ctx context.Context, l *eventLoop, fsas []*ieee20305.
 	var best any
 	bestPrimacy := -1
 	collect := func(list string, primacy uint8, program string) error {
+		a.watch(list)
 		return a.c.Iterate(ctx, list, 0, func(it any) error {
 			ev, err := schedule.FromEvent(it, primacy, program+"|"+list)
 			if err != nil {
@@ -258,6 +259,7 @@ func (a *Agent) pollEvents(ctx context.Context, l *eventLoop, fsas []*ieee20305.
 			continue
 		}
 		seen[href] = true
+		a.watch(href)
 		var programs []any
 		if err := a.c.Iterate(ctx, href, 0, func(it any) error {
 			programs = append(programs, it)

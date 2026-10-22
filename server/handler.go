@@ -337,7 +337,7 @@ func (s *Server) replace(ctx context.Context, req *Request) error {
 	setHref(req.Doc, req.Node.Href)
 	n := *req.Node
 	n.Value, n.Modified = req.Doc, s.clock()
-	return s.store.Put(ctx, &n)
+	return s.putNode(ctx, &n)
 }
 
 func (s *Server) post(ctx context.Context, w http.ResponseWriter, req *Request, hooks Hooks) error {
