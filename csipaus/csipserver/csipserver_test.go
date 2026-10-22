@@ -72,7 +72,7 @@ func TestConnectionPoint(t *testing.T) {
 		t.Error("a CSIP-AUS document with the schemaVer of 2023")
 	}
 	cp := ed.ConnectionPointLink.Href
-	if status, _ := do(http.MethodPut, cp, &csipaus.ConnectionPointType{ConnectionPointId: "NMI1"}); status != http.StatusCreated {
+	if status, _ := do(http.MethodPut, cp, &csipaus.ConnectionPointType{ConnectionPointId: "NMI1"}); status != http.StatusNoContent {
 		t.Errorf("PUT: %d", status)
 	}
 	status, data := do(http.MethodGet, cp, nil)

@@ -25,6 +25,7 @@ var itemParts = map[string][]string{
 	"MessagingProgram":      {"TextMessageList", "ActiveTextMessageList"},
 	"TariffProfile":         {"RateComponentList"},
 	"RateComponent":         {"TimeTariffIntervalList", "ActiveTimeTariffIntervalList"},
+	"TimeTariffInterval":    {"ConsumptionTariffIntervalList"},
 	"ResponseSet":           {"ResponseList"},
 	"UsagePoint":            {"MeterReadingList"},
 	"MeterReading":          {"ReadingSetList", "ReadingType"},

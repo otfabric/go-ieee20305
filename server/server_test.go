@@ -280,7 +280,7 @@ func TestSlotAndClose(t *testing.T) {
 	if status, _, _ := h.do(t, "dev", http.MethodGet, "/der/1/dg", nil); status != http.StatusNotFound {
 		t.Errorf("GET of a slot: %d", status)
 	}
-	if status, _, _ := h.do(t, "dev", http.MethodPut, "/der/1/dg", marshal(t, examples.DERSettings(0))); status != http.StatusCreated {
+	if status, _, _ := h.do(t, "dev", http.MethodPut, "/der/1/dg", marshal(t, examples.DERSettings(0))); status != http.StatusNoContent {
 		t.Errorf("PUT into a slot: %d", status)
 	}
 	status, _, data := h.do(t, "dev", http.MethodGet, "/der/1/dg", nil)
@@ -412,6 +412,9 @@ func TestAdminErrors(t *testing.T) {
 	}
 	if err := a.Root(ctx, "EndDeviceList", "/edev3", &ieee20305.EndDeviceList{}); err != nil {
 		t.Fatal(err)
+	}
+	if _, err := a.Create(ctx, "/edev3", &ieee20305.DERProgram{}, ""); !errors.Is(err, ieee20305.ErrInvalid) {
+		t.Errorf("Create of an item the list cannot hold: %v", err)
 	}
 	if err := a.Root(ctx, "Nope", "/x", nil); err == nil {
 		t.Error("Root of an unknown resource")

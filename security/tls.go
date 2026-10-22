@@ -59,3 +59,27 @@ func ServerTLSConfig(server tls.Certificate, clientCAs *x509.CertPool) *tls.Conf
 		}),
 	}
 }
+
+// NotificationTLSConfig returns the TLS configuration with which a server
+// posts notifications to the listeners of devices: the server certificate
+// as its client certificate, and the listener's chain verified against
+// deviceCAs. A device may serve its listener with its device certificate,
+// whose extended key usage is clientAuth only, so the usage is not checked;
+// the listener's name is, when its certificate has DNS names or IP
+// addresses. As in ClientTLSConfig, InsecureSkipVerify only turns off the
+// verification of crypto/tls, which rejects HardwareModuleName names.
+func NotificationTLSConfig(server tls.Certificate, deviceCAs *x509.CertPool) *tls.Config {
+	return &tls.Config{
+		MinVersion:         tls.VersionTLS12,
+		Certificates:       []tls.Certificate{server},
+		RootCAs:            deviceCAs,
+		InsecureSkipVerify: true,
+		VerifyConnection: func(cs tls.ConnectionState) error {
+			return Verify(cs.PeerCertificates, VerifyOptions{
+				Roots:      deviceCAs,
+				ServerName: cs.ServerName,
+				Usage:      x509.ExtKeyUsageAny,
+			})
+		},
+	}
+}

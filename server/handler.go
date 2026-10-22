@@ -307,8 +307,10 @@ func (s *Server) get(ctx context.Context, w http.ResponseWriter, req *Request, h
 	return s.respond(w, req.Principal, http.StatusOK, doc, head)
 }
 
+// put answers 204 also to the first PUT of a resource a device creates
+// (a DERSettings, say): the server already linked it, so the PUT updates
+// it, and clients such as py20305 take only 200 and 204.
 func (s *Server) put(ctx context.Context, w http.ResponseWriter, req *Request, hooks Hooks) error {
-	created := req.Node.Value == nil
 	if hooks.Update != nil {
 		if err := hooks.Update(ctx, req); err != nil {
 			return err
@@ -316,11 +318,7 @@ func (s *Server) put(ctx context.Context, w http.ResponseWriter, req *Request, h
 	} else if err := s.replace(ctx, req); err != nil {
 		return err
 	}
-	if created {
-		w.WriteHeader(http.StatusCreated)
-	} else {
-		w.WriteHeader(http.StatusNoContent)
-	}
+	w.WriteHeader(http.StatusNoContent)
 	return nil
 }
 

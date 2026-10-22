@@ -58,6 +58,13 @@ func (a *Admin) Create(ctx context.Context, list string, v any, owner string) (s
 	if !isList(n.Value) {
 		return "", fmt.Errorf("%w: %s is not a list", ieee20305.ErrInvalid, list)
 	}
+	// An item of a type the list's document cannot hold (a base document in
+	// a list of a profile, say) would fail every GET of the list.
+	if l, ok := a.s.newList(n.Resource).(interface{ SetListItems([]any) error }); ok {
+		if err := l.SetListItems([]any{v}); err != nil {
+			return "", fmt.Errorf("%w: %s: %v", ieee20305.ErrInvalid, list, err)
+		}
+	}
 	return a.s.createItem(ctx, n, v, owner)
 }
 

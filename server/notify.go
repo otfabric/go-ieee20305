@@ -5,6 +5,8 @@ package server
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"io"
@@ -542,4 +544,16 @@ func DefaultNotificationURIAllowed(u *url.URL) bool {
 	}
 	return !ip.IsLoopback() && !ip.IsUnspecified() && !ip.IsLinkLocalUnicast() &&
 		!ip.IsLinkLocalMulticast() && !ip.IsMulticast() && !ip.IsInterfaceLocalMulticast()
+}
+
+// NewNotificationClient returns an http.Client for Config.NotificationClient:
+// it presents the server's certificate, and verifies the listeners of the
+// devices against deviceCAs (security.NotificationTLSConfig). It sets no
+// timeout of its own: the notifier bounds each delivery with its context.
+func NewNotificationClient(server tls.Certificate, deviceCAs *x509.CertPool) *http.Client {
+	return &http.Client{Transport: &http.Transport{
+		TLSClientConfig:     security.NotificationTLSConfig(server, deviceCAs),
+		TLSHandshakeTimeout: 10 * time.Second,
+		MaxIdleConnsPerHost: 8,
+	}, Timeout: time.Minute}
 }

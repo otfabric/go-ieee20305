@@ -5,26 +5,29 @@ package interop
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
 	"encoding/hex"
 	"fmt"
 	"io"
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"testing"
 	"time"
 
 	ieee20305 "github.com/otfabric/go-ieee20305"
+	"github.com/otfabric/go-ieee20305/csipaus"
+	"github.com/otfabric/go-ieee20305/csipaus/csipserver"
 	"github.com/otfabric/go-ieee20305/security"
 	"github.com/otfabric/go-ieee20305/server"
 	"github.com/otfabric/go-ieee20305/tlsccm"
 )
 
 // TestServer runs each client image against the server of this module, for
-// each edition the client speaks, with every operation it declares.
+// each edition the client speaks and each fixture it handles, with every
+// operation it declares.
 func TestServer(t *testing.T) {
 	requireDocker(t)
 	for _, c := range []struct{ name, env, def string }{
@@ -44,26 +47,51 @@ func TestServer(t *testing.T) {
 					t.Logf("SKIP_UNSUPPORTED %s %s client", c.name, version)
 					continue
 				}
-				t.Run(version, func(t *testing.T) {
-					t.Parallel()
-					serverScenario(t, img, version, cl.Operations, caps)
-				})
+				for _, fx := range fixturesOf(cl) {
+					t.Run(version+"/"+fx, func(t *testing.T) {
+						t.Parallel()
+						serverScenario(t, img, version, fx, cl.Operations, caps)
+					})
+				}
 			}
 		})
 	}
 }
 
-// serverScenario serves the server of this module, seeded from the
-// baseline fixture of the client image, and runs the client's operations
-// against it.
-func serverScenario(t *testing.T, img, version string, ops []string, caps capabilities) {
-	f := bakedFixture(t, img, "baseline")
-	p := newPKI(t, f.Device.Serial, "host.docker.internal", "localhost", "127.0.0.1")
+// fixturesOf returns the fixtures a role handles: the baseline when it
+// names none.
+func fixturesOf(r role) []string {
+	if len(r.Fixtures) == 0 {
+		return []string{"baseline"}
+	}
+	return r.Fixtures
+}
+
+// serverScenario serves the server of this module, seeded from the fixture
+// fx of the client image, runs the client's operations against it, and
+// checks what each did on the server.
+func serverScenario(t *testing.T, img, version, fx string, ops []string, caps capabilities) {
+	f := bakedFixture(t, img, fx)
 	edition, err := ieee20305.ParseEdition(version)
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv, err := server.New(server.Config{PeerCertificates: tlsccm.PeerCertificates, DefaultEdition: edition})
+	if f.csipAUS() && edition != ieee20305.Edition2018 {
+		t.Skipf("SKIP_UNSUPPORTED: CSIP-AUS profiles IEEE 2030.5-2018")
+	}
+	p := newPKI(t, f.Device.Serial, "host.docker.internal", "localhost", "127.0.0.1")
+	cfg := server.Config{PeerCertificates: tlsccm.PeerCertificates, DefaultEdition: edition,
+		NotificationClient: server.NewNotificationClient(p.server, p.roots),
+		// The listeners of the clients are published on the loopback
+		// address, which the default refuses.
+		NotificationURIAllowed: func(*url.URL) bool { return true }}
+	if os.Getenv("IEEE20305_INTEROP_TRACE") != "" {
+		cfg.Logger = ieee20305.NewStdLogger(log.New(testWriter{t}, "", 0), false)
+	}
+	if f.csipAUS() {
+		cfg = csipserver.Configure(cfg)
+	}
+	srv, err := server.New(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,27 +103,230 @@ func serverScenario(t *testing.T, img, version string, ops []string, caps capabi
 		// element is optional; the server leaves it out for EPRI.
 		f.Device.DeviceCategory = ""
 	}
-	seed(t, srv, f, security.CertificateLFDI(p.device.cert), edition)
+	lfdi := security.CertificateLFDI(p.device.cert)
+	ed := seed(t, srv, f, lfdi, edition)
+	s := &served{t: t, srv: srv, f: f, ed: ed, lfdi: lfdi}
 	url := serve(t, srv, p, caps.offers(suiteGCM128))
-	for _, op := range []string{"discover", "register", "poll-controls", "report"} {
+	for _, op := range []string{"discover", "register", "poll-controls", "poll-pricing", "report", "respond",
+		"log-event", "put-der", "flow-reservation", "subscribe"} {
 		if !contains(ops, op) {
-			t.Logf("SKIP_UNSUPPORTED %s %s %s", caps.Adapter, version, op)
+			t.Logf("SKIP_UNSUPPORTED %s %s %s %s", caps.Adapter, version, fx, op)
 			continue
 		}
 		t.Run(op, func(t *testing.T) {
-			r := runClient(t, img, op, version, url, p)
+			s.t = t
+			o := runOptions{fixture: fx}
+			var trigger func()
+			if op == "subscribe" {
+				o, trigger = s.subscribe(o)
+			}
+			done := make(chan result, 1)
+			go func() { done <- runClient(t, img, op, version, url, p, o) }()
+			if trigger != nil {
+				trigger()
+			}
+			r := <-done
+			detail := ""
+			if r.Error != nil {
+				detail = r.Error.Code + ": " + r.Error.Detail
+			}
+			if !known(caps.Adapter, "client", version+"/"+fx+"/"+op).expect(t, !r.OK, detail) {
+				return
+			}
 			if !r.OK {
-				detail := ""
-				if r.Error != nil {
-					detail = r.Error.Code + ": " + r.Error.Detail
-				}
 				t.Errorf("%s %s: %s\nrequest %s\nresponse %s", caps.Adapter, op, detail, r.Request, r.Response)
 				if os.Getenv("IEEE20305_INTEROP_TRACE") != "" {
 					t.Logf("output of the client:\n%s", r.Output)
 				}
+				return
 			}
+			s.check(op)
 		})
 	}
+}
+
+// served is the server of a scenario, with what it was seeded with.
+type served struct {
+	t    *testing.T
+	srv  *server.Server
+	f    fixture
+	ed   string
+	lfdi security.LFDI
+}
+
+func (s *served) members(list string) []*server.Node {
+	s.t.Helper()
+	nodes, err := s.srv.Admin().Members(context.Background(), list)
+	if err != nil {
+		s.t.Fatal(err)
+	}
+	return nodes
+}
+
+func (s *served) get(href string) *server.Node {
+	s.t.Helper()
+	n, err := s.srv.Admin().Get(context.Background(), href)
+	if err != nil {
+		s.t.Fatalf("%s: %v", href, err)
+	}
+	return n
+}
+
+func (s *served) endDevice() *ieee20305.EndDevice {
+	s.t.Helper()
+	switch v := s.get(s.ed).Value.(type) {
+	case *csipaus.EndDevice:
+		return &v.EndDevice
+	case *ieee20305.EndDevice:
+		return v
+	default:
+		s.t.Fatalf("the EndDevice is a %T", v)
+		return nil
+	}
+}
+
+// check checks what the operation op of a client did on the server.
+func (s *served) check(op string) {
+	t := s.t
+	t.Helper()
+	switch op {
+	case "report":
+		want := s.f.Report.MirrorUsagePoint.MRID
+		for _, n := range s.members("/mup") {
+			if m, ok := n.Value.(*ieee20305.MirrorUsagePoint); ok && strings.EqualFold(hex.EncodeToString(m.MRID), want) {
+				return
+			}
+		}
+		t.Errorf("no MirrorUsagePoint %s", want)
+	case "respond":
+		for _, rs := range s.members("/rsps") {
+			for _, n := range s.members(rs.Href + "/rsp") {
+				if r, ok := n.Value.(*ieee20305.DERControlResponse); ok && r.Status != nil && *r.Status == 2 {
+					return
+				}
+			}
+		}
+		t.Error("no DERControlResponse with status 2 (event started)")
+	case "log-event":
+		want := s.f.LogEvent
+		for _, n := range s.members(s.endDevice().LogEventListLink.Href) {
+			if l, ok := n.Value.(*ieee20305.LogEvent); ok && uint16(l.LogEventID) == want.LogEventID &&
+				uint8(l.LogEventCode) == want.LogEventCode && uint32(l.LogEventPEN) == want.LogEventPEN {
+				return
+			}
+		}
+		t.Errorf("no LogEvent %d", want.LogEventID)
+	case "put-der":
+		ders := s.members(s.endDevice().DERListLink.Href)
+		if len(ders) == 0 {
+			t.Fatal("no DER")
+		}
+		d := ders[0].Value.(*ieee20305.DER)
+		links := map[string]string{}
+		if d.DERCapabilityLink != nil {
+			links["DERCapability"] = d.DERCapabilityLink.Href
+		}
+		if d.DERSettingsLink != nil {
+			links["DERSettings"] = d.DERSettingsLink.Href
+		}
+		if d.DERStatusLink != nil {
+			links["DERStatus"] = d.DERStatusLink.Href
+		}
+		if d.DERAvailabilityLink != nil {
+			links["DERAvailability"] = d.DERAvailabilityLink.Href
+		}
+		for _, name := range []string{"DERCapability", "DERSettings", "DERStatus", "DERAvailability"} {
+			n, err := s.srv.Admin().Get(context.Background(), links[name])
+			if links[name] == "" || err != nil || n.Value == nil {
+				t.Errorf("the device put no %s: %v", name, err)
+			}
+		}
+		s.checkSettings(d)
+	case "flow-reservation":
+		want := s.f.FlowReservation.MRID
+		for _, n := range s.members(s.endDevice().FlowReservationRequestListLink.Href) {
+			if r, ok := n.Value.(*ieee20305.FlowReservationRequest); ok && strings.EqualFold(hex.EncodeToString(r.MRID), want) {
+				return
+			}
+		}
+		t.Errorf("no FlowReservationRequest %s", want)
+	}
+}
+
+// checkSettings checks the DERSettings a client put against the fixture.
+func (s *served) checkSettings(d *ieee20305.DER) {
+	want := s.f.DER.Settings.SetMaxW
+	if d.DERSettingsLink == nil || want == nil {
+		return
+	}
+	n, err := s.srv.Admin().Get(context.Background(), d.DERSettingsLink.Href)
+	if err != nil {
+		return
+	}
+	var got ieee20305.ActivePower
+	switch v := n.Value.(type) {
+	case *ieee20305.DERSettings:
+		got = v.SetMaxW
+	case *csipaus.DERSettings:
+		got = v.SetMaxW
+	default:
+		s.t.Errorf("DERSettings is a %T", n.Value)
+		return
+	}
+	if int64(got.Value) != want.Value || int8(got.Multiplier) != want.Multiplier {
+		s.t.Errorf("DERSettings setMaxW %d*10^%d, want %d*10^%d", got.Value, got.Multiplier, want.Value, want.Multiplier)
+	}
+}
+
+// subscribe publishes the notification listener of a subscribe run on a
+// port of the loopback address, and returns the options of the run and a
+// trigger: it waits for the subscription, then changes the device's DER
+// programs, so that the server notifies the client.
+func (s *served) subscribe(o runOptions) (runOptions, func()) {
+	t := s.t
+	port := freePort(t)
+	o.docker = append(o.docker, "--publish", fmt.Sprintf("127.0.0.1:%d:8443", port))
+	o.flags = append(o.flags, "--notify-listen", "0.0.0.0:8443",
+		"--notify-host", fmt.Sprintf("127.0.0.1:%d", port), "--timeout-ms", "90000")
+	return o, func() {
+		ctx := context.Background()
+		subs := s.endDevice().SubscriptionListLink.Href
+		deadline := time.Now().Add(2 * time.Minute)
+		for len(s.members(subs)) == 0 {
+			if time.Now().After(deadline) {
+				t.Error("the client created no subscription")
+				return
+			}
+			time.Sleep(200 * time.Millisecond)
+		}
+		// The listener is up before the client subscribes; give the
+		// published port a moment all the same.
+		time.Sleep(time.Second)
+		fsa := s.members(s.endDevice().FunctionSetAssignmentsListLink.Href)[0].Value.(*ieee20305.FunctionSetAssignments)
+		prog := &ieee20305.DERProgram{Primacy: 9}
+		prog.MRID = ieee20305.MRIDType{0x5B, 0x5C}
+		desc := ieee20305.String32("notified")
+		prog.Description = &desc
+		a := s.srv.Admin()
+		href, err := a.Create(ctx, "/derp", prog, "")
+		if err == nil {
+			err = a.AddMember(ctx, fsa.DERProgramListLink.Href, href)
+		}
+		if err != nil {
+			t.Error(err)
+		}
+	}
+}
+
+// freePort returns a TCP port of the loopback address that is free now.
+func freePort(t *testing.T) int {
+	t.Helper()
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = l.Close() }()
+	return l.Addr().(*net.TCPAddr).Port
 }
 
 // serve serves srv on every interface with CCM_8 (and GCM when allowed),
@@ -149,114 +380,10 @@ func (r *recorder) Write(b []byte) (int, error) {
 	return r.ResponseWriter.Write(b)
 }
 
-// seed provisions the device of the fixture on srv, with its PIN, and
-// assigns it the fixture's DER programs with their controls, which start
-// now (plus their start), as a server of the contract does.
-func seed(t *testing.T, srv *server.Server, f fixture, lfdi security.LFDI, edition ieee20305.Edition) {
-	t.Helper()
-	ctx := context.Background()
-	a := srv.Admin()
-	must := func(err error) {
-		t.Helper()
-		if err != nil {
-			t.Fatal(err)
-		}
-	}
-	must(a.Root(ctx, "DERProgramList", "/derp", &ieee20305.DERProgramList{}))
-	must(a.Root(ctx, "MirrorUsagePointList", "/mup", &ieee20305.MirrorUsagePointList{}))
-	tmpl := &ieee20305.EndDevice{}
-	if f.Device.DeviceCategory != "" {
-		cat, err := hex.DecodeString(f.Device.DeviceCategory)
-		must(err)
-		dc := ieee20305.DeviceCategoryType(cat)
-		tmpl.DeviceCategory = &dc
-	}
-	_, err := a.ProvisionDevice(ctx, server.DeviceSpec{LFDI: lfdi, Edition: edition, Register: true, PIN: f.Device.PIN, EndDevice: tmpl})
-	must(err)
-	fsaDoc := &ieee20305.FunctionSetAssignments{MRID: newMRID(t)}
-	desc := ieee20305.String32("interop")
-	fsaDoc.Description = &desc
-	fsa, err := a.AssignFSA(ctx, lfdi, fsaDoc)
-	must(err)
-	must(a.NewList(ctx, "DERProgramList", fsa+"/derp", fsa, "DERProgramListLink", lfdi.String()))
-	now := time.Now()
-	for _, fp := range f.DERPrograms {
-		prog := &ieee20305.DERProgram{Primacy: ieee20305.PrimacyType(fp.Primacy)}
-		prog.MRID = mrid(t, fp.MRID)
-		pd := ieee20305.String32(fp.Description)
-		prog.Description = &pd
-		href, err := a.Create(ctx, "/derp", prog, "")
-		must(err)
-		must(a.AddMember(ctx, fsa+"/derp", href))
-		if dc := fp.DefaultControl; dc != nil {
-			d := &ieee20305.DefaultDERControl{DERControlBase: base(t, dc.Base)}
-			d.MRID = mrid(t, dc.MRID)
-			dd := ieee20305.String32(dc.Description)
-			d.Description = &dd
-			must(a.Put(ctx, &server.Node{Href: href + "/dderc", Resource: "DefaultDERControl", Value: d}))
-		}
-		for _, fc := range fp.Controls {
-			c := &ieee20305.DERControl{DERControlBase: base(t, fc.Base)}
-			c.MRID = mrid(t, fc.MRID)
-			cd := ieee20305.String32(fc.Description)
-			c.Description = &cd
-			c.CreationTime = ieee20305.TimeType(now.Unix())
-			c.Interval = ieee20305.DateTimeInterval{Start: ieee20305.TimeType(now.Unix() + int64(fc.Start)), Duration: ieee20305.UInt32(fc.Duration)}
-			_, err := a.Create(ctx, href+"/derc", c, "")
-			must(err)
-		}
-	}
-}
+// testWriter writes the lines of a log to t.
+type testWriter struct{ t *testing.T }
 
-func mrid(t *testing.T, s string) ieee20305.MRIDType {
-	t.Helper()
-	b, err := hex.DecodeString(strings.TrimSpace(s))
-	if err != nil {
-		t.Fatalf("mRID %q: %v", s, err)
-	}
-	return b
-}
-
-func newMRID(t *testing.T) ieee20305.MRIDType {
-	t.Helper()
-	b := make([]byte, 16)
-	if _, err := rand.Read(b); err != nil {
-		t.Fatal(err)
-	}
-	return b
-}
-
-// base returns the DERControlBase of a fixture's base.
-func base(t *testing.T, m map[string]any) ieee20305.DERControlBase {
-	t.Helper()
-	var b ieee20305.DERControlBase
-	for k, v := range m {
-		switch k {
-		case "opModConnect", "opModEnergize":
-			x, ok := v.(bool)
-			if !ok {
-				t.Fatalf("%s: %v", k, v)
-			}
-			if k == "opModConnect" {
-				b.OpModConnect = &x
-			} else {
-				b.OpModEnergize = &x
-			}
-		case "opModMaxLimW":
-			n, ok := v.(float64)
-			if !ok {
-				t.Fatalf("%s: %v", k, v)
-			}
-			b.OpModMaxLimW = &ieee20305.PerCentControlType{Value: ieee20305.PerCent(n)}
-		case "opModFixedW":
-			n, ok := v.(float64)
-			if !ok {
-				t.Fatalf("%s: %v", k, v)
-			}
-			b.OpModFixedW = &ieee20305.SignedPerCentControlType{Value: ieee20305.SignedPerCent(n)}
-		default:
-			t.Fatalf("a fixture control %s the suite does not know", k)
-		}
-	}
-	return b
+func (w testWriter) Write(b []byte) (int, error) {
+	w.t.Log(strings.TrimSpace(string(b)))
+	return len(b), nil
 }

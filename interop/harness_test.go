@@ -82,6 +82,8 @@ type capabilities struct {
 type role struct {
 	Supported  bool     `json:"supported"`
 	Operations []string `json:"operations"`
+	Fixtures   []string `json:"fixtures"`
+	Calls      []string `json:"calls"`
 }
 
 func capabilitiesOf(t *testing.T, img string) capabilities {
@@ -223,6 +225,11 @@ func newPKI(t *testing.T, serial string, names ...string) *pki {
 	writePEM(t, filepath.Join(cl, "client.crt"), "CERTIFICATE", p.device.cert.Raw)
 	writeKey(t, filepath.Join(cl, "client.key"), p.device.key)
 	writePEM(t, filepath.Join(cl, "ca.crt"), "CERTIFICATE", ca.Raw)
+	// The certificate of the client's notification listener, which the
+	// suite publishes on the loopback address.
+	notifyCert, notifyKey := contractServer(t, ca, caKey, []string{"127.0.0.1", "localhost"})
+	writePEM(t, filepath.Join(cl, "notify.crt"), "CERTIFICATE", notifyCert.Raw)
+	writeKey(t, filepath.Join(cl, "notify.key"), notifyKey)
 	// The containers run as another user: the throwaway material must be
 	// readable by it.
 	err := filepath.Walk(p.dir, func(path string, info os.FileInfo, err error) error {
@@ -262,17 +269,19 @@ func writeKey(t *testing.T, path string, key *ecdsa.PrivateKey) {
 
 // serverContainer is a running ieee20305-interop server container.
 type serverContainer struct {
+	id  string
 	url string // https://127.0.0.1:<port>
 }
 
-// startServer runs img as a server of IEEE 2030.5 version with the TLS
-// material of p, and waits until it is ready.
-func startServer(t *testing.T, img, version string, p *pki) *serverContainer {
+// startServer runs img as a server of IEEE 2030.5 version, seeded with its
+// baked fixture, with the TLS material of p, and waits until it is ready.
+func startServer(t *testing.T, img, version, fixture string, p *pki) *serverContainer {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 	out, err := docker(ctx, "run", "--detach", "--publish", "127.0.0.1::443",
-		"--volume", p.dir+":/tls:ro", img, "server", "--version", version, "--tls-dir", "/tls/server")
+		"--add-host", "host.docker.internal:host-gateway", "--volume", p.dir+":/tls:ro",
+		img, "server", "--version", version, "--tls-dir", "/tls/server", "--fixture", fixturePath(fixture))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -302,7 +311,7 @@ func startServer(t *testing.T, img, version string, p *pki) *serverContainer {
 		t.Fatal(err)
 	}
 	addr := strings.TrimSpace(strings.Split(strings.TrimSpace(port), "\n")[0])
-	return &serverContainer{url: "https://" + addr}
+	return &serverContainer{id: id, url: "https://" + addr}
 }
 
 // transport is how the client of this module connects: crypto/tls (GCM)
@@ -328,6 +337,30 @@ func newClient(t *testing.T, s *serverContainer, p *pki, d device, via transport
 	return c
 }
 
+// call runs a call operation in the server container s, as an operator
+// would, with the payload v.
+func (s *serverContainer) call(t *testing.T, op string, v any) result {
+	t.Helper()
+	payload, err := json.Marshal(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := docker(context.Background(), "exec", s.id, "ieee20305-interop", "call", op, "--payload", string(payload))
+	var r result
+	if jerr := json.Unmarshal([]byte(lastLine(out)), &r); jerr != nil {
+		t.Fatalf("call %s: no result document (%v): %s", op, err, out)
+	}
+	return r
+}
+
+func lastLine(out string) string {
+	line := strings.TrimSpace(out)
+	if i := strings.LastIndexByte(line, '\n'); i >= 0 {
+		line = line[i+1:]
+	}
+	return line
+}
+
 // result is the result document of a one-shot client operation.
 type result struct {
 	Adapter   string `json:"adapter"`
@@ -343,22 +376,33 @@ type result struct {
 	Output string `json:"-"`
 }
 
+// runOptions are the options of a client run: the baked fixture, and more
+// arguments of docker run and of the operation.
+type runOptions struct {
+	fixture string
+	docker  []string
+	flags   []string
+}
+
+// fixturePath is the path of a baked fixture in an image.
+func fixturePath(name string) string { return "/fixtures/" + name + "/fixture.json" }
+
 // runClient runs the one-shot operation op of the client image img against
 // url, as the device of the client/ directory of p, and returns its
 // result.
-func runClient(t *testing.T, img, op, version, url string, p *pki) result {
+func runClient(t *testing.T, img, op, version, url string, p *pki, o runOptions) result {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
-	out, err := docker(ctx, "run", "--rm", "--add-host", "host.docker.internal:host-gateway",
-		"--volume", p.dir+":/tls:ro", img,
-		"client", op, "--version", version, "--url", url, "--tls-dir", "/tls/client")
-	var r result
-	line := strings.TrimSpace(out)
-	if i := strings.LastIndexByte(line, '\n'); i >= 0 {
-		line = line[i+1:]
+	args := append([]string{"run", "--rm", "--add-host", "host.docker.internal:host-gateway",
+		"--volume", p.dir + ":/tls:ro"}, o.docker...)
+	args = append(args, img, "client", op, "--version", version, "--url", url, "--tls-dir", "/tls/client")
+	if o.fixture != "" {
+		args = append(args, "--fixture", fixturePath(o.fixture))
 	}
-	if jerr := json.Unmarshal([]byte(line), &r); jerr != nil {
+	out, err := docker(ctx, append(args, o.flags...)...)
+	var r result
+	if jerr := json.Unmarshal([]byte(lastLine(out)), &r); jerr != nil {
 		t.Fatalf("client %s: no result document (%v): %s", op, err, out)
 	}
 	r.Output = out
@@ -366,59 +410,4 @@ func runClient(t *testing.T, img, op, version, url string, p *pki) result {
 		r.Output += "\n" + err.Error()
 	}
 	return r
-}
-
-// fixture is the part of an ieee20305-interop fixture the suite uses.
-type fixture struct {
-	Device struct {
-		Serial         string `json:"serial"`
-		PIN            uint32 `json:"pin"`
-		DeviceCategory string `json:"deviceCategory"`
-	} `json:"device"`
-	DERPrograms []struct {
-		MRID           string `json:"mRID"`
-		Description    string `json:"description"`
-		Primacy        uint8  `json:"primacy"`
-		DefaultControl *struct {
-			MRID        string         `json:"mRID"`
-			Description string         `json:"description"`
-			Base        map[string]any `json:"base"`
-		} `json:"defaultControl"`
-		Controls []struct {
-			MRID        string         `json:"mRID"`
-			Description string         `json:"description"`
-			Base        map[string]any `json:"base"`
-			Duration    uint32         `json:"duration"`
-			Start       uint32         `json:"start"`
-		} `json:"controls"`
-	} `json:"derPrograms"`
-	Report struct {
-		MirrorUsagePoint struct {
-			MRID                string `json:"mRID"`
-			Description         string `json:"description"`
-			RoleFlags           string `json:"roleFlags"`
-			ServiceCategoryKind uint8  `json:"serviceCategoryKind"`
-			Status              uint8  `json:"status"`
-		} `json:"mirrorUsagePoint"`
-		MeterReadings []struct {
-			MRID        string           `json:"mRID"`
-			Description string           `json:"description"`
-			ReadingType map[string]int64 `json:"readingType"`
-			Value       int64            `json:"value"`
-		} `json:"meterReadings"`
-	} `json:"report"`
-}
-
-// bakedFixture reads the fixture name that img carries.
-func bakedFixture(t *testing.T, img, name string) fixture {
-	t.Helper()
-	out, err := docker(context.Background(), "run", "--rm", img, "print-fixture", name)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var f fixture
-	if err := json.Unmarshal([]byte(out), &f); err != nil {
-		t.Fatalf("fixture %s: %v", name, err)
-	}
-	return f
 }

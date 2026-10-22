@@ -62,7 +62,7 @@ func TestProvisionDevice(t *testing.T) {
 		t.Errorf("DeviceInformation before PUT: %d", status)
 	}
 	di := marshal(t, examples.DeviceInformation(0))
-	if status, _, _ := h.do(t, "dev", http.MethodPut, ed.DeviceInformationLink.Href, di); status != http.StatusCreated {
+	if status, _, _ := h.do(t, "dev", http.MethodPut, ed.DeviceInformationLink.Href, di); status != http.StatusNoContent {
 		t.Errorf("first PUT of DeviceInformation: %d", status)
 	}
 	if status, _, _ := h.do(t, "dev", http.MethodPut, ed.DeviceInformationLink.Href, di); status != http.StatusNoContent {
