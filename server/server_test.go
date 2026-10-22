@@ -195,13 +195,23 @@ func TestAccess(t *testing.T) {
 	if status, _, _ := h.do(t, "a", http.MethodDelete, "/edev/2", nil); status != http.StatusForbidden {
 		t.Errorf("DELETE of a public resource: %d", status)
 	}
-	// A POST to a list creates an item of the device.
-	status, hdr, _ := h.do(t, "b", http.MethodPost, "/edev", marshal(t, examples.EndDevice(0)))
-	if status != http.StatusCreated || hdr.Get("Location") != "/edev/3" {
+	// A POST to a list of every client creates an item of the device; a
+	// device cannot post to other lists of every client.
+	if err := h.srv.Admin().Root(ctx, "MirrorUsagePointList", "/mup", &ieee20305.MirrorUsagePointList{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.srv.Admin().Root(ctx, "DERProgramList", "/derp", &ieee20305.DERProgramList{}); err != nil {
+		t.Fatal(err)
+	}
+	status, hdr, _ := h.do(t, "b", http.MethodPost, "/mup", marshal(t, examples.MirrorUsagePoint(0)))
+	if status != http.StatusCreated || hdr.Get("Location") != "/mup/1" {
 		t.Fatalf("POST: %d %q", status, hdr.Get("Location"))
 	}
-	if status, _, _ := h.do(t, "a", http.MethodGet, "/edev/3", nil); status != http.StatusNotFound {
-		t.Errorf("a device reads another's new EndDevice: %d", status)
+	if status, _, _ := h.do(t, "a", http.MethodGet, "/mup/1", nil); status != http.StatusNotFound {
+		t.Errorf("a device reads another's MirrorUsagePoint: %d", status)
+	}
+	if status, _, _ := h.do(t, "b", http.MethodPost, "/derp", marshal(t, examples.DERProgram(0))); status != http.StatusForbidden {
+		t.Errorf("a device posts a DERProgram: %d", status)
 	}
 }
 

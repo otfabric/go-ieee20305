@@ -77,9 +77,14 @@ type Config struct {
 	// Disable lists, by WADL resource ID, methods the server refuses
 	// although the WADL makes them mandatory or optional.
 	Disable map[string][]string
-	// InBandRegistration lets a device the server was not given register
-	// itself by posting its EndDevice.
+	// InBandRegistration lets a device the server was not given
+	// (Admin.ProvisionDevice) register itself by posting its EndDevice to the
+	// EndDeviceList. The server creates its resources, without a
+	// Registration until Admin.Register.
 	InBandRegistration bool
+	// ClientLists names, by WADL resource ID, lists of every client that
+	// clients may post to, besides MirrorUsagePointList and ResponseList.
+	ClientLists map[string]bool
 	// PollRate is the pollRate of DeviceCapability, in seconds; 900 when
 	// zero.
 	PollRate uint32
@@ -106,13 +111,18 @@ type Server struct {
 	counters map[string]int        // per list or parent: the last id allocated
 	devices  map[string]deviceInfo // by LFDI
 	closed   bool
+
+	// regMu serializes the creation of EndDevices, so that a device that
+	// posts its EndDevice twice at once gets one.
+	regMu sync.Mutex
 }
 
 // deviceInfo is what the server knows of a device by its LFDI.
 type deviceInfo struct {
 	EndDevice string // href
 	Edition   ieee20305.Edition
-	PIN       uint32
+	Role      Role
+	ManagedBy string // the LFDI of its aggregator
 }
 
 // New returns a Server for cfg.
@@ -172,7 +182,7 @@ func New(cfg Config) (*Server, error) {
 }
 
 // bootstrap creates what every server has: DeviceCapability at /dcap and
-// Time at /tm.
+// Time at /tm, and the EndDeviceList with in-band registration.
 func (s *Server) bootstrap(ctx context.Context) error {
 	if _, err := s.store.Get(ctx, "/dcap"); errors.Is(err, ErrNoNode) {
 		dc := &ieee20305.DeviceCapability{}
@@ -185,7 +195,12 @@ func (s *Server) bootstrap(ctx context.Context) error {
 			return err
 		}
 	}
-	return nil
+	if _, err := s.store.Get(ctx, EndDeviceListHref); errors.Is(err, ErrNoNode) && s.cfg.InBandRegistration {
+		if err := s.Admin().Root(ctx, "EndDeviceList", EndDeviceListHref, &ieee20305.EndDeviceList{}); err != nil {
+			return err
+		}
+	}
+	return s.loadDevices(ctx)
 }
 
 // Close stops what the server runs in the background. The handler answers

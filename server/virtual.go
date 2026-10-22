@@ -14,6 +14,9 @@ func builtinHooks(s *Server) map[string]Hooks {
 	return map[string]Hooks{
 		"DeviceCapability": {Get: s.getDeviceCapability},
 		"Time":             {Get: s.getTime},
+		"EndDeviceList":    {Create: s.createEndDevice},
+		"EndDevice":        {Update: s.updateEndDevice, Delete: s.deleteEndDevice},
+		"Registration":     {Update: s.operatorOnly, Delete: s.operatorOnly},
 	}
 }
 

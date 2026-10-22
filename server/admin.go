@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"strings"
 
 	ieee20305 "github.com/otfabric/go-ieee20305"
 )
@@ -140,4 +141,31 @@ func setLink(v any, name, href string) error {
 	}
 	h.SetString(href)
 	return nil
+}
+
+// keepLinks sets the links of the document dst (its fields named *Link,
+// through embedding) to those of src, a document of the same type: the
+// links a client sends are not its to make.
+func keepLinks(dst, src any) {
+	d, s := reflect.ValueOf(dst), reflect.ValueOf(src)
+	if d.Kind() != reflect.Pointer || s.Kind() != reflect.Pointer || d.IsNil() || s.IsNil() || d.Type() != s.Type() {
+		return
+	}
+	copyLinks(d.Elem(), s.Elem())
+}
+
+func copyLinks(d, s reflect.Value) {
+	if d.Kind() != reflect.Struct {
+		return
+	}
+	t := d.Type()
+	for i := 0; i < t.NumField(); i++ {
+		f := t.Field(i)
+		switch {
+		case f.Anonymous:
+			copyLinks(d.Field(i), s.Field(i))
+		case f.IsExported() && strings.HasSuffix(f.Name, "Link") && f.Type.Kind() == reflect.Pointer:
+			d.Field(i).Set(s.Field(i))
+		}
+	}
 }

@@ -103,7 +103,7 @@ func (s *Server) serve(ctx context.Context, w http.ResponseWriter, r *http.Reque
 	if !ieee20305.InEdition(node.Resource, p.Edition) && !s.profileResource(node.Resource) {
 		return httpError(http.StatusNotFound, "%s is no resource of IEEE 2030.5-%v", r.URL.Path, p.Edition)
 	}
-	if !canRead(p, node) {
+	if !s.canRead(p, node) {
 		return httpError(http.StatusNotFound, "%s", r.URL.Path)
 	}
 	method := r.Method
@@ -141,7 +141,7 @@ func (s *Server) serve(ctx context.Context, w http.ResponseWriter, r *http.Reque
 				return err
 			}
 		} else {
-			if !canChange(p, node) {
+			if !s.canChange(p, node) {
 				return httpError(http.StatusForbidden, "%s is not the client's", node.Href)
 			}
 			if err := s.store.Delete(ctx, node.Href); err != nil {
@@ -276,16 +276,8 @@ func (s *Server) put(ctx context.Context, w http.ResponseWriter, req *Request, h
 		if err := hooks.Update(ctx, req); err != nil {
 			return err
 		}
-	} else {
-		if !canChange(req.Principal, req.Node) {
-			return httpError(http.StatusForbidden, "%s is not the client's", req.Node.Href)
-		}
-		setHref(req.Doc, req.Node.Href)
-		n := *req.Node
-		n.Value, n.Modified = req.Doc, s.clock()
-		if err := s.store.Put(ctx, &n); err != nil {
-			return err
-		}
+	} else if err := s.replace(ctx, req); err != nil {
+		return err
 	}
 	if created {
 		w.WriteHeader(http.StatusCreated)
@@ -295,6 +287,22 @@ func (s *Server) put(ctx context.Context, w http.ResponseWriter, req *Request, h
 	return nil
 }
 
+// replace is the default PUT: the client replaces a document it may change.
+// The links of the document are the server's: those of the stored document
+// stay, except for an operator.
+func (s *Server) replace(ctx context.Context, req *Request) error {
+	if !s.canChange(req.Principal, req.Node) {
+		return httpError(http.StatusForbidden, "%s is not the client's", req.Node.Href)
+	}
+	if req.Principal.Role != RoleOperator && req.Node.Value != nil {
+		keepLinks(req.Doc, req.Node.Value)
+	}
+	setHref(req.Doc, req.Node.Href)
+	n := *req.Node
+	n.Value, n.Modified = req.Doc, s.clock()
+	return s.store.Put(ctx, &n)
+}
+
 func (s *Server) post(ctx context.Context, w http.ResponseWriter, req *Request, hooks Hooks) error {
 	var href string
 	var err error
@@ -302,7 +310,7 @@ func (s *Server) post(ctx context.Context, w http.ResponseWriter, req *Request, 
 	case hooks.Create != nil:
 		href, err = hooks.Create(ctx, req)
 	case isList(req.Node.Value):
-		href, err = s.createItem(ctx, req.Node, req.Doc, req.Principal.lfdi())
+		href, err = s.createDefault(ctx, req)
 	default:
 		return httpError(http.StatusMethodNotAllowed, "POST to %s", req.Node.Href)
 	}

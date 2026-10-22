@@ -17,6 +17,6 @@
 // Registration retrieves what the server registered, and CheckPIN checks the
 // PIN the device was given out of band.
 //
-// Program and control polling, event handling and telemetry reporting are
-// built on these calls in later releases.
+// Package agent builds the behaviour of a device on these calls: it
+// registers, checks the PIN and polls the device's resources.
 package client

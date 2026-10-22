@@ -23,7 +23,7 @@ func (s *Server) list(ctx context.Context, req *Request) (any, error) {
 	}
 	var items []*Node
 	for _, m := range members {
-		if m.Value != nil && canRead(req.Principal, m) {
+		if m.Value != nil && s.canRead(req.Principal, m) {
 			items = append(items, m)
 		}
 	}
@@ -207,8 +207,9 @@ func (s *Server) newHref(parent string) string {
 	return path.Join(parent, strconv.Itoa(s.counters[parent]))
 }
 
-// maxChild returns the largest number among the hrefs parent/<n> the store
-// holds, so that hrefs stay unique after a restart with a persistent store.
+// maxChild returns the largest number among the hrefs parent/<n> and
+// parent/<n>/... the store holds, so that hrefs stay unique after a restart
+// with a persistent store.
 func (s *Server) maxChild(parent string) int {
 	hrefs, err := s.store.Hrefs(context.Background())
 	if err != nil {
@@ -218,9 +219,10 @@ func (s *Server) maxChild(parent string) int {
 	prefix := strings.TrimSuffix(parent, "/") + "/"
 	for _, h := range hrefs {
 		rest, ok := strings.CutPrefix(h, prefix)
-		if !ok || strings.Contains(rest, "/") {
+		if !ok {
 			continue
 		}
+		rest, _, _ = strings.Cut(rest, "/")
 		if n, err := strconv.Atoi(rest); err == nil && n > max {
 			max = n
 		}

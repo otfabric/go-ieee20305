@@ -177,6 +177,14 @@ func TestConformance(t *testing.T) {
 		t.Run(edition.String(), func(t *testing.T) {
 			h := newHarness(t, server.Config{DefaultEdition: edition}, "dev")
 			seedAll(t, h, h.lfdi("dev"))
+			// An operator, who may use every method the server supports.
+			op, err := security.ParseLFDI(h.lfdi("dev"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := h.srv.Admin().ProvisionDevice(context.Background(), server.DeviceSpec{LFDI: op, Role: server.RoleOperator, Edition: edition}); err != nil {
+				t.Fatal(err)
+			}
 			codec := edition.Codec()
 			for _, spec := range distinct() {
 				p := samplePath(spec.SamplePath)
@@ -187,6 +195,12 @@ func TestConformance(t *testing.T) {
 						v := examples.Element(m.Request, 1)
 						if v == nil {
 							t.Fatalf("%s %s: no example of %s", m.Method, spec.ID, m.Request)
+						}
+						if ed, ok := v.(*ieee20305.EndDevice); ok {
+							// The sFDI of an EndDevice is that of its lFDI.
+							l := security.LFDI{0x2a, byte(edition)}
+							lfdi := ieee20305.HexBinary160(l[:])
+							ed.LFDI, ed.SFDI = &lfdi, ieee20305.SFDIType(l.SFDI())
 						}
 						out, err := ieee20305.MarshalEdition(v, edition)
 						if err != nil {
