@@ -29,4 +29,10 @@
 // keeps the EventStatus of events as they become active, computes the
 // Active lists and the CurrentDERProgram of a DER, and stores each Response
 // once (Config.OnResponse); Admin.CancelEvent cancels an event.
+//
+// A device mirrors its metering by posting a MirrorUsagePoint, which the
+// server mirrors to a UsagePoint, and MirrorMeterReadings, which become its
+// MeterReadings, ReadingTypes, ReadingSets and Readings, one per mRID. A
+// FlowReservationRequest is answered by Config.FlowPolicy with a
+// FlowReservationResponse event of the device.
 package server

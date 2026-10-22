@@ -108,6 +108,9 @@ type Config struct {
 	// OnResponse, when set, is called with each new Response a client
 	// posts, and its href.
 	OnResponse func(ctx context.Context, href string, response any)
+	// FlowPolicy answers the FlowReservationRequests of devices: GrantAll
+	// when nil.
+	FlowPolicy FlowPolicy
 	// Hooks override or extend the handling of resources, by WADL resource
 	// ID; they run before the built-in function sets.
 	Hooks map[string]Hooks

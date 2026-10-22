@@ -27,6 +27,9 @@ const (
 	Pricing
 	// Prepayment is SupplyInterruptionOverrides of Prepayments.
 	Prepayment
+	// FlowReservation is the FlowReservationResponses the server sends to
+	// the device's requests.
+	FlowReservation
 	functionSets
 )
 
@@ -42,6 +45,8 @@ func (fs FunctionSet) String() string {
 		return "Pricing"
 	case Prepayment:
 		return "Prepayment"
+	case FlowReservation:
+		return "FlowReservation"
 	case functionSets:
 	}
 	return "FunctionSet(?)"
@@ -52,6 +57,9 @@ type eventSet struct {
 	fs FunctionSet
 	// programs returns the href of the list of the programs of an FSA.
 	programs func(fsa *ieee20305.FunctionSetAssignments) string
+	// own returns the hrefs of the lists of events of the EndDevice
+	// itself, of primacy 0.
+	own func(ed *ieee20305.EndDevice) []string
 	// events returns the hrefs of the lists of events of a program, and
 	// its primacy.
 	events func(ctx context.Context, a *Agent, program any) (lists []string, primacy uint8, ok bool, err error)
@@ -171,6 +179,20 @@ var eventSets = [functionSets]eventSet{
 			return c.OnSupplyInterruptionOverride
 		},
 	},
+	FlowReservation: {
+		fs:       FlowReservation,
+		programs: func(*ieee20305.FunctionSetAssignments) string { return "" },
+		events:   func(context.Context, *Agent, any) ([]string, uint8, bool, error) { return nil, 0, false, nil },
+		own: func(ed *ieee20305.EndDevice) []string {
+			if ed.FlowReservationResponseListLink == nil {
+				return nil
+			}
+			return []string{ed.FlowReservationResponseListLink.Href}
+		},
+		conflicts: func(a, b schedule.Event) bool { return false },
+		response:  func() any { return &ieee20305.FlowReservationResponseResponse{} },
+		handler:   func(c *Config) func(context.Context, schedule.Transition) error { return c.OnFlowReservation },
+	},
 }
 
 // eventLoop is the scheduling of the events of a function set by an
@@ -208,6 +230,28 @@ func (a *Agent) pollEvents(ctx context.Context, l *eventLoop, fsas []*ieee20305.
 	events := map[string]bool{}
 	var best any
 	bestPrimacy := -1
+	collect := func(list string, primacy uint8, program string) error {
+		return a.c.Iterate(ctx, list, 0, func(it any) error {
+			ev, err := schedule.FromEvent(it, primacy, program+"|"+list)
+			if err != nil {
+				a.log.Warn("skipping an event", "function set", l.set.fs, "err", err)
+				return nil
+			}
+			if ev.MRID == "" || events[ev.MRID] {
+				return nil
+			}
+			events[ev.MRID] = true
+			l.sched.Upsert(ev)
+			return nil
+		})
+	}
+	if ed := a.State().EndDevice; l.set.own != nil && ed != nil {
+		for _, list := range l.set.own(ed) {
+			if err := collect(list, 0, ed.GetHref()); err != nil {
+				return err
+			}
+		}
+	}
 	for _, fsa := range fsas {
 		href := l.set.programs(fsa)
 		if href == "" || seen[href] {
@@ -233,19 +277,7 @@ func (a *Agent) pollEvents(ctx context.Context, l *eventLoop, fsas []*ieee20305.
 				best, bestPrimacy = p, int(primacy)
 			}
 			for _, list := range lists {
-				if err := a.c.Iterate(ctx, list, 0, func(it any) error {
-					ev, err := schedule.FromEvent(it, primacy, hrefOf(p)+"|"+list)
-					if err != nil {
-						a.log.Warn("skipping an event", "function set", l.set.fs, "err", err)
-						return nil
-					}
-					if ev.MRID == "" || events[ev.MRID] {
-						return nil
-					}
-					events[ev.MRID] = true
-					l.sched.Upsert(ev)
-					return nil
-				}); err != nil {
+				if err := collect(list, primacy, hrefOf(p)); err != nil {
 					return err
 				}
 			}

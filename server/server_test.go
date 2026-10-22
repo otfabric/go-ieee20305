@@ -203,7 +203,10 @@ func TestAccess(t *testing.T) {
 	if err := h.srv.Admin().Root(ctx, "DERProgramList", "/derp", &ieee20305.DERProgramList{}); err != nil {
 		t.Fatal(err)
 	}
-	status, hdr, _ := h.do(t, "b", http.MethodPost, "/mup", marshal(t, examples.MirrorUsagePoint(0)))
+	mup := examples.MirrorUsagePoint(0)
+	b := h.id("b")
+	mup.DeviceLFDI = b[:]
+	status, hdr, _ := h.do(t, "b", http.MethodPost, "/mup", marshal(t, mup))
 	if status != http.StatusCreated || hdr.Get("Location") != "/mup/1" {
 		t.Fatalf("POST: %d %q", status, hdr.Get("Location"))
 	}

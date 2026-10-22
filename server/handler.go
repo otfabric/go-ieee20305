@@ -216,6 +216,12 @@ func acceptsXML(accept string) bool {
 	return false
 }
 
+// alsoAccepted are the documents a resource takes besides the one of the
+// WADL: a MirrorUsagePoint takes one MirrorMeterReading as well as a list.
+var alsoAccepted = map[string]map[string]bool{
+	"MirrorUsagePoint": {"MirrorMeterReading": true},
+}
+
 // decodeBody decodes and validates the document of a PUT or POST.
 func (s *Server) decodeBody(w http.ResponseWriter, req *Request) error {
 	if ct := req.Header.Get("Content-Type"); ct != "" {
@@ -238,7 +244,7 @@ func (s *Server) decodeBody(w http.ResponseWriter, req *Request) error {
 	}
 	n, _ := s.profile.ElementName(v)
 	name := n.Local
-	if req.Method.Request != "" && !s.profile.Derives(name, req.Method.Request) {
+	if req.Method.Request != "" && !s.profile.Derives(name, req.Method.Request) && !alsoAccepted[req.Spec.ID][name] {
 		return &HTTPError{Status: http.StatusBadRequest, Reason: ReasonInvalidRequest,
 			Err: errors.New(name + " where the resource takes " + req.Method.Request)}
 	}

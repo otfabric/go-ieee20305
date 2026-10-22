@@ -174,3 +174,8 @@ func copyLinks(d, s reflect.Value) {
 // *ieee20305.DemandResponseProgramList for DemandResponseProgramList, or
 // nil.
 func (a *Admin) Document(resource string) any { return a.s.newList(resource) }
+
+// Members returns the items of the list at list.
+func (a *Admin) Members(ctx context.Context, list string) ([]*Node, error) {
+	return a.s.store.Members(ctx, list)
+}

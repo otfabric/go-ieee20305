@@ -67,6 +67,20 @@ type Config struct {
 	OnTextMessage                func(ctx context.Context, t schedule.Transition) error
 	OnTimeTariffInterval         func(ctx context.Context, t schedule.Transition) error
 	OnSupplyInterruptionOverride func(ctx context.Context, t schedule.Transition) error
+	// OnFlowReservation is called with the transitions of the
+	// FlowReservationResponses to the device's requests.
+	OnFlowReservation func(ctx context.Context, t schedule.Transition) error
+	// OnFile is called with each File of the device's FSAs the agent has
+	// not seen (by href and mfVer); the device loads it and reports with
+	// PutFileStatus.
+	OnFile func(ctx context.Context, f *ieee20305.File) error
+	// MirrorUsagePoint and Readings make the agent mirror metering: it
+	// creates the MirrorUsagePoint and posts what Readings returns at
+	// PostRate (the postRate of the MirrorUsagePoint, else 900 s, when
+	// zero).
+	MirrorUsagePoint *ieee20305.MirrorUsagePoint
+	Readings         func(ctx context.Context) ([]ieee20305.MirrorMeterReading, error)
+	PostRate         time.Duration
 	// OnDefaultDERControl is called with the DefaultDERControl of the
 	// DERProgram of highest precedence when it changes.
 	OnDefaultDERControl func(ctx context.Context, d *ieee20305.DefaultDERControl) error
@@ -92,6 +106,7 @@ type Agent struct {
 	mu          sync.Mutex
 	state       State
 	lastDefault []byte
+	files       map[string]bool
 }
 
 // State is what an agent knows of the server.
@@ -109,6 +124,10 @@ type State struct {
 	Polls int
 	// Responses counts the Responses the agent posted.
 	Responses int
+	// MirrorUsagePoint is the href of the device's mirror, and Posts
+	// counts the posts of readings to it.
+	MirrorUsagePoint string
+	Posts            int
 }
 
 // New returns an Agent for cfg.
@@ -125,7 +144,7 @@ func New(cfg Config) (*Agent, error) {
 	if cfg.MaxRetryDelay <= 0 {
 		cfg.MaxRetryDelay = 5 * time.Minute
 	}
-	a := &Agent{cfg: cfg, c: cfg.Client, log: cfg.Logger}
+	a := &Agent{cfg: cfg, c: cfg.Client, log: cfg.Logger, files: map[string]bool{}}
 	if a.log == nil {
 		a.log = slog.New(discardHandler{})
 	}
@@ -226,6 +245,9 @@ func (a *Agent) poll(ctx context.Context) error {
 			return err
 		}
 	}
+	if err := a.pollFiles(ctx, fsas); err != nil {
+		return err
+	}
 	return a.pollDefault(ctx)
 }
 
@@ -275,6 +297,13 @@ func (a *Agent) Run(ctx context.Context) error {
 		}
 	}
 	a.log.Info("started", "endDevice", a.State().EndDevice.GetHref())
+	var wg sync.WaitGroup
+	defer wg.Wait()
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		a.mirror(ctx)
+	}()
 	delay = a.cfg.RetryDelay
 	wait := a.pollRate()
 	for {

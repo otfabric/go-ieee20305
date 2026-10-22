@@ -202,6 +202,9 @@ func TestConformance(t *testing.T) {
 							// where no one listens.
 							sub.SubscribedResource, sub.NotificationURI, sub.Encoding = "/edev", "https://127.0.0.1:1/ntfy", 0
 						}
+						if m, ok := v.(*ieee20305.MirrorUsagePoint); ok {
+							m.DeviceLFDI = make(ieee20305.HexBinary160, 20)
+						}
 						if r, ok := v.(*ieee20305.Response); ok {
 							// A Response of a device: an LFDI.
 							r.EndDeviceLFDI = make(ieee20305.HexBinary160, 20)

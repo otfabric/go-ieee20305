@@ -12,15 +12,18 @@ import (
 // builtinHooks are the function sets the server implements itself.
 func builtinHooks(s *Server) map[string]Hooks {
 	hooks := map[string]Hooks{
-		"DeviceCapability":  {Get: s.getDeviceCapability},
-		"Time":              {Get: s.getTime},
-		"EndDeviceList":     {Create: s.createEndDevice},
-		"EndDevice":         {Update: s.updateEndDevice, Delete: s.deleteEndDevice},
-		"Registration":      {Update: s.operatorOnly, Delete: s.operatorOnly},
-		"SubscriptionList":  {Create: s.createSubscription},
-		"Subscription":      {Update: s.updateSubscription},
-		"CurrentDERProgram": {Get: s.getCurrentDERProgram},
-		"ResponseList":      {Create: s.createResponse},
+		"DeviceCapability":           {Get: s.getDeviceCapability},
+		"Time":                       {Get: s.getTime},
+		"EndDeviceList":              {Create: s.createEndDevice},
+		"EndDevice":                  {Update: s.updateEndDevice, Delete: s.deleteEndDevice},
+		"Registration":               {Update: s.operatorOnly, Delete: s.operatorOnly},
+		"SubscriptionList":           {Create: s.createSubscription},
+		"Subscription":               {Update: s.updateSubscription},
+		"CurrentDERProgram":          {Get: s.getCurrentDERProgram},
+		"ResponseList":               {Create: s.createResponse},
+		"MirrorUsagePointList":       {Create: s.createMirror},
+		"MirrorUsagePoint":           {Create: s.postMirrorReadings},
+		"FlowReservationRequestList": {Create: s.createFlowReservation},
 	}
 	for _, id := range activeLists {
 		hooks[id] = Hooks{Get: s.getActive}

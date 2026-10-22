@@ -16,7 +16,8 @@ import (
 var itemParts = map[string][]string{
 	"EndDevice": {"FunctionSetAssignmentsList", "DeviceInformation", "DeviceStatus", "PowerStatus",
 		"Configuration", "FileStatus", "LogEventList", "IPInterfaceList", "LoadShedAvailabilityList",
-		"SubscriptionList", "DERList", "FlowReservationRequestList", "FlowReservationResponseList"},
+		"SubscriptionList", "DERList", "FlowReservationRequestList", "FlowReservationResponseList",
+		"AggregatedDeviceList", "AggregationPriority"},
 	"DER": {"DERCapability", "DERSettings", "DERStatus", "DERAvailability", "AssociatedDERProgramList",
 		"CurrentDERProgram", "AssociatedUsagePoint"},
 	"DERProgram":            {"DERControlList", "ActiveDERControlList", "DERCurveList", "DefaultDERControl"},
@@ -25,6 +26,12 @@ var itemParts = map[string][]string{
 	"TariffProfile":         {"RateComponentList"},
 	"RateComponent":         {"TimeTariffIntervalList", "ActiveTimeTariffIntervalList"},
 	"ResponseSet":           {"ResponseList"},
+	"UsagePoint":            {"MeterReadingList"},
+	"MeterReading":          {"ReadingSetList", "ReadingType"},
+	"ReadingSet":            {"ReadingList"},
+	"CustomerAccount":       {"CustomerAgreementList", "ServiceSupplier"},
+	"CustomerAgreement": {"BillingPeriodList", "ActiveBillingPeriodList", "ProjectionReadingList",
+		"ActiveProjectionReadingList", "TargetReadingList", "ActiveTargetReadingList", "HistoricalReadingList"},
 	"Prepayment": {"AccountBalance", "PrepayOperationStatus", "CreditRegisterList", "ActiveCreditRegisterList",
 		"SupplyInterruptionOverrideList", "ActiveSupplyInterruptionOverrideList"},
 }

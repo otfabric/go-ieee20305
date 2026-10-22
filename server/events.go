@@ -152,10 +152,12 @@ func (a *Admin) CancelEvent(ctx context.Context, href string, randomized bool) e
 // activeLists are the lists of the events of a program that are active,
 // which the server computes from the list of all of its events.
 var activeLists = []string{"ActiveDERControlList", "ActiveEndDeviceControlList", "ActiveTextMessageList",
-	"ActiveTimeTariffIntervalList", "ActiveSupplyInterruptionOverrideList"}
+	"ActiveTimeTariffIntervalList", "ActiveSupplyInterruptionOverrideList", "ActiveBillingPeriodList",
+	"ActiveProjectionReadingList", "ActiveTargetReadingList", "ActiveCreditRegisterList"}
 
 // getActive answers an Active*List: the items of the sibling list of all
-// events that are active now.
+// that are active now: events that are Active, and items whose interval
+// (or timePeriod) holds now; all of the items that have neither.
 func (s *Server) getActive(ctx context.Context, r *Request) (any, error) {
 	source := path.Join(path.Dir(r.Node.Href), s.partPath(strings.TrimPrefix(r.Node.Resource, "Active")))
 	now := s.clock().Unix()
@@ -165,26 +167,32 @@ func (s *Server) getActive(ctx context.Context, r *Request) (any, error) {
 				return false
 			}
 		}
-		start, ok := eventStart(n.Value)
+		iv, ok := intervalOf(n.Value)
 		if !ok {
 			return true
 		}
-		end := start + int64(eventDuration(n.Value))
-		return start <= now && now < end
+		start := int64(iv.Start)
+		return start <= now && now < start+int64(iv.Duration)
 	})
 }
 
-// eventDuration returns the duration of the interval of an event.
-func eventDuration(v any) uint32 {
+// intervalOf returns the interval of a document: its interval, or its
+// timePeriod.
+func intervalOf(v any) (ieee20305.DateTimeInterval, bool) {
 	rv := reflect.ValueOf(v)
 	if rv.Kind() != reflect.Pointer || rv.IsNil() {
-		return 0
+		return ieee20305.DateTimeInterval{}, false
 	}
-	f := rv.Elem().FieldByName("Interval")
-	if !f.IsValid() || f.Type() != reflect.TypeOf(ieee20305.DateTimeInterval{}) {
-		return 0
+	for _, name := range []string{"Interval", "TimePeriod"} {
+		f := rv.Elem().FieldByName(name)
+		if f.IsValid() && f.Kind() == reflect.Pointer && !f.IsNil() {
+			f = f.Elem()
+		}
+		if f.IsValid() && f.Type() == reflect.TypeOf(ieee20305.DateTimeInterval{}) {
+			return f.Interface().(ieee20305.DateTimeInterval), true
+		}
 	}
-	return uint32(f.Interface().(ieee20305.DateTimeInterval).Duration)
+	return ieee20305.DateTimeInterval{}, false
 }
 
 // getCurrentDERProgram answers the CurrentDERProgram of a DER: of the
