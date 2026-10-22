@@ -1,0 +1,153 @@
+{
+  "description": "Pinned upstream sources and generation targets for go-ieee20305. The files are downloaded into schemas/upstream/ by 'make schemas' and are not committed. Every download and every extracted file is verified against the SHA-256 recorded here.",
+  "userAgent": "ieee20305-gen/1.0 (+https://github.com/otfabric/go-ieee20305)",
+  "sources": [
+    {
+      "id": "ieee-2030.5-2023",
+      "title": "IEEE Std 2030.5-2023 supplemental material",
+      "version": "2023 (schema version 2.2)",
+      "url": "https://standards.ieee.org/wp-content/uploads/2024/12/2030.5-2023_downloads.zip",
+      "sha256": "44ef0bd26f59fee3d4a4be0951ec9d5985c6bc3f377dd8f4908f25675174d6d3",
+      "archive": "zip",
+      "license": "Copyright IEEE. The terms of use embedded in sep.xsd allow downloading for personal use and forbid redistribution of the document or significant portions of it without written permission from IEEE.",
+      "redistributable": false,
+      "files": [
+        {
+          "from": "2030.5-2023_downloads/sep.xsd",
+          "to": "ieee-2030.5-2023/sep.xsd",
+          "sha256": "fc8a0acbd7e995bad0f5fcd8102f48dfa107ba94881268185574840f73a35d35"
+        },
+        {
+          "from": "2030.5-2023_downloads/sep_wadl.xml",
+          "to": "ieee-2030.5-2023/sep_wadl.xml",
+          "sha256": "8faa40c636cee615ff21d3744ed088c45514e35de7790a79b19f50afff699396"
+        },
+        {
+          "from": "2030.5-2023_downloads/Examples/",
+          "to": "ieee-2030.5-2023/Examples/"
+        }
+      ],
+      "watch": {
+        "page": "https://standards.ieee.org/downloads/",
+        "pattern": "2030\\.5-[0-9]{4}_downloads\\.zip",
+        "ignore": ["2030.5-2013_downloads.zip"]
+      }
+    },
+    {
+      "id": "ieee-2030.5-2018",
+      "title": "IEEE Std 2030.5-2018 supplemental material (model build 20180301)",
+      "version": "2018",
+      "url": "https://standards.ieee.org/wp-content/uploads/import/download/2030.5-2018_downloads.zip",
+      "sha256": "0baee125683f17279ebc2da705fa7e73ff394c9bcd95e7ee19086df8316acdcc",
+      "archive": "zip",
+      "license": "Copyright IEEE. Same terms as the 2023 material.",
+      "redistributable": false,
+      "files": [
+        {
+          "from": "Model Build 20180301/sep.xsd",
+          "to": "ieee-2030.5-2018/sep.xsd",
+          "sha256": "5b32e18378e64133e3a9f7f320ea10e204bb5596aac96898cdef9e8ec39a9164"
+        },
+        {
+          "from": "Model Build 20180301/sep_wadl.xml",
+          "to": "ieee-2030.5-2018/sep_wadl.xml",
+          "sha256": "93ee874d3a7e216dd1074781a0be390af2fa075f8f9145f5fbf08d509f4fa1c5"
+        }
+      ]
+    },
+    {
+      "id": "csipaus-1.3-core",
+      "title": "CSIP-AUS v1.3 core schema (redefines IEEE 2030.5 types)",
+      "version": "1.3",
+      "url": "https://www.csipaus.org/s/csipaus-core-v13.xsd",
+      "sha256": "dc746492dad27b1c8c89d7b1bad4b68bd87e31a6ade69bf6fa693d789f1f696c",
+      "license": "Published by the CSIP-AUS working group at https://www.csipaus.org/ns/v1-3. No redistribution licence is stated.",
+      "redistributable": false,
+      "files": [
+        {
+          "to": "csipaus-1.3/csipaus-core-v1.3.xsd",
+          "sha256": "dc746492dad27b1c8c89d7b1bad4b68bd87e31a6ade69bf6fa693d789f1f696c"
+        }
+      ],
+      "watch": {
+        "probe": [
+          "https://www.csipaus.org/ns/v1-4",
+          "https://www.csipaus.org/ns/v2-0",
+          "https://www.csipaus.org/csip-aus-v1-4-release",
+          "https://www.csipaus.org/csip-aus-v2-0-release"
+        ]
+      }
+    },
+    {
+      "id": "csipaus-1.3-ext",
+      "title": "CSIP-AUS v1.3 extension schema (namespace https://csipaus.org/ns/v1.3)",
+      "version": "1.3",
+      "url": "https://www.csipaus.org/s/csipaus-ext-v13.xsd",
+      "sha256": "6662ed52ec2c5c9253d01f55a292708d3d21aee8e4de291718e3da42ed065515",
+      "license": "Published by the CSIP-AUS working group at https://www.csipaus.org/ns/v1-3. No redistribution licence is stated.",
+      "redistributable": false,
+      "files": [
+        {
+          "to": "csipaus-1.3/csipaus-ext-v1.3.xsd",
+          "sha256": "6662ed52ec2c5c9253d01f55a292708d3d21aee8e4de291718e3da42ed065515"
+        }
+      ]
+    },
+    {
+      "id": "epri-sep-2.0.4",
+      "title": "EPRI IEEE 2030.5 client: historical SEP 2.0.4 schema and WADL (reference only)",
+      "version": "2.0.4 (commit 505ee47d9c3ed43ce63087198d09f77338da627d)",
+      "url": "https://raw.githubusercontent.com/epri-dev/IEEE-2030.5-Client/505ee47d9c3ed43ce63087198d09f77338da627d/sep.xsd",
+      "sha256": "2e0f7e22caa2cb98a85598d9ae8cb7cb5ca9ffac32f74e90377b274f688762ac",
+      "license": "Distributed in the EPRI IEEE-2030.5-Client repository; the schema text is IEEE material.",
+      "redistributable": false,
+      "files": [
+        {
+          "to": "epri-2.0.4/sep.xsd",
+          "sha256": "2e0f7e22caa2cb98a85598d9ae8cb7cb5ca9ffac32f74e90377b274f688762ac"
+        }
+      ]
+    }
+  ],
+  "targets": [
+    {
+      "name": "ieee20305",
+      "dir": ".",
+      "package": "ieee20305",
+      "importPath": "github.com/otfabric/go-ieee20305",
+      "xsd": "ieee-2030.5-2023/sep.xsd",
+      "wadl": "ieee-2030.5-2023/sep_wadl.xml",
+      "overrides": [
+        {
+          "kind": "polymorphicElement",
+          "type": "{urn:ieee:std:2030.5:ns}Notification",
+          "name": "Resource",
+          "reason": "A Notification carries the subscribed resource in its Resource element, declared as type Resource, with xsi:type naming the actual type (see Examples/C_09_04_Notification.xml). Generate it as a value of any type derived from Resource."
+        }
+      ]
+    },
+    {
+      "name": "csipaus",
+      "notes": "CSIP-AUS v1.3 profiles IEEE 2030.5-2018: its schemas compile against the 2018 sep.xsd (after the RateComponentLink correction below) but not against the 2023 one, where Resource ends with an xs:any wildcard that makes ConnectionPointType non-deterministic. The Go types are generated against the 2023 schema, a superset of 2018, so that they build on the base package; csipaus/codec_test.go validates their documents against the CSIP-AUS schemas composed with the 2018 sep.xsd.",
+      "dir": "csipaus",
+      "package": "csipaus",
+      "importPath": "github.com/otfabric/go-ieee20305/csipaus",
+      "base": "ieee20305",
+      "profileVersion": "1.3",
+      "xsd": "csipaus-1.3/csipaus-core-v1.3.xsd",
+      "schemaLocations": {
+        "sep.xsd": "ieee-2030.5-2023/sep.xsd",
+        "csipaus-ext-v1.3.xsd": "csipaus-1.3/csipaus-ext-v1.3.xsd"
+      },
+      "overrides": [
+        {
+          "kind": "elementRef",
+          "ref": "{urn:ieee:std:2030.5:ns}RateComponentLink",
+          "name": "RateComponentLink",
+          "type": "{urn:ieee:std:2030.5:ns}RateComponentLink",
+          "reason": "csipaus-core-v1.3.xsd redefines TimeTariffInterval with ref=\"RateComponentLink\", but sep.xsd declares no global element of that name, only local elements of type RateComponentLink. Treat the ref as a local element named RateComponentLink of that type."
+        }
+      ]
+    }
+  ]
+}

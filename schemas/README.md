@@ -1,48 +1,58 @@
-# IEEE 2030.5 Schema Files
+# Upstream schemas
 
-The XSD files used for code generation are **not committed** to this repository.
-The IEEE 2030.5 specification and its schema are proprietary to the IEEE
-Standards Association and cannot be redistributed without explicit permission.
+The Go types of this module are generated from the official machine-readable
+specifications. Those files are **not committed**: the IEEE material may not be
+redistributed, and no redistribution licence is stated for the CSIP-AUS
+schemas. They are downloaded on demand and verified against
+[`manifest.json`](manifest.json).
 
-## Obtaining the XSD
+## manifest.json
 
-1. Visit the [IEEE Standards Association](https://standards.ieee.org/) and
-   obtain IEEE Std 2030.5-2023 (or 2030.5-2018 for the earlier version).
-2. Extract `sep.xsd` from the specification package.
-3. Place the XSD file(s) in this directory (`schemas/`).
+The manifest pins every upstream source:
 
-## For CSIP-AUS extensions
+| Source | Used for |
+|---|---|
+| `ieee-2030.5-2023` — IEEE Std 2030.5-2023 supplemental material (ZIP) | `sep.xsd` (schema 2.2) → package `ieee20305`; `sep_wadl.xml` → `resources_gen.go`; `Examples/` → round-trip tests |
+| `ieee-2030.5-2018` — IEEE Std 2030.5-2018 supplemental material (ZIP) | `sep.xsd` → validating CSIP-AUS documents (CSIP-AUS v1.3 profiles 2018) |
+| `csipaus-1.3-core`, `csipaus-1.3-ext` — CSIP-AUS v1.3 schemas | package `csipaus` |
+| `epri-sep-2.0.4` — EPRI client `sep.xsd` at a pinned commit | reference for compatibility checks |
 
-The CSIP-AUS XSD is available from the Australian National University (ANU)
-and ARENA's DER integration program.
+For each source it records the download URL, the SHA-256 of the download, and
+the SHA-256 of every file used from it, with version and licence notes. Its
+`targets` say which Go package is generated from which files, and its
+`overrides` record, with a reason, each explicit correction of an upstream
+defect or ambiguity (for example the unresolvable `ref="RateComponentLink"` in
+`csipaus-core-v1.3.xsd`).
 
-## Running code generation
+## Workflow
 
-Once the schema files are in place, generate all Go types:
-
-```bash
-make generate          # runs all three generators (base, csipaus, wadl)
-# or equivalently:
-go generate ./...
+```sh
+make download        # fetch into schemas/upstream/ and verify every checksum
+make generate        # regenerate the *_gen.go files (runs download first)
+make generate-verify # offline: generated headers match the manifest
+make check-updates   # compare upstream with the manifest
 ```
 
-The generated `*_gen.go` files carry a `// Code generated ... DO NOT EDIT.`
-header with the source schema's SHA-256 checksum. **Do not edit them by hand.**
-If the output is wrong, fix the generator in `internal/gen/` instead.
+`make download` refuses a file whose checksum differs from the manifest. The
+generated files are committed and their headers record the checksum of every
+input. **Never edit a generated file**: fix the generator in `internal/gen` or
+its inputs here, and regenerate.
 
-Generated files are committed to the repository so that downstream consumers
-(and CI) do not need the proprietary XSD to build.
+## Continuous integration
 
-## Verification
+- The `Generated code` job of `ci.yml` downloads the sources, regenerates, and
+  fails if the result differs from the committed code. It then round-trips the
+  official IEEE examples and validates the encoded documents with `xmllint`
+  against the official IEEE 2030.5 and CSIP-AUS schemas.
+- `schema-updates.yml` runs weekly. It reports content that changed at a pinned
+  URL, new IEEE 2030.5 releases on the IEEE downloads page, and new CSIP-AUS
+  version pages, by opening or updating an issue.
 
-The `make generate-verify` target checks that every committed `*_gen.go`
-header checksum matches `manifest.yaml` — it does not need the XSD files,
-only the manifest. CI runs this on every push.
+## Adopting an upstream change
 
-After obtaining or updating the schema files, record their checksums:
-
-```bash
-shasum -a 256 schemas/sep.xsd schemas/csipaus.xsd schemas/sep.wadl
-```
-
-Then update the corresponding `sha256:` fields in `manifest.yaml`.
+1. Download the new release and review what changed.
+2. Update the URL, version and checksums in `manifest.json` (and its targets if
+   file names changed).
+3. Run `make generate`, fix the generator if it rejects a new construct, and
+   review the diff of the generated code.
+4. Run `make check` and commit the manifest and the regenerated code together.

@@ -4,7 +4,7 @@
 
 .DEFAULT_GOAL := help
 
-.PHONY: help all build fmt fmt-check lint lint-ci vet vuln test coverage cover fuzz check clean interop test-interop e2e nodeps generate generate-base generate-csipaus generate-wadl generate-verify
+.PHONY: help all build fmt fmt-check lint lint-ci vet vuln test coverage cover fuzz check clean interop test-interop e2e nodeps download schemas generate generate-verify generate-check check-updates
 help: ## This help
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z0-9_-]+:.*?## / {printf "\033[36m%-30s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
@@ -99,46 +99,33 @@ test-interop: ## Run the interop suite against reference implementations (needs 
 
 interop: test-interop ## Alias for test-interop
 
-check: fmt fmt-check nodeps lint lint-ci vet vuln test coverage ## Run format + lint + vet + vuln + test
+check: fmt fmt-check nodeps generate-verify lint lint-ci vet vuln test coverage ## Run format + generated-code check + lint + vet + vuln + test
 
 # ── Code generation ──────────────────────────────────────────────────────────
 
-SCHEMA     ?= schemas/sep.xsd
-CSIPAUS    ?= schemas/csipaus.xsd
-WADL       ?= schemas/sep.wadl
+# The upstream IEEE 2030.5 and CSIP-AUS schemas are pinned (URL and SHA-256)
+# in schemas/manifest.json and downloaded into schemas/upstream/, which is not
+# committed. The *_gen.go files generated from them are committed.
+GEN := go run ./internal/gen
 
-generate: generate-base generate-csipaus generate-wadl ## Generate all Go types from XSD and WADL schemas
+download: ## Download the pinned upstream schemas into schemas/upstream/ and verify their checksums
+	@$(GEN) fetch
 
-generate-base: ## Generate base IEEE 2030.5 types from sep.xsd
-	@test -f "$(SCHEMA)" || { echo "Error: $(SCHEMA) not found. See schemas/README.md."; exit 1; }
-	@echo "Generating base types from $(SCHEMA)..."
-	@go run ./internal/gen -schema "$(SCHEMA)" -out . -pkg ieee20305
+schemas: download ## Alias for download
 
-generate-csipaus: ## Generate CSIP-AUS extension types from csipaus.xsd
-	@test -f "$(SCHEMA)" || { echo "Error: $(SCHEMA) not found. See schemas/README.md."; exit 1; }
-	@test -f "$(CSIPAUS)" || { echo "Skipping CSIP-AUS: $(CSIPAUS) not found."; exit 0; }
-	@echo "Generating CSIP-AUS extension types from $(CSIPAUS)..."
-	@go run ./internal/gen -base "$(SCHEMA)" -schema "$(CSIPAUS)" -out csipaus -pkg csipaus
+generate: download ## Regenerate every *_gen.go file from the upstream schemas
+	@$(GEN) generate
 
-generate-wadl: ## Generate resource table from sep.wadl
-	@test -f "$(WADL)" || { echo "Skipping WADL: $(WADL) not found."; exit 0; }
-	@echo "Generating resource table from $(WADL)..."
-	@go run ./internal/gen -wadl "$(WADL)" -out . -pkg ieee20305
+generate-verify: ## Check offline that the generated files record the sources pinned in schemas/manifest.json
+	@$(GEN) verify
 
-generate-verify: ## Verify that *_gen.go headers match schemas/manifest.yaml checksums
-	@echo "Verifying generated code checksums..."
-	@found=0; \
-	for f in *_gen.go csipaus/*_gen.go; do \
-		[ -f "$$f" ] || continue; \
-		found=1; \
-		hash="$$(sed -nE 's/.*SHA-256: ([0-9a-f]+).*/\1/p' "$$f" | head -n1)"; \
-		[ -n "$$hash" ] || { echo "$$f: no SHA-256 in header"; exit 1; }; \
-		if ! grep -q "$$hash" schemas/manifest.yaml; then \
-			echo "$$f: SHA-256 $$hash not found in schemas/manifest.yaml"; exit 1; \
-		fi; \
-		echo "$$f: ok ($$hash)"; \
-	done; \
-	[ "$$found" = "1" ] || { echo "No generated files found."; exit 1; }
+generate-check: generate ## Fail if regenerating changes the committed generated code (CI drift check)
+	@git diff --exit-code --stat -- '*_gen.go' || { echo "Generated code is out of date: run make generate and commit the result."; exit 1; }
+	@untracked="$$(git ls-files --others --exclude-standard -- '*_gen.go')"; \
+	if [ -n "$$untracked" ]; then echo "Generated files are not committed:"; echo "$$untracked"; exit 1; fi
+
+check-updates: ## Report upstream schema changes and new releases (exit status 3 when there are some)
+	@$(GEN) check-updates
 
 clean: ## Remove generated binaries and coverage artifacts
 	@echo "Cleaning up"

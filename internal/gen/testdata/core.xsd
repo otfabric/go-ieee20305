@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Synthetic fixture: the core schema of a profile, in the shape of
+     csipaus-core: it redefines base types to append extension elements. The
+     ref="Missing" has no global element, like RateComponentLink in
+     csipaus-core-v1.3, and needs an elementRef override. -->
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns="urn:test:base"
+           xmlns:x="urn:test:ext" targetNamespace="urn:test:base" elementFormDefault="qualified">
+  <xs:import namespace="urn:test:ext" schemaLocation="ext.xsd"/>
+  <xs:redefine schemaLocation="base.xsd">
+    <xs:complexType name="Control">
+      <xs:complexContent>
+        <xs:extension base="Control">
+          <xs:sequence>
+            <xs:element ref="x:limitExtra" minOccurs="0" maxOccurs="1"/>
+            <xs:element ref="x:mode" minOccurs="0" maxOccurs="1"/>
+            <xs:element ref="Missing" minOccurs="0" maxOccurs="1"/>
+          </xs:sequence>
+        </xs:extension>
+      </xs:complexContent>
+    </xs:complexType>
+    <xs:complexType name="Link">
+      <xs:complexContent>
+        <xs:extension base="Link">
+          <xs:attribute name="rel" use="optional" type="String6"/>
+        </xs:extension>
+      </xs:complexContent>
+    </xs:complexType>
+  </xs:redefine>
+</xs:schema>

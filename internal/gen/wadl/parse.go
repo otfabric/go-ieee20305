@@ -6,109 +6,204 @@ import (
 	"encoding/xml"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 )
 
-// ParseFile reads and parses a WADL file from disk.
+// ParseFile reads and parses a WADL file.
 func ParseFile(path string) (*Application, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("read wadl: %w", err)
+		return nil, err
 	}
-	return Parse(data)
-}
-
-// Parse parses WADL XML bytes into a typed Application.
-func Parse(data []byte) (*Application, error) {
-	var raw rawApplication
-	if err := xml.Unmarshal(data, &raw); err != nil {
-		return nil, fmt.Errorf("unmarshal wadl: %w", err)
-	}
-	app := &Application{}
-	if raw.Resources != nil {
-		for _, rr := range raw.Resources.Resources {
-			app.Resources = append(app.Resources, convertResource(rr))
-		}
+	app, err := Parse(data)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
 	}
 	return app, nil
 }
 
-func convertResource(rr rawResource) Resource {
-	r := Resource{
-		Path: rr.Path,
+// Parse parses a WADL document. Nested resources are flattened, with their
+// sample paths as written in the document.
+func Parse(data []byte) (*Application, error) {
+	var raw rawApplication
+	if err := xml.Unmarshal(data, &raw); err != nil {
+		return nil, err
 	}
-	for _, rp := range rr.Params {
-		r.Params = append(r.Params, Param{
-			Name:  rp.Name,
-			Style: rp.Style,
-			Type:  stripNS(rp.Type),
-		})
+	if raw.XMLName.Space != Namespace || raw.XMLName.Local != "application" {
+		return nil, fmt.Errorf("root element is not a WADL application")
 	}
-	for _, rm := range rr.Methods {
-		m := Method{Name: rm.Name}
-		if rm.Request != nil && len(rm.Request.Representations) > 0 {
-			rep := rm.Request.Representations[0]
-			m.Request = &Representation{
-				MediaType: rep.MediaType,
-				Element:   stripNS(rep.Element),
+	ns := map[string]string{}
+	for _, a := range raw.Attrs {
+		if a.Name.Space == "xmlns" {
+			ns[a.Name.Local] = a.Value
+		}
+	}
+	if len(raw.Resources) != 1 {
+		return nil, fmt.Errorf("expected one resources element, found %d", len(raw.Resources))
+	}
+	app := &Application{}
+	ids := map[string]bool{}
+	var walk func([]rawResource) error
+	walk = func(rs []rawResource) error {
+		for i := range rs {
+			r, err := convertResource(&rs[i], ns)
+			if err != nil {
+				return err
+			}
+			if ids[r.ID] {
+				return fmt.Errorf("resource id %q appears twice", r.ID)
+			}
+			ids[r.ID] = true
+			app.Resources = append(app.Resources, r)
+			if err := walk(rs[i].Resources); err != nil {
+				return err
 			}
 		}
-		if rm.Response != nil && len(rm.Response.Representations) > 0 {
-			rep := rm.Response.Representations[0]
-			m.Response = &Representation{
-				MediaType: rep.MediaType,
-				Element:   stripNS(rep.Element),
+		return nil
+	}
+	if err := walk(raw.Resources[0].Resources); err != nil {
+		return nil, err
+	}
+	return app, nil
+}
+
+func convertResource(rr *rawResource, ns map[string]string) (*Resource, error) {
+	if rr.ID == "" {
+		return nil, fmt.Errorf("resource without an id")
+	}
+	if err := unexpected("resource "+rr.ID, rr.Other); err != nil {
+		return nil, err
+	}
+	r := &Resource{ID: rr.ID, SamplePath: rr.SamplePath}
+	for i := range rr.Methods {
+		rm := &rr.Methods[i]
+		where := "resource " + rr.ID + " method " + rm.ID
+		if err := unexpected(where, rm.Other); err != nil {
+			return nil, err
+		}
+		switch rm.Mode {
+		case "M", "O", "D", "E":
+		default:
+			return nil, fmt.Errorf("%s: unknown wx:mode %q", where, rm.Mode)
+		}
+		m := &Method{ID: rm.ID, Name: rm.Name, Mode: rm.Mode}
+		if rm.Request != nil {
+			for _, p := range rm.Request.Params {
+				if p.Style != "query" {
+					return nil, fmt.Errorf("%s: request param %s has style %q", where, p.Name, p.Style)
+				}
+				m.QueryParams = append(m.QueryParams, p.Name)
 			}
+			reps, err := representations(rm.Request.Representations, ns, where)
+			if err != nil {
+				return nil, err
+			}
+			m.Request = reps
+		}
+		for _, resp := range rm.Responses {
+			out := Response{}
+			for _, s := range strings.Fields(resp.Status) {
+				n, err := strconv.Atoi(s)
+				if err != nil {
+					return nil, fmt.Errorf("%s: bad status %q", where, s)
+				}
+				out.Statuses = append(out.Statuses, n)
+			}
+			for _, p := range resp.Params {
+				if p.Style != "header" {
+					return nil, fmt.Errorf("%s: response param %s has style %q", where, p.Name, p.Style)
+				}
+				out.HeaderParams = append(out.HeaderParams, p.Name)
+			}
+			reps, err := representations(resp.Representations, ns, where)
+			if err != nil {
+				return nil, err
+			}
+			out.Representations = reps
+			m.Responses = append(m.Responses, out)
 		}
 		r.Methods = append(r.Methods, m)
 	}
-	for _, child := range rr.Resources {
-		r.Children = append(r.Children, convertResource(child))
-	}
-	return r
+	return r, nil
 }
 
-// stripNS removes a namespace prefix from a QName (e.g. "sep:EndDevice" → "EndDevice").
-func stripNS(s string) string {
-	if i := strings.LastIndex(s, ":"); i >= 0 {
-		return s[i+1:]
+func representations(raws []rawRepresentation, ns map[string]string, where string) ([]Representation, error) {
+	var out []Representation
+	for _, rr := range raws {
+		rep := Representation{MediaType: rr.MediaType}
+		if rr.Element != "" {
+			prefix, local, ok := strings.Cut(rr.Element, ":")
+			if !ok {
+				return nil, fmt.Errorf("%s: element %q has no namespace prefix", where, rr.Element)
+			}
+			space, ok := ns[prefix]
+			if !ok {
+				return nil, fmt.Errorf("%s: undeclared prefix in %q", where, rr.Element)
+			}
+			rep.ElementSpace, rep.Element = space, local
+		}
+		out = append(out, rep)
 	}
-	return s
+	return out, nil
 }
 
-// Raw XML types for unmarshal.
+func unexpected(where string, other []rawOther) error {
+	if len(other) > 0 {
+		return fmt.Errorf("%s: unexpected element %s", where, other[0].XMLName.Local)
+	}
+	return nil
+}
+
+type rawOther struct {
+	XMLName xml.Name
+}
 
 type rawApplication struct {
-	XMLName   xml.Name      `xml:"application"`
-	Resources *rawResources `xml:"resources"`
+	XMLName   xml.Name
+	Attrs     []xml.Attr     `xml:",any,attr"`
+	Resources []rawResources `xml:"resources"`
 }
 
 type rawResources struct {
-	Base      string        `xml:"base,attr"`
 	Resources []rawResource `xml:"resource"`
 }
 
 type rawResource struct {
-	Path      string        `xml:"path,attr"`
-	Params    []rawParam    `xml:"param"`
-	Methods   []rawMethod   `xml:"method"`
-	Resources []rawResource `xml:"resource"`
+	ID           string        `xml:"id,attr"`
+	Path         string        `xml:"path,attr"`
+	SamplePath   string        `xml:"urn:ieee:std:2030.5:wadlExt samplePath,attr"`
+	Doc          []rawOther    `xml:"doc"`
+	Methods      []rawMethod   `xml:"method"`
+	Resources    []rawResource `xml:"resource"`
+	SampleParams []rawOther    `xml:"urn:ieee:std:2030.5:wadlExt sampleParam"`
+	Other        []rawOther    `xml:",any"`
+}
+
+type rawMethod struct {
+	ID        string        `xml:"id,attr"`
+	Name      string        `xml:"name,attr"`
+	Mode      string        `xml:"urn:ieee:std:2030.5:wadlExt mode,attr"`
+	Doc       []rawOther    `xml:"doc"`
+	Request   *rawRequest   `xml:"request"`
+	Responses []rawResponse `xml:"response"`
+	Other     []rawOther    `xml:",any"`
+}
+
+type rawRequest struct {
+	Params          []rawParam          `xml:"param"`
+	Representations []rawRepresentation `xml:"representation"`
+}
+
+type rawResponse struct {
+	Status          string              `xml:"status,attr"`
+	Params          []rawParam          `xml:"param"`
+	Representations []rawRepresentation `xml:"representation"`
 }
 
 type rawParam struct {
 	Name  string `xml:"name,attr"`
 	Style string `xml:"style,attr"`
-	Type  string `xml:"type,attr"`
-}
-
-type rawMethod struct {
-	Name     string       `xml:"name,attr"`
-	Request  *rawBody     `xml:"request"`
-	Response *rawBody     `xml:"response"`
-}
-
-type rawBody struct {
-	Representations []rawRepresentation `xml:"representation"`
 }
 
 type rawRepresentation struct {

@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Synthetic fixture for the generator's tests: one instance of every XSD
+     construct the IEEE 2030.5 schema uses. Not a model of IEEE 2030.5. -->
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns="urn:test:base"
+           targetNamespace="urn:test:base" elementFormDefault="qualified" version="1.2">
+  <xs:simpleType name="UInt8"><xs:restriction base="xs:unsignedByte"/></xs:simpleType>
+  <xs:simpleType name="UInt32"><xs:restriction base="xs:unsignedInt"/></xs:simpleType>
+  <xs:simpleType name="UInt48">
+    <xs:restriction base="xs:unsignedLong"><xs:maxInclusive value="281474976710655"/></xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="Int48">
+    <xs:restriction base="xs:long">
+      <xs:minInclusive value="-140737488355328"/>
+      <xs:maxInclusive value="140737488355328"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="HexBinary16"><xs:restriction base="xs:hexBinary"><xs:maxLength value="2"/></xs:restriction></xs:simpleType>
+  <xs:simpleType name="String6"><xs:restriction base="xs:string"><xs:maxLength value="6"/></xs:restriction></xs:simpleType>
+  <xs:simpleType name="Version"><xs:restriction base="xs:string"><xs:pattern value="[0-9]+[.][0-9]+"/></xs:restriction></xs:simpleType>
+  <xs:simpleType name="Kind">
+    <xs:restriction base="xs:string"><xs:enumeration value="a"/><xs:enumeration value="b"/></xs:restriction>
+  </xs:simpleType>
+  <xs:complexType name="Status">
+    <xs:simpleContent><xs:extension base="UInt8"><xs:anyAttribute processContents="lax"/></xs:extension></xs:simpleContent>
+  </xs:complexType>
+  <xs:complexType name="Flags">
+    <xs:simpleContent><xs:extension base="HexBinary16"/></xs:simpleContent>
+  </xs:complexType>
+  <xs:complexType name="Percent">
+    <xs:simpleContent><xs:extension base="UInt8"/></xs:simpleContent>
+  </xs:complexType>
+  <xs:complexType name="PercentControl">
+    <xs:complexContent>
+      <xs:extension base="Percent">
+        <xs:attribute name="disabled" use="optional" default="false" type="xs:boolean"/>
+      </xs:extension>
+    </xs:complexContent>
+  </xs:complexType>
+  <xs:complexType name="Revision">
+    <xs:sequence><xs:any namespace="##targetNamespace" processContents="lax" minOccurs="1" maxOccurs="unbounded"/></xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="Resource">
+    <xs:sequence>
+      <xs:element name="Resource_r2_3" type="Revision" minOccurs="0" maxOccurs="1"/>
+      <xs:any namespace="##other" processContents="lax" minOccurs="0" maxOccurs="unbounded"/>
+    </xs:sequence>
+    <xs:attribute name="href" use="optional" type="xs:anyURI"/>
+  </xs:complexType>
+  <xs:complexType name="Link">
+    <xs:sequence/>
+    <xs:attribute name="href" use="required" type="xs:anyURI"/>
+  </xs:complexType>
+  <xs:complexType name="Power">
+    <xs:sequence><xs:element name="value" type="UInt32"/></xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="Control">
+    <xs:sequence>
+      <xs:element name="limit" type="Power" minOccurs="0"/>
+      <xs:element name="share" type="PercentControl" minOccurs="0"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="Device">
+    <xs:complexContent>
+      <xs:extension base="Resource">
+        <xs:sequence>
+          <xs:element name="lFDI" type="HexBinary16" minOccurs="0"/>
+          <xs:element name="sFDI" type="UInt48"/>
+          <xs:element name="offset" type="Int48" minOccurs="0"/>
+          <xs:element name="name" type="String6" minOccurs="0" default="dev"/>
+          <xs:element name="kind" type="Kind" minOccurs="0"/>
+          <xs:element name="version" type="Version" minOccurs="0"/>
+          <xs:element name="status" type="Status" minOccurs="0" default="0"/>
+          <xs:element name="flags" type="Flags" minOccurs="0" default="00FF"/>
+          <xs:element name="enabled" type="xs:boolean" minOccurs="0" default="true"/>
+          <xs:element name="Control" type="Control" minOccurs="0"/>
+          <xs:element name="Link" type="Link" minOccurs="1" maxOccurs="3"/>
+        </xs:sequence>
+        <xs:attribute name="pollRate" use="optional" default="900" type="UInt32"/>
+      </xs:extension>
+    </xs:complexContent>
+  </xs:complexType>
+  <xs:complexType name="DeviceList">
+    <xs:complexContent>
+      <xs:extension base="Resource">
+        <xs:sequence><xs:element name="Device" type="Device" minOccurs="0" maxOccurs="unbounded"/></xs:sequence>
+        <xs:attribute name="all" use="required" type="UInt32"/>
+      </xs:extension>
+    </xs:complexContent>
+  </xs:complexType>
+  <xs:complexType name="SubscriptionBase">
+    <xs:complexContent>
+      <xs:extension base="Resource">
+        <xs:sequence><xs:element name="subscribedResource" type="xs:anyURI"/></xs:sequence>
+      </xs:extension>
+    </xs:complexContent>
+  </xs:complexType>
+  <xs:complexType name="Notification">
+    <xs:complexContent>
+      <xs:extension base="SubscriptionBase">
+        <xs:sequence><xs:element name="Resource" type="Resource" minOccurs="0"/></xs:sequence>
+      </xs:extension>
+    </xs:complexContent>
+  </xs:complexType>
+  <xs:element name="Device">
+    <xs:complexType><xs:complexContent><xs:extension base="Device">
+      <xs:attribute name="schemaVer" use="optional" type="Version"/>
+    </xs:extension></xs:complexContent></xs:complexType>
+  </xs:element>
+  <xs:element name="DeviceList">
+    <xs:complexType><xs:complexContent><xs:extension base="DeviceList">
+      <xs:attribute name="schemaVer" use="optional" type="Version"/>
+    </xs:extension></xs:complexContent></xs:complexType>
+  </xs:element>
+  <xs:element name="Notification">
+    <xs:complexType><xs:complexContent><xs:extension base="Notification">
+      <xs:attribute name="schemaVer" use="optional" type="Version"/>
+    </xs:extension></xs:complexContent></xs:complexType>
+  </xs:element>
+</xs:schema>

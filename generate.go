@@ -1,13 +1,11 @@
 // SPDX-License-Identifier: MIT
 
-// Code generation directives. Running "go generate" or "make generate"
-// regenerates all *_gen.go files from the IEEE 2030.5 XSD and WADL schemas.
-// The generated files carry a "DO NOT EDIT" header with the source schema's
-// SHA-256 checksum — do not edit them by hand; fix the generator instead.
-// See schemas/README.md for how to obtain the schema files.
+// The *_gen.go files of this module are generated from the upstream IEEE
+// 2030.5 and CSIP-AUS schemas pinned in schemas/manifest.json. Download them
+// with "make download" and regenerate with "make generate" (or go generate).
+// Never edit a generated file: fix the generator in internal/gen, or its
+// inputs in the manifest, and regenerate.
 
-//go:generate go run ./internal/gen -schema schemas/sep.xsd -out . -pkg ieee20305
-//go:generate go run ./internal/gen -base schemas/sep.xsd -schema schemas/csipaus.xsd -out csipaus -pkg csipaus
-//go:generate go run ./internal/gen -wadl schemas/sep.wadl -out . -pkg ieee20305
+//go:generate go run ./internal/gen generate
 
 package ieee20305

@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Synthetic fixture: the extension namespace of a profile, in the shape
+     of csipaus-ext. -->
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns="urn:test:ext"
+           xmlns:b="urn:test:base" targetNamespace="urn:test:ext" elementFormDefault="qualified">
+  <xs:import namespace="urn:test:base" schemaLocation="base.xsd"/>
+  <xs:element name="limitExtra" type="b:Power"/>
+  <xs:element name="mode" type="ModeType"/>
+  <xs:element name="Meter" type="MeterType"/>
+  <xs:complexType name="ModeType">
+    <xs:simpleContent><xs:extension base="b:HexBinary16"/></xs:simpleContent>
+  </xs:complexType>
+  <xs:complexType name="MeterType">
+    <xs:complexContent>
+      <xs:extension base="b:Resource">
+        <xs:sequence><xs:element name="id" type="b:String6"/></xs:sequence>
+      </xs:extension>
+    </xs:complexContent>
+  </xs:complexType>
+</xs:schema>

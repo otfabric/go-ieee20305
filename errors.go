@@ -49,8 +49,9 @@ var (
 	ErrSchedule = errors.New("ieee20305: schedule conflict")
 )
 
-// Error is a non-success response from an IEEE 2030.5 server.
-type Error struct {
+// StatusError is a non-success HTTP response from an IEEE 2030.5 server. The
+// Error document a server may send in the body is the generated type Error.
+type StatusError struct {
 	// Method and Path identify the request.
 	Method string
 	Path   string
@@ -58,7 +59,7 @@ type Error struct {
 	StatusCode int
 }
 
-func (e *Error) Error() string {
+func (e *StatusError) Error() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "ieee20305: %s %s: %d", e.Method, e.Path, e.StatusCode)
 	title := http.StatusText(e.StatusCode)
@@ -69,7 +70,7 @@ func (e *Error) Error() string {
 }
 
 // Is matches the category sentinel for the response's status code.
-func (e *Error) Is(target error) bool {
+func (e *StatusError) Is(target error) bool {
 	switch e.StatusCode {
 	case http.StatusBadRequest:
 		return target == ErrBadRequest

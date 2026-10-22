@@ -1,70 +1,84 @@
 // SPDX-License-Identifier: MIT
 
+// Package wadl reads the IEEE 2030.5 WADL: the resources of the protocol
+// with their sample URIs, methods, conformance levels and representations.
 package wadl
 
-// Application is the root of a parsed WADL document.
+// Namespace of WADL documents.
+const Namespace = "http://wadl.dev.java.net/2009/02"
+
+// ExtNamespace of the IEEE 2030.5 WADL extension attributes.
+const ExtNamespace = "urn:ieee:std:2030.5:wadlExt"
+
+// Application is a parsed WADL document.
 type Application struct {
-	Resources []Resource
+	Resources []*Resource
 }
 
-// Resource describes a single REST resource with its URI template,
-// supported HTTP methods, and optional child resources.
+// Resource is one resource of the WADL.
 type Resource struct {
-	Path     string
-	Params   []Param
-	Methods  []Method
-	Children []Resource
+	ID         string
+	SamplePath string
+	Methods    []*Method
 }
 
-// Param describes a URI template parameter (e.g. {eDevId}).
-type Param struct {
-	Name  string
-	Style string // "template", "query"
-	Type  string // XSD type (e.g. "xs:string")
-}
-
-// Method describes an HTTP method on a resource.
+// Method is an HTTP method on a resource.
 type Method struct {
-	Name     string // GET, POST, PUT, DELETE
-	Request  *Representation
-	Response *Representation
+	ID   string
+	Name string
+	// Mode is the wx:mode conformance letter: M (mandatory), O (optional),
+	// D (discouraged) or E (error).
+	Mode        string
+	QueryParams []string
+	Request     []Representation
+	Responses   []Response
 }
 
-// Representation describes the media type and XSD element of a
-// request or response body.
+// Representation is a body of a request or response.
 type Representation struct {
-	MediaType string // e.g. "application/sep+xml"
-	Element   string // local name of the XSD element/type
+	MediaType string
+	// Element is the local name of the document element, in the namespace
+	// ElementSpace.
+	ElementSpace string
+	Element      string
 }
 
-// FlatResource is a resolved resource with its full URI pattern
-// and all methods collected from the WADL tree.
-type FlatResource struct {
-	Path    string
-	Params  []Param
-	Methods []Method
+// Response is a possible response of a method.
+type Response struct {
+	Statuses        []int
+	Representations []Representation
+	HeaderParams    []string
 }
 
-// Flatten walks the resource tree and returns a flat list of
-// resources with fully-qualified URI paths.
-func (a *Application) Flatten() []FlatResource {
-	var out []FlatResource
-	for _, r := range a.Resources {
-		flattenResource("", r, &out)
+// ResponseElement returns the document element of the method's successful
+// response, or "" if it has no body.
+func (m *Method) ResponseElement() string {
+	for _, r := range m.Responses {
+		ok := len(r.Statuses) == 0
+		for _, s := range r.Statuses {
+			ok = ok || (s >= 200 && s < 300)
+		}
+		if ok && len(r.Representations) > 0 {
+			return r.Representations[0].Element
+		}
+	}
+	return ""
+}
+
+// RequestElement returns the document element of the method's request
+// body, or "" if it has none.
+func (m *Method) RequestElement() string {
+	if len(m.Request) == 0 {
+		return ""
+	}
+	return m.Request[0].Element
+}
+
+// Statuses returns the explicit status codes of the method's responses.
+func (m *Method) Statuses() []int {
+	var out []int
+	for _, r := range m.Responses {
+		out = append(out, r.Statuses...)
 	}
 	return out
-}
-
-func flattenResource(prefix string, r Resource, out *[]FlatResource) {
-	path := prefix + r.Path
-	if len(r.Methods) > 0 {
-		*out = append(*out, FlatResource{
-			Path:    path,
-			Params:  r.Params,
-			Methods: r.Methods,
-		})
-	}
-	for _, child := range r.Children {
-		flattenResource(path, child, out)
-	}
 }

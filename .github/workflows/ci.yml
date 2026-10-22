@@ -19,12 +19,30 @@ jobs:
       go-versions: '["1.23", "1.24", "1.25", "1.26"]'
     secrets: inherit
 
-  generate-verify:
-    name: Verify generated code
+  # Downloads the pinned upstream schemas, regenerates the code and fails if
+  # it differs from what is committed. Then tests the generated code against
+  # the official IEEE examples and validates its output with xmllint against
+  # the official IEEE 2030.5 and CSIP-AUS schemas.
+  generated-code:
+    name: Generated code
     runs-on: ubuntu-latest
+    env:
+      GOWORK: "off"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      - run: make generate-verify
+      - name: Install xmllint
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libxml2-utils
+      - name: Cache upstream schemas
+        uses: actions/cache@v4
+        with:
+          path: schemas/upstream
+          key: upstream-schemas-${{ hashFiles('schemas/manifest.json') }}
+      - name: Check generated headers against the manifest
+        run: make generate-verify
+      - name: Download, verify and regenerate; fail on drift
+        run: make generate-check
+      - name: Test against the official examples and schemas
+        run: go test -count=1 -race . ./csipaus ./internal/...

@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Synthetic fixture in the shape of the IEEE 2030.5 WADL. -->
+<application xmlns="http://wadl.dev.java.net/2009/02" xmlns:wx="urn:ieee:std:2030.5:wadlExt"
+             xmlns:t="urn:test:base">
+  <doc title="Test">fixture</doc>
+  <grammars><include href="base.xsd"/></grammars>
+  <resources wx:sampleBase="http://localhost/">
+    <resource id="DeviceList" wx:samplePath="/dev">
+      <doc title="DeviceList">Devices.</doc>
+      <method id="GETDeviceList" name="GET" wx:mode="M">
+        <request>
+          <param name="s" style="query" type="xsd:int"><doc>start</doc></param>
+          <param name="l" style="query" type="xsd:int"><doc>limit</doc></param>
+        </request>
+        <response>
+          <representation mediaType="application/sep+xml" element="t:DeviceList"/>
+          <representation mediaType="application/sep-exi" element="t:DeviceList"/>
+        </response>
+      </method>
+      <method id="POSTDeviceList" name="POST" wx:mode="O">
+        <request>
+          <representation mediaType="application/sep+xml" element="t:Device"/>
+        </request>
+        <response status="201">
+          <param name="location" style="header" type="xsd:anyURI" required="true"/>
+        </response>
+      </method>
+      <method id="DELETEDeviceList" name="DELETE" wx:mode="E">
+        <response status="400"/>
+        <response status="405"/>
+      </method>
+    </resource>
+    <resource id="Device" wx:samplePath="/dev/{id1}">
+      <method id="GETDevice" name="GET" wx:mode="M">
+        <response>
+          <representation mediaType="application/sep+xml" element="t:Device"/>
+        </response>
+      </method>
+      <method id="PUTDevice" name="PUT" wx:mode="D">
+        <request><representation mediaType="application/sep+xml" element="t:Device"/></request>
+      </method>
+      <wx:sampleParam name="id1" style="template" type="idType"/>
+    </resource>
+  </resources>
+</application>

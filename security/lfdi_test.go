@@ -24,7 +24,7 @@ func TestCertificateLFDI(t *testing.T) {
 
 	// Should be uppercase hex.
 	for _, c := range s {
-		if !((c >= '0' && c <= '9') || (c >= 'A' && c <= 'F')) {
+		if (c < '0' || c > '9') && (c < 'A' || c > 'F') {
 			t.Fatalf("LFDI contains non-hex char %c", c)
 		}
 	}

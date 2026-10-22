@@ -1,2 +1,2 @@
-*.xsd
-*.wadl
+# Upstream schema files downloaded by "make schemas" (not redistributable).
+upstream/

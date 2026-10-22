@@ -4,149 +4,66 @@ package wadl_test
 
 import (
 	"path/filepath"
+	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/otfabric/go-ieee20305/internal/gen/wadl"
 )
 
 func TestParseFile(t *testing.T) {
-	app, err := wadl.ParseFile(filepath.Join("testdata", "minimal.wadl"))
+	app, err := wadl.ParseFile(filepath.Join("..", "testdata", "app.wadl"))
 	if err != nil {
-		t.Fatalf("ParseFile: %v", err)
+		t.Fatal(err)
 	}
-	if len(app.Resources) != 3 {
-		t.Fatalf("got %d top-level resources, want 3", len(app.Resources))
+	if len(app.Resources) != 2 {
+		t.Fatalf("got %d resources", len(app.Resources))
 	}
-
-	dcap := app.Resources[0]
-	if dcap.Path != "/dcap" {
-		t.Errorf("dcap path = %q, want /dcap", dcap.Path)
+	list := app.Resources[0]
+	if list.ID != "DeviceList" || list.SamplePath != "/dev" || len(list.Methods) != 3 {
+		t.Fatalf("DeviceList = %+v", list)
 	}
-	if len(dcap.Methods) != 1 || dcap.Methods[0].Name != "GET" {
-		t.Error("dcap should have one GET method")
+	get, post, del := list.Methods[0], list.Methods[1], list.Methods[2]
+	if get.Name != "GET" || get.Mode != "M" || !reflect.DeepEqual(get.QueryParams, []string{"s", "l"}) {
+		t.Errorf("GET = %+v", get)
 	}
-	if dcap.Methods[0].Response == nil || dcap.Methods[0].Response.Element != "DeviceCapability" {
-		t.Error("dcap GET response should be DeviceCapability")
+	if get.ResponseElement() != "DeviceList" || get.RequestElement() != "" {
+		t.Errorf("GET elements = %q %q", get.RequestElement(), get.ResponseElement())
+	}
+	if rep := get.Responses[0].Representations; len(rep) != 2 || rep[0].ElementSpace != "urn:test:base" || rep[1].MediaType != "application/sep-exi" {
+		t.Errorf("GET representations = %+v", rep)
+	}
+	if post.Mode != "O" || post.RequestElement() != "Device" || post.ResponseElement() != "" ||
+		!reflect.DeepEqual(post.Statuses(), []int{201}) || !reflect.DeepEqual(post.Responses[0].HeaderParams, []string{"location"}) {
+		t.Errorf("POST = %+v", post)
+	}
+	if del.Mode != "E" || !reflect.DeepEqual(del.Statuses(), []int{400, 405}) {
+		t.Errorf("DELETE = %+v", del)
+	}
+	if dev := app.Resources[1]; dev.SamplePath != "/dev/{id1}" || dev.Methods[1].Mode != "D" {
+		t.Errorf("Device = %+v", dev)
 	}
 }
 
-func TestParseNestedResources(t *testing.T) {
-	app, err := wadl.ParseFile(filepath.Join("testdata", "minimal.wadl"))
-	if err != nil {
-		t.Fatalf("ParseFile: %v", err)
+func TestParseErrors(t *testing.T) {
+	const head = `<application xmlns="http://wadl.dev.java.net/2009/02" xmlns:wx="urn:ieee:std:2030.5:wadlExt" xmlns:t="urn:t"><resources>`
+	const tail = `</resources></application>`
+	tests := map[string]string{
+		"not wadl":         `<application xmlns="urn:other"/>`,
+		"missing id":       head + `<resource/>` + tail,
+		"duplicate id":     head + `<resource id="A"/><resource id="A"/>` + tail,
+		"unknown mode":     head + `<resource id="A"><method name="GET" wx:mode="X"/></resource>` + tail,
+		"undeclared":       head + `<resource id="A"><method name="GET" wx:mode="M"><response><representation element="q:B"/></response></method></resource>` + tail,
+		"bad status":       head + `<resource id="A"><method name="GET" wx:mode="M"><response status="ok"/></method></resource>` + tail,
+		"unknown element":  head + `<resource id="A"><nope/></resource>` + tail,
+		"template request": head + `<resource id="A"><method name="GET" wx:mode="M"><request><param name="x" style="template"/></request></method></resource>` + tail,
 	}
-
-	edev := app.Resources[2]
-	if edev.Path != "/edev" {
-		t.Fatalf("edev path = %q, want /edev", edev.Path)
-	}
-	if len(edev.Children) != 1 {
-		t.Fatalf("edev children = %d, want 1", len(edev.Children))
-	}
-
-	instance := edev.Children[0]
-	if instance.Path != "/{eDevId}" {
-		t.Errorf("instance path = %q, want /{eDevId}", instance.Path)
-	}
-	if len(instance.Params) != 1 || instance.Params[0].Name != "eDevId" {
-		t.Error("instance should have eDevId param")
-	}
-	if instance.Params[0].Style != "template" {
-		t.Errorf("eDevId style = %q, want template", instance.Params[0].Style)
-	}
-
-	// DER sub-collection
-	if len(instance.Children) != 1 {
-		t.Fatalf("instance children = %d, want 1 (der)", len(instance.Children))
-	}
-	der := instance.Children[0]
-	if der.Path != "/der" {
-		t.Errorf("der path = %q, want /der", der.Path)
-	}
-}
-
-func TestParseMethods(t *testing.T) {
-	app, err := wadl.ParseFile(filepath.Join("testdata", "minimal.wadl"))
-	if err != nil {
-		t.Fatalf("ParseFile: %v", err)
-	}
-
-	edev := app.Resources[2]
-
-	// Collection: GET + POST
-	if len(edev.Methods) != 2 {
-		t.Fatalf("edev methods = %d, want 2", len(edev.Methods))
-	}
-	if edev.Methods[0].Name != "GET" {
-		t.Errorf("edev method[0] = %q, want GET", edev.Methods[0].Name)
-	}
-	if edev.Methods[1].Name != "POST" {
-		t.Errorf("edev method[1] = %q, want POST", edev.Methods[1].Name)
-	}
-	if edev.Methods[1].Request == nil || edev.Methods[1].Request.Element != "EndDevice" {
-		t.Error("POST request should be EndDevice")
-	}
-
-	// Instance: GET + PUT + DELETE
-	instance := edev.Children[0]
-	if len(instance.Methods) != 3 {
-		t.Fatalf("instance methods = %d, want 3", len(instance.Methods))
-	}
-	del := instance.Methods[2]
-	if del.Name != "DELETE" {
-		t.Errorf("instance method[2] = %q, want DELETE", del.Name)
-	}
-	if del.Request != nil || del.Response != nil {
-		t.Error("DELETE should have no request or response")
-	}
-}
-
-func TestFlatten(t *testing.T) {
-	app, err := wadl.ParseFile(filepath.Join("testdata", "minimal.wadl"))
-	if err != nil {
-		t.Fatalf("ParseFile: %v", err)
-	}
-
-	flat := app.Flatten()
-
-	paths := make(map[string]bool)
-	for _, fr := range flat {
-		paths[fr.Path] = true
-	}
-
-	want := []string{
-		"/dcap",
-		"/tm",
-		"/edev",
-		"/edev/{eDevId}",
-		"/edev/{eDevId}/der",
-		"/edev/{eDevId}/der/{derId}",
-	}
-	for _, w := range want {
-		if !paths[w] {
-			t.Errorf("missing flattened path %q", w)
+	for name, doc := range tests {
+		if _, err := wadl.Parse([]byte(doc)); err == nil {
+			t.Errorf("%s: Parse succeeded", name)
 		}
 	}
-	if len(flat) != len(want) {
-		t.Errorf("got %d flat resources, want %d", len(flat), len(want))
-	}
-}
-
-func TestParseMediaType(t *testing.T) {
-	app, err := wadl.ParseFile(filepath.Join("testdata", "minimal.wadl"))
-	if err != nil {
-		t.Fatalf("ParseFile: %v", err)
-	}
-
-	resp := app.Resources[0].Methods[0].Response
-	if resp.MediaType != "application/sep+xml" {
-		t.Errorf("mediaType = %q, want application/sep+xml", resp.MediaType)
-	}
-}
-
-func TestParseInvalidXML(t *testing.T) {
-	_, err := wadl.Parse([]byte("not xml"))
-	if err == nil {
-		t.Error("expected error for invalid XML")
+	if _, err := wadl.Parse([]byte(strings.Repeat("<", 3))); err == nil {
+		t.Error("malformed XML parsed")
 	}
 }
