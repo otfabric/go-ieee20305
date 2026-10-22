@@ -93,3 +93,32 @@ func TestDecode(t *testing.T) {
 		t.Errorf("unknown root: %v", err)
 	}
 }
+
+func TestMarshalUnsupported(t *testing.T) {
+	if _, err := Marshal(docName, "", make(chan int)); err == nil {
+		t.Error("Marshal of a channel succeeded")
+	}
+}
+
+func TestCompactKeepsMarkup(t *testing.T) {
+	in := `<?xml version="1.0"?><!DOCTYPE Doc><?pi?><Doc xmlns="urn:a"><!-- c --><a xmlns="urn:a">x</a></Doc>`
+	out, err := compact([]byte(in))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `<?xml version="1.0"?><!DOCTYPE Doc><?pi?><Doc xmlns="urn:a"><!-- c --><a>x</a></Doc>`
+	if string(out) != want {
+		t.Errorf("compact =\n%s\nwant\n%s", out, want)
+	}
+}
+
+func TestCompactErrors(t *testing.T) {
+	for name, in := range map[string]string{
+		"unbalanced": `</Doc>`,
+		"malformed":  `<Doc a=>`,
+	} {
+		if _, err := compact([]byte(in)); err == nil {
+			t.Errorf("%s: compact succeeded", name)
+		}
+	}
+}

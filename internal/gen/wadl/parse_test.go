@@ -85,3 +85,33 @@ func TestRenamed(t *testing.T) {
 		t.Error("Renamed changed the original")
 	}
 }
+
+func TestParseMoreErrors(t *testing.T) {
+	const head = `<application xmlns="http://wadl.dev.java.net/2009/02" xmlns:wx="urn:ieee:std:2030.5:wadlExt" xmlns:t="urn:t"><resources>`
+	const tail = `</resources></application>`
+	method := func(body string) string {
+		return head + `<resource id="A"><method name="GET" wx:mode="M">` + body + `</method></resource>` + tail
+	}
+	tests := map[string]string{
+		"two resources":       `<application xmlns="http://wadl.dev.java.net/2009/02"><resources/><resources/></application>`,
+		"nested duplicate":    head + `<resource id="A"><resource id="A"/></resource>` + tail,
+		"method element":      method(`<nope/>`),
+		"unprefixed":          method(`<request><representation element="B"/></request>`),
+		"query response":      method(`<response><param name="x" style="query"/></response>`),
+		"undeclared response": method(`<response status="200"><representation element="q:B"/></response>`),
+	}
+	for name, doc := range tests {
+		if _, err := wadl.Parse([]byte(doc)); err == nil {
+			t.Errorf("%s: Parse succeeded", name)
+		}
+	}
+}
+
+func TestParseFileErrors(t *testing.T) {
+	if _, err := wadl.ParseFile(filepath.Join(t.TempDir(), "none.wadl")); err == nil {
+		t.Error("ParseFile of a missing file succeeded")
+	}
+	if _, err := wadl.ParseFile(filepath.Join("..", "testdata", "base.xsd")); err == nil || !strings.Contains(err.Error(), "base.xsd") {
+		t.Errorf("ParseFile of a schema = %v", err)
+	}
+}

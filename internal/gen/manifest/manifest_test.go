@@ -63,3 +63,60 @@ func TestParseRejects(t *testing.T) {
 		t.Errorf("valid manifest rejected: %v", err)
 	}
 }
+
+func TestLoadMissing(t *testing.T) {
+	if _, err := manifest.Load(filepath.Join(t.TempDir(), "none.json")); err == nil {
+		t.Error("Load of a missing file succeeded")
+	}
+}
+
+// withTargets returns a manifest with one pinned single-file source x and the
+// given targets.
+func withTargets(targets string) string {
+	return `{"sources":[{"id":"a","url":"https://x/a","sha256":"` + sha + `","license":"l","files":[{"to":"x","sha256":"` + sha + `"}]}],"targets":[` + targets + `]}`
+}
+
+func TestParseRejectsMore(t *testing.T) {
+	file := `"files":[{"to":"x","sha256":"` + sha + `"}]`
+	one := func(id, extra string) string {
+		return `{"id":"` + id + `","url":"https://x/a","sha256":"` + sha + `",` + extra + `}`
+	}
+	tests := map[string]string{
+		"duplicate id":      `{"sources":[` + one("a", file) + `,` + one("a", `"files":[{"to":"y","sha256":"`+sha+`"}]`) + `]}`,
+		"missing id":        `{"sources":[` + one("", file) + `]}`,
+		"bad archive":       `{"sources":[` + one("a", `"archive":"tar",`+file) + `]}`,
+		"duplicate output":  `{"sources":[` + one("a", file) + `,` + one("b", file) + `]}`,
+		"single with from":  `{"sources":[` + one("a", `"files":[{"from":"f","to":"x","sha256":"`+sha+`"}]`) + `]}`,
+		"watch half":        `{"sources":[` + one("a", file+`,"watch":{"page":"https://x"}`) + `]}`,
+		"duplicate target":  withTargets(`{"name":"t","dir":".","package":"p","importPath":"p"},{"name":"t","dir":".","package":"p","importPath":"p"}`),
+		"no package":        withTargets(`{"name":"t","dir":".","importPath":"p"}`),
+		"edition2018":       withTargets(`{"name":"t","dir":".","package":"p","importPath":"p","edition2018":{"xsd":"x"}}`),
+		"resource override": withTargets(`{"name":"t","dir":".","package":"p","importPath":"p","overrides":[{"kind":"resource","name":"n","reason":"r"}]}`),
+		"override no type":  withTargets(`{"name":"t","dir":".","package":"p","importPath":"p","overrides":[{"kind":"elementRef","name":"n","reason":"r"}]}`),
+		"trailing garbage":  `[`,
+	}
+	for name, doc := range tests {
+		if _, err := manifest.Parse([]byte(doc)); err == nil {
+			t.Errorf("%s: Parse accepted %s", name, doc)
+		}
+	}
+}
+
+func TestParseAccepts(t *testing.T) {
+	doc := withTargets(`{"name":"b","dir":".","package":"b","importPath":"b","xsd":"x","wadl":"x",` +
+		`"edition2018":{"xsd":"x","wadl":"x"},"schemaLocations":{"u":"x"},"examples":{"dir":"e","package":"e","importPath":"b/e"},` +
+		`"overrides":[{"kind":"elementRef","name":"n","type":"t","ref":"r","reason":"r"},` +
+		`{"kind":"polymorphicElement","name":"n","type":"t","reason":"r"},` +
+		`{"kind":"resource","name":"n","like":"l","path":"/p","reason":"r"}]},` +
+		`{"name":"t","dir":"t","package":"t","importPath":"b/t","base":"b","examples":{"dir":"te","package":"te","importPath":"b/te"}}`)
+	m, err := manifest.Parse([]byte(doc))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := m.Target("nope"); ok {
+		t.Error("Target found an unknown name")
+	}
+	if m.FileSHA256("nope") != "" {
+		t.Error("FileSHA256 pinned an unknown file")
+	}
+}
