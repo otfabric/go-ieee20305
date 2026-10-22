@@ -68,7 +68,7 @@ func TestSFDI(t *testing.T) {
 	sfdi := lfdi.SFDI()
 
 	if !sfdi.Valid() {
-		t.Errorf("SFDI %s failed Luhn check", sfdi)
+		t.Errorf("SFDI %s has a wrong check digit", sfdi)
 	}
 
 	// SFDI should be a positive number.
@@ -77,8 +77,8 @@ func TestSFDI(t *testing.T) {
 	}
 }
 
-func TestSFDILuhn(t *testing.T) {
-	// Generate several certs and check that all SFDIs pass Luhn.
+func TestSFDICheckDigit(t *testing.T) {
+	// Generate several certs and check that every SFDI has a valid check digit.
 	for i := 0; i < 5; i++ {
 		ca, caKey, err := security.TestCA("Test Org")
 		if err != nil {
@@ -91,8 +91,28 @@ func TestSFDILuhn(t *testing.T) {
 
 		sfdi := security.CertificateLFDI(dev).SFDI()
 		if !sfdi.Valid() {
-			t.Errorf("iteration %d: SFDI %s failed Luhn check", i, sfdi)
+			t.Errorf("iteration %d: SFDI %s has a wrong check digit", i, sfdi)
 		}
+	}
+}
+
+// TestSFDIVectors uses the worked example of IEEE 2030.5 and the sFDI of
+// the official example EndDevice documents.
+func TestSFDIVectors(t *testing.T) {
+	lfdi, err := security.ParseLFDI("3E4F45AB31EDFE5B67E343E5E4562E31984E23E5")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := lfdi.SFDI(); got != 167261211391 {
+		t.Errorf("SFDI = %d, want 167261211391", got)
+	}
+	for _, s := range []security.SFDI{167261211391, 987654321005} {
+		if !s.Valid() {
+			t.Errorf("%d should be valid", s)
+		}
+	}
+	if security.SFDI(167261211392).Valid() {
+		t.Error("wrong check digit accepted")
 	}
 }
 
