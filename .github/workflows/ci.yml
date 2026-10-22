@@ -88,9 +88,12 @@ jobs:
       GOWORK: "off"
     steps:
       - uses: actions/checkout@v4
+      # The latest patch of the Go release tlsccm/go.mod names as its least:
+      # govulncheck flags the standard library of older patches.
       - uses: actions/setup-go@v5
         with:
-          go-version-file: tlsccm/go.mod
+          go-version: "1.26.x"
+          check-latest: true
           cache-dependency-path: tlsccm/go.sum
       - name: Install linters
         run: |
