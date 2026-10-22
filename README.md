@@ -17,6 +17,19 @@ A Go implementation of [IEEE 2030.5](https://standards.ieee.org/ieee/2030.5/5897
 - **`schedule`**: primacy-based event scheduling and the active/superseded/cancelled state machine;
 - **`discovery`**: DNS-SD service discovery for IEEE 2030.5 servers.
 
+## IEEE 2030.5 in five minutes
+
+- **REST over HTTPS, XML on the wire.** A server exposes resources (`application/sep+xml`); clients `GET`, `PUT`, `POST` and `DELETE` them. Everything starts at **DeviceCapability** (`/dcap`), and clients find every other resource by following **links**, never by building paths.
+- **Mutual TLS is identity.** Every device has a certificate. Its SHA-256 fingerprint gives the **LFDI** (long form) and **SFDI** (short form, with a check digit) that name the device. There are no passwords. The standard's cipher suite is `TLS_ECDHE_ECDSA_WITH_AES_128_CCM_8`.
+- **EndDevice and registration.** Each device has an **EndDevice** in the server's EndDeviceList. Its **Registration** carries a **PIN**, which the device checks against the PIN it was given out of band before it trusts the server.
+- **Function set assignments.** An EndDevice's **FunctionSetAssignments** (FSAs) tell it which programs apply to it: DER programs, demand response, pricing, messaging, prepayment, files and billing.
+- **Programs and events.** A program (such as a **DERProgram**) has a **primacy**, where lower wins, and a list of time-bound **events** (such as a **DERControl**: "limit export to 5 kW from 14:00 for 30 minutes"). Clients schedule the events themselves. When events conflict, primacy and creation time decide which one applies, start and duration may be randomized, and the server can cancel events. A **DefaultDERControl** applies when no event does.
+- **Responses.** An event may ask (`responseRequired`, `replyTo`) for **Responses** when the device receives it, starts it, completes it, or sees it cancelled or superseded.
+- **Polling or subscriptions.** Clients poll at the server's `pollRate`, or **subscribe** to a resource and receive **Notifications** at an HTTPS endpoint of their own.
+- **Lists.** Collections are lists that clients page through with `s` (start) and `l` (limit). A **ListLink** gives the number of items in `all`.
+- **Metering.** Devices report readings by posting a **MirrorUsagePoint** and its **MirrorMeterReadings**, which the server exposes as UsagePoints and MeterReadings.
+- **Editions and profiles.** IEEE 2030.5-2018 and -2023 differ in optional elements and resources. Profiles constrain or extend the standard: **CSIP** (California) and **CSIP-AUS** (Australia, which adds site limits, the dynamic operating envelopes).
+
 ## Package overview
 
 | Package | Description |
