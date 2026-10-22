@@ -11,9 +11,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/otfabric/go-ieee20305/internal/dnsmsg"
-
 	ieee20305 "github.com/otfabric/go-ieee20305"
+	"github.com/otfabric/go-ieee20305/internal/dnsmsg"
 )
 
 // ServiceType is the DNS-SD service type of IEEE 2030.5 servers.

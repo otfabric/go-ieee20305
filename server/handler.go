@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	ieee20305 "github.com/otfabric/go-ieee20305"
 )
@@ -74,18 +75,35 @@ func parseQuery(r *http.Request, allowed []string) (Query, error) {
 // ServeHTTP answers an IEEE 2030.5 request.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+	start := time.Now()
+	rec := &statusWriter{ResponseWriter: w, status: http.StatusOK}
+	p := Principal{Edition: s.cfg.DefaultEdition}
+	defer func() {
+		s.log.Debugf("%s %s from %s: %d in %v", r.Method, r.URL.Path, p.LFDI, rec.status, time.Since(start))
+	}()
 	if s.isClosed() {
-		http.Error(w, "server closed", http.StatusServiceUnavailable)
+		http.Error(rec, "server closed", http.StatusServiceUnavailable)
 		return
 	}
-	p, err := s.principal(r)
-	if err != nil {
-		s.fail(w, Principal{Edition: s.cfg.DefaultEdition}, err)
+	var err error
+	if p, err = s.principal(r); err != nil {
+		s.fail(rec, Principal{Edition: s.cfg.DefaultEdition}, err)
 		return
 	}
-	if err := s.serve(ctx, w, r, p); err != nil {
-		s.fail(w, p, err)
+	if err := s.serve(ctx, rec, r, p); err != nil {
+		s.fail(rec, p, err)
 	}
+}
+
+// statusWriter records the status of a response.
+type statusWriter struct {
+	http.ResponseWriter
+	status int
+}
+
+func (w *statusWriter) WriteHeader(status int) {
+	w.status = status
+	w.ResponseWriter.WriteHeader(status)
 }
 
 func (s *Server) serve(ctx context.Context, w http.ResponseWriter, r *http.Request, p Principal) error {
@@ -356,7 +374,9 @@ func (s *Server) respond(w http.ResponseWriter, p Principal, status int, doc any
 func (s *Server) fail(w http.ResponseWriter, p Principal, err error) {
 	he := asHTTPError(err)
 	if he.Status >= 500 {
-		s.log.Error("request failed", "err", err)
+		s.log.Errorf("request failed: %v", err)
+	} else {
+		s.log.Debugf("request refused (%d): %v", he.Status, err)
 	}
 	if he.Status == http.StatusBadRequest {
 		doc := &ieee20305.Error{ReasonCode: he.Reason}

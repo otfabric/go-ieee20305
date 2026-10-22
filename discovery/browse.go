@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	ieee20305 "github.com/otfabric/go-ieee20305"
 	"github.com/otfabric/go-ieee20305/internal/dnsmsg"
 )
 
@@ -47,6 +48,9 @@ type BrowseOptions struct {
 	// that responders answer it directly instead of over multicast
 	// (RFC 6762, section 5.4).
 	Unicast bool
+	// Logger receives the browser's log (see ieee20305.Logger), such as
+	// queries that cannot be sent; none when nil.
+	Logger ieee20305.Logger
 }
 
 // Browse finds IEEE 2030.5 servers with multicast DNS: it queries for the
@@ -70,6 +74,7 @@ func Browse(ctx context.Context, o BrowseOptions) (<-chan Service, error) {
 	b := &browser{
 		t:        t,
 		ifi:      o.Interface,
+		log:      ieee20305.ComponentLogger(o.Logger, "discovery"),
 		queries:  map[string]string{},
 		ptr:      map[string]map[string]time.Time{},
 		srv:      map[string]srvEntry{},
@@ -111,6 +116,7 @@ type txtEntry struct {
 type browser struct {
 	t   PacketTransport
 	ifi *net.Interface
+	log ieee20305.Logger
 	// queries maps the lower-case names browsed for to their subtype
 	// label, "" for the service type; order lists them as given.
 	queries map[string]string
@@ -185,7 +191,9 @@ func (b *browser) run(ctx context.Context, out chan<- Service) {
 			}
 			pending = b.handle(p, time.Now())
 		case <-requery.C:
-			_ = b.query(false)
+			if err := b.query(false); err != nil {
+				b.log.Warnf("sending a query: %v", err)
+			}
 			interval = min(2*interval, maxRequery)
 			requery.Reset(interval)
 		case now := <-sweep.C:
@@ -333,7 +341,9 @@ func (b *browser) reconcile(now time.Time) []Service {
 	}
 	maps.DeleteFunc(b.resolved, func(_ dnsmsg.Question, t time.Time) bool { return now.Sub(t) >= resolveInterval })
 	if len(missing) > 0 {
-		_ = b.send(missing)
+		if err := b.send(missing); err != nil {
+			b.log.Warnf("sending a query: %v", err)
+		}
 	}
 	return out
 }

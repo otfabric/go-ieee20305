@@ -28,6 +28,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/GRIDAPPSD/ieee-2030_5-core-go/pkg/sep2tls"
@@ -50,9 +51,9 @@ type Options struct {
 	AllowGCM bool
 	// HandshakeTimeout bounds a handshake: 10s when zero.
 	HandshakeTimeout time.Duration
-	// ErrorLog receives the handshake failures of a listener; the standard
-	// logger when nil, as for net/http.
-	ErrorLog *log.Logger
+	// Logger receives the handshake failures of a listener, at Warn (see
+	// ieee20305.Logger); none when nil.
+	Logger ieee20305.Logger
 }
 
 func (o Options) suites() []uint16 {
@@ -138,12 +139,22 @@ func NewHTTPClient(device tls.Certificate, roots *x509.CertPool, o Options) *htt
 // NewListener returns a listener of TLS connections with CCM_8 on inner,
 // for a server with the server certificate whose clients one of clientCAs
 // issued. A connection is accepted once its handshake succeeds; a failure
-// goes to Options.ErrorLog. clientCAs is required.
+// goes to Options.Logger. clientCAs is required.
 func NewListener(inner net.Listener, server tls.Certificate, clientCAs *x509.CertPool, o Options) (net.Listener, error) {
 	if clientCAs == nil {
 		return nil, fmt.Errorf("%w: tlsccm: a listener needs the CAs of its clients", ieee20305.ErrConfiguration)
 	}
-	return sep2tls.WrapCCMListenerWithTimeout(gotls.NewListener(inner, ServerConfig(server, clientCAs, o)), o.ErrorLog, o.timeout())
+	errorLog := log.New(logWriter{ieee20305.ComponentLogger(o.Logger, "tlsccm")}, "", 0)
+	return sep2tls.WrapCCMListenerWithTimeout(gotls.NewListener(inner, ServerConfig(server, clientCAs, o)), errorLog, o.timeout())
+}
+
+// logWriter writes the lines of a *log.Logger (which the listener of the
+// fork takes) to a Logger.
+type logWriter struct{ l ieee20305.Logger }
+
+func (w logWriter) Write(p []byte) (int, error) {
+	w.l.Warnf("%s", strings.TrimSpace(string(p)))
+	return len(p), nil
 }
 
 type connKey struct{}

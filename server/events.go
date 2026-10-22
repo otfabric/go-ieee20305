@@ -69,7 +69,7 @@ func (e *events) run(ch <-chan schedule.Transition) {
 			continue
 		}
 		if err := e.setStatus(context.Background(), t.Event.MRID, t.To, t.At); err != nil && !errors.Is(err, ErrNoNode) && !errors.Is(err, ieee20305.ErrClosed) {
-			e.s.log.Error("updating an event status", "event", t.Event.MRID, "err", err)
+			e.s.log.Errorf("updating the status of event %s: %v", t.Event.MRID, err)
 		}
 	}
 }

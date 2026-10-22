@@ -17,7 +17,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"sync"
 	"time"
@@ -95,8 +94,9 @@ type Config struct {
 	Clock schedule.Clock
 	// Seed seeds the randomization of the events: the SFDI when zero.
 	Seed uint64
-	// Logger receives the agent's log; none when nil.
-	Logger *slog.Logger
+	// Logger receives the agent's log (see ieee20305.Logger); none when
+	// nil.
+	Logger ieee20305.Logger
 }
 
 // Agent is a device that talks to one server. Its methods are safe for
@@ -104,7 +104,7 @@ type Config struct {
 type Agent struct {
 	cfg Config
 	c   *client.Client
-	log *slog.Logger
+	log ieee20305.Logger
 
 	clock schedule.Clock
 	loops [functionSets]*eventLoop
@@ -156,9 +156,7 @@ func New(cfg Config) (*Agent, error) {
 		cfg.MaxRetryDelay = 5 * time.Minute
 	}
 	a := &Agent{cfg: cfg, c: cfg.Client, log: cfg.Logger, files: map[string]bool{}}
-	if a.log == nil {
-		a.log = slog.New(discardHandler{})
-	}
+	a.log = ieee20305.ComponentLogger(cfg.Logger, "agent")
 	a.clock = cfg.Clock
 	if a.clock == nil {
 		a.clock = offsetClock{a}
@@ -346,16 +344,16 @@ func (a *Agent) Run(ctx context.Context) error {
 		if errors.Is(err, client.ErrNotRegistered) {
 			// Waiting for the operator, not for a failing server.
 			wait = a.pollRate()
-			a.log.Info("waiting for registration", "retry", wait)
+			a.log.Infof("waiting for the server to register the device; again in %v", wait)
 		} else {
-			a.log.Warn("start failed", "err", err, "retry", wait)
+			a.log.Warnf("start failed; again in %v: %v", wait, err)
 			delay = min(2*delay, a.cfg.MaxRetryDelay)
 		}
 		if err := sleep(ctx, wait); err != nil {
 			return err
 		}
 	}
-	a.log.Info("started", "endDevice", a.State().EndDevice.GetHref())
+	a.log.Infof("started as EndDevice %s", a.State().EndDevice.GetHref())
 	var wg sync.WaitGroup
 	defer wg.Wait()
 	wg.Add(1)
@@ -373,7 +371,7 @@ func (a *Agent) Run(ctx context.Context) error {
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
-			a.log.Warn("poll failed", "err", err, "retry", delay)
+			a.log.Warnf("poll failed; again in %v: %v", delay, err)
 			wait = delay
 			delay = min(2*delay, a.cfg.MaxRetryDelay)
 			continue
@@ -429,11 +427,3 @@ func sleep(ctx context.Context, d time.Duration) error {
 		return nil
 	}
 }
-
-// discardHandler drops the log (slog.DiscardHandler is Go 1.24).
-type discardHandler struct{}
-
-func (discardHandler) Enabled(context.Context, slog.Level) bool  { return false }
-func (discardHandler) Handle(context.Context, slog.Record) error { return nil }
-func (h discardHandler) WithAttrs([]slog.Attr) slog.Handler      { return h }
-func (h discardHandler) WithGroup(string) slog.Handler           { return h }

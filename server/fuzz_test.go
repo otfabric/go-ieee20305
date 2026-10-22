@@ -26,7 +26,7 @@ func FuzzHandler(f *testing.F) {
 	f.Add("PUT", "/edev/1", ed)
 	f.Add("PUT", "/edev/1", []byte("<EndDevice xmlns=\"urn:ieee:std:2030.5:ns\"><sFDI>x</sFDI></EndDevice>"))
 	f.Add("DELETE", "/edev/1", []byte(nil))
-	h := newHarness(f, server.Config{Logger: slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))}, "dev")
+	h := newHarness(f, server.Config{Logger: ieee20305.NewSlogLogger(slog.NewTextHandler(&bytes.Buffer{}, nil))}, "dev")
 	seedAll(f, h, h.lfdi("dev"))
 	f.Fuzz(func(t *testing.T, method, path string, body []byte) {
 		if !strings.HasPrefix(path, "/") || strings.ContainsAny(path, " \r\n#") {

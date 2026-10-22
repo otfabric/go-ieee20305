@@ -234,7 +234,7 @@ func (a *Agent) pollEvents(ctx context.Context, l *eventLoop, fsas []*ieee20305.
 		return a.c.Iterate(ctx, list, 0, func(it any) error {
 			ev, err := schedule.FromEvent(it, primacy, program+"|"+list)
 			if err != nil {
-				a.log.Warn("skipping an event", "function set", l.set.fs, "err", err)
+				a.log.Warnf("%v: skipping an event: %v", l.set.fs, err)
 				return nil
 			}
 			if ev.MRID == "" || events[ev.MRID] {
@@ -310,11 +310,11 @@ func (a *Agent) runLoop(l *eventLoop, ch <-chan schedule.Transition) {
 		ctx := a.ctx
 		if handle != nil {
 			if err := handle(ctx, t); err != nil {
-				a.log.Warn("event handler failed", "function set", l.set.fs, "mRID", t.Event.MRID, "err", err)
+				a.log.Warnf("%v: the handler of event %s failed: %v", l.set.fs, t.Event.MRID, err)
 			}
 		}
 		if err := a.respond(ctx, l.set, t); err != nil {
-			a.log.Warn("posting a Response failed", "function set", l.set.fs, "mRID", t.Event.MRID, "err", err)
+			a.log.Warnf("%v: posting a Response to event %s failed: %v", l.set.fs, t.Event.MRID, err)
 		}
 	}
 }

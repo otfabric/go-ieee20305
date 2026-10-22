@@ -108,7 +108,7 @@ func serve(t *testing.T, srv *server.Server, p *pki, gcm bool) string {
 		t.Fatal(err)
 	}
 	quiet := log.New(io.Discard, "", 0)
-	l, err := tlsccm.NewListener(inner, p.server, p.roots, tlsccm.Options{AllowGCM: gcm, ErrorLog: quiet})
+	l, err := tlsccm.NewListener(inner, p.server, p.roots, tlsccm.Options{AllowGCM: gcm})
 	if err != nil {
 		t.Fatal(err)
 	}

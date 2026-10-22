@@ -59,7 +59,7 @@ func (a *Agent) mirror(ctx context.Context) {
 			href = h
 			break
 		}
-		a.log.Warn("creating the MirrorUsagePoint failed", "err", err, "retry", delay)
+		a.log.Warnf("creating the MirrorUsagePoint failed; again in %v: %v", delay, err)
 		if sleep(ctx, delay) != nil {
 			return
 		}
@@ -84,7 +84,7 @@ func (a *Agent) mirror(ctx context.Context) {
 			if ctx.Err() != nil {
 				return
 			}
-			a.log.Warn("posting readings failed", "err", err)
+			a.log.Warnf("posting readings failed: %v", err)
 		} else {
 			a.mu.Lock()
 			a.state.Posts++

@@ -14,9 +14,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/otfabric/go-ieee20305/internal/dnsmsg"
-
 	ieee20305 "github.com/otfabric/go-ieee20305"
+	"github.com/otfabric/go-ieee20305/internal/dnsmsg"
 )
 
 // TTLs of the records of an advertisement (RFC 6762, section 10): records
@@ -48,11 +47,15 @@ type AdvertiseOptions struct {
 	// from NewMulticastTransport(Interface). The Advertisement closes it
 	// when it is closed.
 	Transport PacketTransport
+	// Logger receives the advertisement's log (see ieee20305.Logger), such
+	// as answers that cannot be sent; none when nil.
+	Logger ieee20305.Logger
 }
 
 // Advertisement is a service being advertised by Advertise.
 type Advertisement struct {
 	t       PacketTransport
+	log     ieee20305.Logger
 	svc     Service
 	records []dnsmsg.Resource
 
@@ -90,6 +93,7 @@ func Advertise(ctx context.Context, s Service, o AdvertiseOptions) (*Advertiseme
 	}
 	a := &Advertisement{
 		t:       t,
+		log:     ieee20305.ComponentLogger(o.Logger, "discovery"),
 		svc:     s,
 		records: records(s),
 		closing: make(chan struct{}),
@@ -104,7 +108,9 @@ func Advertise(ctx context.Context, s Service, o AdvertiseOptions) (*Advertiseme
 		defer a.wg.Done()
 		select {
 		case <-time.After(announceInterval):
-			_ = a.announce()
+			if err := a.announce(); err != nil {
+				a.log.Warnf("announcing %s again: %v", a.svc.Instance, err)
+			}
 		case <-a.closing:
 		}
 	}()
@@ -175,7 +181,9 @@ func (a *Advertisement) serve() {
 			return
 		}
 		if m, dst, ok := a.respond(data, src); ok {
-			_ = a.send(m, dst)
+			if err := a.send(m, dst); err != nil {
+				a.log.Warnf("answering %v: %v", dst, err)
+			}
 		}
 	}
 }

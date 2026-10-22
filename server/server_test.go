@@ -457,7 +457,7 @@ func TestPeerCertificateErrorsAndLogging(t *testing.T) {
 	var log bytes.Buffer
 	srv, err := server.New(server.Config{
 		PeerCertificates: func(*http.Request) ([]*x509.Certificate, error) { return nil, errors.New("no handshake") },
-		Logger:           slog.New(slog.NewTextHandler(&log, nil)),
+		Logger:           ieee20305.NewSlogLogger(slog.NewTextHandler(&log, nil)),
 		Hooks: map[string]server.Hooks{"Time": {Get: func(context.Context, *server.Request) (any, error) {
 			return nil, &server.HTTPError{Status: http.StatusBadGateway, Err: errors.New("upstream")}
 		}}},
@@ -477,7 +477,7 @@ func TestPeerCertificateErrorsAndLogging(t *testing.T) {
 	cert := testDevice(t, "dev")
 	srv2, err := server.New(server.Config{
 		PeerCertificates: func(*http.Request) ([]*x509.Certificate, error) { return []*x509.Certificate{cert}, nil },
-		Logger:           slog.New(slog.NewTextHandler(&log, nil)),
+		Logger:           ieee20305.NewSlogLogger(slog.NewTextHandler(&log, nil)),
 		Hooks: map[string]server.Hooks{"Time": {Get: func(context.Context, *server.Request) (any, error) {
 			return nil, &server.HTTPError{Status: http.StatusBadGateway, Err: errors.New("upstream")}
 		}}},

@@ -8,7 +8,6 @@ import (
 	"encoding/xml"
 	"errors"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"net/url"
 	"sync"
@@ -132,8 +131,9 @@ type Config struct {
 	// Hooks override or extend the handling of resources, by WADL resource
 	// ID; they run before the built-in function sets.
 	Hooks map[string]Hooks
-	// Logger receives the server's log; none when nil.
-	Logger *slog.Logger
+	// Logger receives the server's log (see ieee20305.Logger); none when
+	// nil.
+	Logger ieee20305.Logger
 }
 
 // Server is an IEEE 2030.5 server: an http.Handler to serve over TLS with
@@ -144,7 +144,7 @@ type Server struct {
 	profile   *Profile
 	store     Store
 	clock     func() time.Time
-	log       *slog.Logger
+	log       ieee20305.Logger
 	resources map[string]ieee20305.ResourceSpec
 	hooks     map[string]Hooks
 	notifier  *notifier
@@ -189,9 +189,7 @@ func New(cfg Config) (*Server, error) {
 	if s.clock == nil {
 		s.clock = time.Now
 	}
-	if s.log == nil {
-		s.log = slog.New(discardHandler{})
-	}
+	s.log = ieee20305.ComponentLogger(cfg.Logger, "server")
 	if s.cfg.MaxRequestBytes <= 0 {
 		s.cfg.MaxRequestBytes = 1 << 20
 	}
@@ -280,10 +278,3 @@ func (s *Server) isClosed() bool {
 // Store returns the store of the server. Changes made through it notify
 // the subscriptions of the resources.
 func (s *Server) Store() Store { return s.store }
-
-type discardHandler struct{}
-
-func (discardHandler) Enabled(context.Context, slog.Level) bool  { return false }
-func (discardHandler) Handle(context.Context, slog.Record) error { return nil }
-func (h discardHandler) WithAttrs([]slog.Attr) slog.Handler      { return h }
-func (h discardHandler) WithGroup(string) slog.Handler           { return h }

@@ -8,8 +8,6 @@ import (
 	"crypto/x509"
 	"encoding/asn1"
 	"errors"
-	"io"
-	"log"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -66,7 +64,6 @@ func serve(t *testing.T, p pki, srv *server.Server, o tlsccm.Options) (string, f
 	if err != nil {
 		t.Fatal(err)
 	}
-	o.ErrorLog = log.New(io.Discard, "", 0)
 	l, err := tlsccm.NewListener(inner, p.server, p.roots, o)
 	if err != nil {
 		t.Fatal(err)

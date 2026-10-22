@@ -66,6 +66,7 @@ func (a *Admin) ProvisionDevice(ctx context.Context, d DeviceSpec) (string, erro
 	}
 	info.EndDevice = href
 	s.setDevice(d.LFDI, info)
+	s.log.Infof("device %s provisioned at %s (%v, %v)", d.LFDI, href, d.Role, d.Edition)
 	if d.Register {
 		return href, a.Register(ctx, d.LFDI, d.PIN)
 	}
@@ -282,6 +283,7 @@ func (s *Server) createEndDevice(ctx context.Context, r *Request) (string, error
 	}
 	info.EndDevice = href
 	s.setDevice(lfdi, info)
+	s.log.Infof("device %s (sFDI %d) registered its EndDevice %s", lfdi, lfdi.SFDI(), href)
 	return href, nil
 }
 
@@ -321,7 +323,7 @@ func (s *Server) trim(ctx context.Context, list string) {
 	}
 	for _, m := range members[:len(members)-max] {
 		if err := s.store.Delete(ctx, m.Href); err != nil && !errors.Is(err, ErrNoNode) {
-			s.log.Warn("trimming a list", "list", list, "item", m.Href, "err", err)
+			s.log.Warnf("trimming %s: deleting %s: %v", list, m.Href, err)
 		}
 	}
 }

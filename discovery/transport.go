@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/netip"
 	"sync"
+	"time"
 
 	ieee20305 "github.com/otfabric/go-ieee20305"
 )
@@ -93,6 +94,7 @@ func NewMulticastTransport(ifi *net.Interface) (PacketTransport, error) {
 
 func (t *multicastTransport) read(c *net.UDPConn) {
 	defer t.wg.Done()
+	var backoff time.Duration
 	for {
 		b := make([]byte, maxPacket)
 		n, src, err := c.ReadFromUDPAddrPort(b)
@@ -100,8 +102,17 @@ func (t *multicastTransport) read(c *net.UDPConn) {
 			if errors.Is(err, net.ErrClosed) {
 				return
 			}
+			// An error that persists (a socket in a bad state) must not
+			// spin: wait longer each time, up to a second.
+			backoff = min(max(2*backoff, time.Millisecond), time.Second)
+			select {
+			case <-time.After(backoff):
+			case <-t.done:
+				return
+			}
 			continue
 		}
+		backoff = 0
 		select {
 		case t.packets <- packet{b[:n], src}:
 		case <-t.done:

@@ -263,7 +263,7 @@ func (n *notifier) work(sub *subscription) {
 		err := n.deliver(sub, status)
 		if status != NotificationDefault || err != nil {
 			if err != nil && !errors.Is(err, errCancelled) && n.ctx.Err() == nil {
-				n.s.log.Warn("notification failed; cancelling the subscription", "subscription", sub.href, "err", err)
+				n.s.log.Warnf("cancelling subscription %s: its notifications fail: %v", sub.href, err)
 			}
 			n.cancel(sub)
 			return
@@ -311,7 +311,9 @@ func (n *notifier) deliver(sub *subscription, status ieee20305.UInt8) error {
 		if body, status, err = n.build(sub, status); err != nil {
 			return err
 		}
-		if err = n.post(sub.uri, body); err == nil {
+		if err = n.post(sub.uri, body); err != nil {
+			n.s.log.Warnf("notification %d of subscription %s to %s failed: %v", i+1, sub.href, sub.uri, err)
+		} else {
 			if status != NotificationDefault {
 				return errCancelled
 			}
@@ -482,7 +484,12 @@ func (s *Server) createSubscription(ctx context.Context, r *Request) (string, er
 	if err := s.checkSubscription(ctx, r); err != nil {
 		return "", err
 	}
-	return s.createDefault(ctx, r)
+	href, err := s.createDefault(ctx, r)
+	if err == nil {
+		sub := r.Doc.(*ieee20305.Subscription)
+		s.log.Infof("subscription %s of %s to %s, notified at %s", href, r.Principal.LFDI, sub.SubscribedResource, sub.NotificationURI)
+	}
+	return href, err
 }
 
 // updateSubscription is the PUT of a Subscription.

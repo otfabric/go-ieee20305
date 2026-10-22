@@ -57,6 +57,9 @@ type Config struct {
 	UserAgent string
 	// MaxResponseBytes limits the size of a response body; 1 MiB when zero.
 	MaxResponseBytes int64
+	// Logger receives the client's log (see ieee20305.Logger): a Debug
+	// line per request. None when nil.
+	Logger ieee20305.Logger
 	// MaxListItems limits the items Iterate and Walk read of one list, as
 	// a list could claim to have any number: 100000 when zero.
 	MaxListItems uint32
@@ -71,6 +74,7 @@ type Client struct {
 	ua       string
 	maxBytes int64
 	maxItems uint32
+	log      ieee20305.Logger
 }
 
 // New returns a Client for cfg.
@@ -93,6 +97,7 @@ func New(cfg Config) (*Client, error) {
 	if c.maxBytes <= 0 {
 		c.maxBytes = defaultMaxResponseBytes
 	}
+	c.log = ieee20305.ComponentLogger(cfg.Logger, "client")
 	c.maxItems = cfg.MaxListItems
 	if c.maxItems == 0 {
 		c.maxItems = 100000
@@ -301,10 +306,14 @@ func (c *Client) do(ctx context.Context, method, href string, q url.Values, body
 	if c.ua != "" {
 		req.Header.Set("User-Agent", c.ua)
 	}
+	start := time.Now()
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return nil, nil, transportError(ctx, method, u, err)
+		err = transportError(ctx, method, u, err)
+		c.log.Debugf("%s %s: %v after %v", method, u.Path, err, time.Since(start))
+		return nil, nil, err
 	}
+	c.log.Debugf("%s %s: %d in %v", method, u.Path, resp.StatusCode, time.Since(start))
 	defer func() { _ = resp.Body.Close() }()
 	data, err := io.ReadAll(io.LimitReader(resp.Body, c.maxBytes+1))
 	if err != nil {

@@ -3,8 +3,6 @@
 package agent
 
 import (
-	"context"
-	"log/slog"
 	"testing"
 	"time"
 
@@ -25,16 +23,5 @@ func TestPollRate(t *testing.T) {
 	a.cfg.PollRate = time.Second
 	if a.pollRate() != time.Second {
 		t.Errorf("configured %v", a.pollRate())
-	}
-}
-
-func TestDiscardHandler(t *testing.T) {
-	l := slog.New(discardHandler{}).WithGroup("g").With("k", "v")
-	l.Info("dropped")
-	if l.Enabled(context.Background(), slog.LevelError) {
-		t.Error("enabled")
-	}
-	if err := (discardHandler{}).Handle(context.Background(), slog.Record{}); err != nil {
-		t.Error(err)
 	}
 }
