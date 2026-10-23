@@ -136,3 +136,53 @@ func TestSchemaValid(t *testing.T) {
 		})
 	}
 }
+
+// The Codec of a client: Marshal, Unmarshal into the document's own type,
+// and Decode, for every document; Unmarshal into a type of the base
+// package; and the errors of what is no document or no XML.
+func TestCodec(t *testing.T) {
+	var c ieee20305.Codec = csipaus.Codec{}
+	for name, doc := range documents() {
+		t.Run(name, func(t *testing.T) {
+			out, err := c.Marshal(doc)
+			if err != nil {
+				t.Fatal(err)
+			}
+			back := reflect.New(reflect.TypeOf(doc).Elem()).Interface()
+			if err := c.Unmarshal(out, back); err != nil {
+				t.Fatalf("Unmarshal: %v\n%s", err, out)
+			}
+			if !reflect.DeepEqual(doc, back) {
+				t.Errorf("Unmarshal changed the value: %s", out)
+			}
+			decoded, err := c.Decode(out)
+			if err != nil || !reflect.DeepEqual(doc, decoded) {
+				t.Errorf("Decode: %v", err)
+			}
+		})
+	}
+
+	timeDoc := []byte(`<Time xmlns="urn:ieee:std:2030.5:ns"><currentTime>5</currentTime><dstEndTime>0</dstEndTime><dstOffset>0</dstOffset><dstStartTime>0</dstStartTime><quality>7</quality><tzOffset>0</tzOffset></Time>`)
+	var tm ieee20305.Time
+	if err := csipaus.Unmarshal(timeDoc, &tm); err != nil || tm.CurrentTime != 5 {
+		t.Errorf("Unmarshal into a type of the base package: %+v, %v", tm, err)
+	}
+
+	var notADocument struct{ X int }
+	if err := c.Unmarshal(timeDoc, &notADocument); !errors.Is(err, ieee20305.ErrInvalid) {
+		t.Errorf("Unmarshal into a type that is no document: %v", err)
+	}
+	if _, err := c.Marshal(&notADocument); !errors.Is(err, ieee20305.ErrInvalid) {
+		t.Errorf("Marshal of a type that is no document: %v", err)
+	}
+	var ctl csipaus.DERControl
+	if err := c.Unmarshal([]byte("not XML"), &ctl); !errors.Is(err, ieee20305.ErrProtocol) {
+		t.Errorf("Unmarshal of a body that is no XML: %v", err)
+	}
+	if err := c.Unmarshal(timeDoc, &ctl); !errors.Is(err, ieee20305.ErrProtocol) {
+		t.Errorf("Unmarshal of a Time into a DERControl: %v", err)
+	}
+	if _, err := c.Decode([]byte("<")); !errors.Is(err, ieee20305.ErrProtocol) {
+		t.Errorf("Decode of a broken document: %v", err)
+	}
+}
