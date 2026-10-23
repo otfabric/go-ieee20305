@@ -46,9 +46,11 @@ present a certificate, and each verifies the other's chain.
 - The standard's cipher suite, TLS_ECDHE_ECDSA_WITH_AES_128_CCM_8, is not in
   crypto/tls. The core module offers the ECDHE-ECDSA AES-GCM suites, which
   are as strong; the module `tlsccm` adds CCM_8 for peers that offer nothing
-  else. It builds on a fork of the Go TLS stack (see
-  [tlsccm/THIRD_PARTY_NOTICES.md](tlsccm/THIRD_PARTY_NOTICES.md)): keep it
-  updated with the module.
+  else. It carries a copy of Go 1.22's `crypto/tls` with CCM_8, used only
+  with TLS 1.2, P-256 and no session resumption; every `crypto/tls`
+  vulnerability Go publishes since is reviewed, and its fix ported when it
+  reaches tlsccm ([tlsccm/internal/gotls/SECURITY.md](tlsccm/internal/gotls/SECURITY.md)).
+  Keep tlsccm updated.
 
 ### Device identity
 

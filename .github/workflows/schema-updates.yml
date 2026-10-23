@@ -1,5 +1,5 @@
 name: Upstream schemas
-run-name: "Upstream schema check (${{ github.event_name }})"
+run-name: "Upstream schema and crypto/tls check (${{ github.event_name }})"
 
 # Compares the IEEE 2030.5 and CSIP-AUS sources pinned in schemas/manifest.json
 # with what upstream publishes, and opens or updates an issue when the content
@@ -43,4 +43,40 @@ jobs:
             gh issue comment "$number" --body-file "$RUNNER_TEMP/report.md"
           else
             gh issue create --title "$title" --body-file "$RUNNER_TEMP/report.md"
+          fi
+
+  # internal/gotls of tlsccm is crypto/tls of Go 1.22.0 with CCM_8: is it
+  # still as recorded, and is every crypto/tls vulnerability Go published
+  # since reviewed (tlsccm/internal/gotls/SECURITY.md)?
+  tlsccm:
+    runs-on: ubuntu-latest
+    env:
+      GOWORK: "off"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: tlsccm/go.mod
+      - name: Check the copy of crypto/tls
+        id: check
+        working-directory: tlsccm
+        run: |
+          set +e
+          go build -o "$RUNNER_TEMP/upstream" ./internal/upstream
+          "$RUNNER_TEMP/upstream" -report "$RUNNER_TEMP/tls-report.md"
+          status=$?
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          # 3: findings (reported below); anything else non-zero is a failure.
+          if [ "$status" -ne 0 ] && [ "$status" -ne 3 ]; then exit "$status"; fi
+      - name: Open or update the tracking issue
+        if: steps.check.outputs.status == '3'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          title="tlsccm: crypto/tls vulnerability to review, or the copy changed"
+          number=$(gh issue list --state open --search "\"$title\" in:title" --json number --jq '.[0].number // empty')
+          if [ -n "$number" ]; then
+            gh issue comment "$number" --body-file "$RUNNER_TEMP/tls-report.md"
+          else
+            gh issue create --title "$title" --body-file "$RUNNER_TEMP/tls-report.md"
           fi

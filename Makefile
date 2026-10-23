@@ -4,7 +4,7 @@
 
 .DEFAULT_GOAL := help
 
-.PHONY: help all build fmt fmt-check lint lint-ci vet vuln test stress coverage cover fuzz check clean interop test-interop test-tlsccm e2e features nodeps download schemas generate generate-verify generate-check check-updates
+.PHONY: tlsccm-upstream help all build fmt fmt-check lint lint-ci vet vuln test stress coverage cover fuzz check clean interop test-interop test-tlsccm e2e features nodeps download schemas generate generate-verify generate-check check-updates
 help: ## This help
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z0-9_-]+:.*?## / {printf "\033[36m%-30s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
@@ -131,9 +131,12 @@ test-interop: ## Run the client and the server against the ieee20305-interop ima
 
 interop: test-interop ## Alias for test-interop
 
+tlsccm-upstream: ## Check tlsccm's copy of crypto/tls against Go 1.22.0 and Go's crypto/tls vulnerabilities (network)
+	@cd tlsccm && go build -o ../bin/tlsccm-upstream ./internal/upstream && ../bin/tlsccm-upstream
+
 test-tlsccm: ## Vet, lint and test the tlsccm module (CCM_8, Go 1.26.8 and dependencies of its own)
 	@echo "Testing the tlsccm module"
-	@cd tlsccm && go vet ./... && staticcheck ./... && golangci-lint run ./... && govulncheck ./... && go test -count=1 -race ./...
+	@cd tlsccm && go vet ./... && staticcheck $$(go list ./... | grep -v /internal/) && golangci-lint run ./... && govulncheck ./... && go test -count=1 -race ./...
 
 check: fmt fmt-check nodeps features generate-verify lint lint-ci vet vuln test coverage-gate test-tlsccm ## Run format + generated-code check + lint + vet + vuln + test + coverage gate + the tlsccm module
 

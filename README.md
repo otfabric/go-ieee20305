@@ -98,8 +98,8 @@ feature and with what is tested, are in [docs/FEATURES.md](docs/FEATURES.md).
 1. As far as the interop images exercise them; see
    [docs/FEATURES.md](docs/FEATURES.md).
 2. `crypto/tls` has no CCM_8: the core module uses the AES-GCM suites, and
-   the separate module `tlsccm` adds CCM_8 through the TLS fork of
-   GridAPPS-D.
+   the separate module `tlsccm` adds CCM_8 with a copy of Go 1.22's
+   `crypto/tls`, checked against Go's security releases.
 
 Choose **go-ieee20305** to embed a client, a device agent or a server in a Go
 program, with every function set and both editions. Choose **Envoy** for a
@@ -363,8 +363,9 @@ reproduce and fail once they no longer do:
 
 ## Limitations
 
-- **CCM_8 needs the module `tlsccm`**, on a fork of the Go TLS stack; the
-  core module, on `crypto/tls`, offers the ECDHE-ECDSA AES-GCM suites.
+- **CCM_8 needs the module `tlsccm`**, on a copy of Go 1.22's `crypto/tls`
+  with CCM_8 (TLS 1.2 only); the core module, on `crypto/tls`, offers the
+  ECDHE-ECDSA AES-GCM suites.
 - **DNS-SD is not exercised across stacks**: the containers run on Docker
   networks without multicast, so interop reaches servers by URL.
   `discovery` is tested against an in-memory network and our own peer.

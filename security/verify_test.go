@@ -475,7 +475,10 @@ func TestInsecureSkipVerifyConfined(t *testing.T) {
 			return err
 		}
 		if d.IsDir() {
-			if path != root && (strings.HasPrefix(d.Name(), ".") || d.Name() == "testdata") {
+			// tlsccm/internal/gotls is crypto/tls itself, which defines
+			// InsecureSkipVerify.
+			if path != root && (strings.HasPrefix(d.Name(), ".") || d.Name() == "testdata" ||
+				path == filepath.Join(root, "tlsccm", "internal", "gotls")) {
 				return filepath.SkipDir
 			}
 			return nil

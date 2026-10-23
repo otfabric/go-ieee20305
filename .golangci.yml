@@ -14,6 +14,12 @@ linters:
   settings:
     exhaustive:
       default-signifies-exhaustive: true  # a default: case satisfies exhaustiveness
+  exclusions:
+    paths:
+      # crypto/tls of Go and Pion's CCM, copied as they are: kept byte-close
+      # to upstream so that it can be diffed and patched (tlsccm/internal/gotls/UPSTREAM.md).
+      - internal/gotls/
+      - internal/ccm/
 
 formatters:
   enable:
@@ -23,6 +29,8 @@ formatters:
   exclusions:
     paths:
       - examples
+      - internal/gotls/
+      - internal/ccm/
 
 issues:
   # Bump the default per-linter issue limit (default is 50)

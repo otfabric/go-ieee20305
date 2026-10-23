@@ -13,7 +13,7 @@ Marks: ✅ implemented · ◐ partly (see the note) · — not implemented.
 | Requirement | Client | Server | Notes |
 |-------------|:------:|:------:|-------|
 | HTTP/1.1 over TLS 1.2, mutual authentication | ✅ | ✅ | `security.ClientTLSConfig`, `ServerTLSConfig`; TLS 1.2 minimum |
-| TLS_ECDHE_ECDSA_WITH_AES_128_CCM_8 | ◐ | ◐ | In the module `tlsccm` (a fork of the Go TLS stack); the core module offers the ECDHE-ECDSA AES-GCM suites |
+| TLS_ECDHE_ECDSA_WITH_AES_128_CCM_8 | ◐ | ◐ | In the module `tlsccm` (a copy of Go 1.22's `crypto/tls` with CCM_8, reviewed against Go's security releases); the core module offers the ECDHE-ECDSA AES-GCM suites |
 | ECDSA P-256 certificates with a HardwareModuleName | ✅ | ✅ | `security.Verify` accepts the critical subjectAltName that crypto/x509 refuses |
 | LFDI and SFDI from the certificate fingerprint | ✅ | ✅ | `security.CertificateLFDI`, `LFDI.SFDI` with its check digit |
 | `application/sep+xml`, namespace `urn:ieee:std:2030.5:ns` | ✅ | ✅ | Documents of another namespace are refused (400) |

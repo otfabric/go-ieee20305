@@ -5,8 +5,10 @@
 // which crypto/tls does not implement (golang/go#27484).
 //
 // It is a module of its own, so that the library stays free of
-// dependencies: it wraps the fork of crypto/tls with CCM_8 of GridAPPS-D
-// (github.com/GRIDAPPSD/ieee-2030_5-core-go/pkg/sep2tls/gotls). Connections
+// dependencies. Its TLS is internal/gotls: crypto/tls of Go 1.22.0 with
+// CCM_8 added (internal/gotls/UPSTREAM.md), kept
+// as close to upstream as can be and checked against Go's security
+// releases (internal/gotls/SECURITY.md). Connections
 // are TLS 1.2 on P-256, as IEEE 2030.5 specifies, and offer CCM_8 only
 // unless Options.AllowGCM also offers
 // TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256, for peers without CCM_8.
@@ -25,16 +27,13 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
-	"log"
 	"net"
 	"net/http"
-	"strings"
 	"time"
 
-	"github.com/GRIDAPPSD/ieee-2030_5-core-go/pkg/sep2tls"
-	"github.com/GRIDAPPSD/ieee-2030_5-core-go/pkg/sep2tls/gotls"
 	ieee20305 "github.com/otfabric/go-ieee20305"
 	"github.com/otfabric/go-ieee20305/security"
+	"github.com/otfabric/go-ieee20305/tlsccm/internal/gotls"
 )
 
 // CCM8 is the cipher suite TLS_ECDHE_ECDSA_WITH_AES_128_CCM_8.
@@ -49,7 +48,8 @@ type Options struct {
 	// AllowGCM offers TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256 after CCM_8,
 	// for peers whose TLS has no CCM_8 (such as crypto/tls).
 	AllowGCM bool
-	// HandshakeTimeout bounds a handshake: 10s when zero.
+	// HandshakeTimeout bounds a handshake: 10s when zero; negative is
+	// ErrConfiguration.
 	HandshakeTimeout time.Duration
 	// Logger receives the handshake failures of a listener, at Warn (see
 	// ieee20305.Logger); none when nil.
@@ -67,20 +67,21 @@ func (o Options) timeout() time.Duration {
 	if o.HandshakeTimeout > 0 {
 		return o.HandshakeTimeout
 	}
-	return sep2tls.DefaultCCMHandshakeTimeout
+	return defaultHandshakeTimeout
 }
 
-// certificate converts a certificate of crypto/tls to one of the fork.
+// certificate converts a certificate of crypto/tls to one of gotls.
 func certificate(c tls.Certificate) gotls.Certificate {
 	return gotls.Certificate{Certificate: c.Certificate, PrivateKey: c.PrivateKey, Leaf: c.Leaf}
 }
 
-// ClientConfig returns the TLS configuration of an IEEE 2030.5 client: the
+// clientConfig returns the TLS configuration of an IEEE 2030.5 client: the
 // device certificate, and the server's chain verified against roots by
 // security.Verify (with the server name when the certificate has one).
-// The fork's own verification is off (InsecureSkipVerify) only because it
+// The verification of gotls is off (InsecureSkipVerify) only because it
 // rejects the HardwareModuleName names; VerifyConnection always runs.
-func ClientConfig(device tls.Certificate, roots *x509.CertPool, o Options) *gotls.Config {
+// TLS 1.2 only: the TLS 1.3 code of gotls is never reached.
+func clientConfig(device tls.Certificate, roots *x509.CertPool, o Options) *gotls.Config {
 	return &gotls.Config{
 		Certificates:       []gotls.Certificate{certificate(device)},
 		RootCAs:            roots,
@@ -99,11 +100,11 @@ func ClientConfig(device tls.Certificate, roots *x509.CertPool, o Options) *gotl
 	}
 }
 
-// ServerConfig returns the TLS configuration of an IEEE 2030.5 server: the
+// serverConfig returns the TLS configuration of an IEEE 2030.5 server: the
 // server certificate, and a client certificate that one of clientCAs
 // issued, verified by security.Verify. Session tickets are off, so that
-// every connection verifies its client.
-func ServerConfig(server tls.Certificate, clientCAs *x509.CertPool, o Options) *gotls.Config {
+// every connection verifies its client; TLS 1.2 only.
+func serverConfig(server tls.Certificate, clientCAs *x509.CertPool, o Options) *gotls.Config {
 	return &gotls.Config{
 		Certificates: []gotls.Certificate{certificate(server)},
 		ClientAuth:   gotls.RequireAnyClientCert,
@@ -124,7 +125,7 @@ func ServerConfig(server tls.Certificate, clientCAs *x509.CertPool, o Options) *
 // device certificate, for client.Config.HTTPClient: it dials with CCM_8.
 // It sets no timeout: bound each call with its context.
 func NewHTTPClient(device tls.Certificate, roots *x509.CertPool, o Options) *http.Client {
-	cfg := ClientConfig(device, roots, o)
+	cfg := clientConfig(device, roots, o)
 	dialer := &gotls.Dialer{NetDialer: &net.Dialer{Timeout: o.timeout()}, Config: cfg}
 	return &http.Client{Transport: &http.Transport{
 		DialTLSContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
@@ -138,23 +139,18 @@ func NewHTTPClient(device tls.Certificate, roots *x509.CertPool, o Options) *htt
 
 // NewListener returns a listener of TLS connections with CCM_8 on inner,
 // for a server with the server certificate whose clients one of clientCAs
-// issued. A connection is accepted once its handshake succeeds; a failure
-// goes to Options.Logger. clientCAs is required.
+// issued. A connection is accepted once its handshake succeeds, within
+// Options.HandshakeTimeout; a failure goes to Options.Logger at Warn.
+// clientCAs is required.
 func NewListener(inner net.Listener, server tls.Certificate, clientCAs *x509.CertPool, o Options) (net.Listener, error) {
 	if clientCAs == nil {
 		return nil, fmt.Errorf("%w: tlsccm: a listener needs the CAs of its clients", ieee20305.ErrConfiguration)
 	}
-	errorLog := log.New(logWriter{ieee20305.ComponentLogger(o.Logger, "tlsccm")}, "", 0)
-	return sep2tls.WrapCCMListenerWithTimeout(gotls.NewListener(inner, ServerConfig(server, clientCAs, o)), errorLog, o.timeout())
-}
-
-// logWriter writes the lines of a *log.Logger (which the listener of the
-// fork takes) to a Logger.
-type logWriter struct{ l ieee20305.Logger }
-
-func (w logWriter) Write(p []byte) (int, error) {
-	w.l.Warnf("%s", strings.TrimSpace(string(p)))
-	return len(p), nil
+	if o.HandshakeTimeout < 0 {
+		return nil, fmt.Errorf("%w: tlsccm: a negative handshake timeout %v", ieee20305.ErrConfiguration, o.HandshakeTimeout)
+	}
+	tl := gotls.NewListener(inner, serverConfig(server, clientCAs, o))
+	return newListener(tl, ieee20305.ComponentLogger(o.Logger, "tlsccm"), o.timeout()), nil
 }
 
 type connKey struct{}

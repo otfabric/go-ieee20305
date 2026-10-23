@@ -5,6 +5,60 @@ tag, GitHub release). The section of the version below, up to the `---` that
 ends it, is the release's notes. Before v1.0.0 a minor release may change the
 API.
 
+## v0.5.2
+
+**Date:** 2026-10-23  
+**Previous release:** v0.5.1
+
+### Summary
+
+Five fixes found by raising the test coverage of agent, server, security
+and internal to 95-100% (the module 95.7%), and tlsccm v0.3.0, which
+depends on no fork: its CCM_8 is a copy of Go's `crypto/tls` in the module,
+checked against Go's security releases.
+
+### Fixed
+
+- **agent** — a DERProgram without a DERControlList ranked as primacy 0, so
+  its DefaultDERControl won over that of the program of highest precedence.
+- **server** — bootstrap ignored store errors other than ErrNoNode, and
+  started without `/tm` when the store failed.
+- **server** — `Admin.NewList` with a link field pointing to a scalar
+  panicked instead of returning `ErrInvalid`.
+- **server** — a response the server could not encode answered 400; it is
+  the server's failure, 500.
+- **generator** — a type derived from `xs:hexBinary` with enumerations
+  generated code that did not compile (no schema of ours has one).
+
+### tlsccm v0.3.0
+
+Released with this version as `tlsccm/v0.3.0`:
+
+- `internal/gotls` (Go 1.22.0's `crypto/tls` with the CCM_8 cipher suite)
+  and `internal/ccm` (Pion's AES-CCM) are part of the module, which requires
+  only `golang.org/x/crypto` and `golang.org/x/sys` now. The listener that
+  completes handshakes is tlsccm's own, and logs through `Options.Logger`.
+- The ALPN error quotes the client's protocols (GO-2025-4008, backported).
+  Every other `crypto/tls` vulnerability published since Go 1.22.0 is
+  reviewed in `tlsccm/internal/gotls/SECURITY.md`: none reaches tlsccm's
+  TLS 1.2 connections without session resumption.
+- `go run ./internal/upstream` (or `make tlsccm-upstream`) checks the copy
+  against `crypto/tls` of Go 1.22.0, and lists `crypto/tls` vulnerabilities
+  not yet reviewed; a weekly workflow opens an issue for either.
+- **Upgrade notes:** `ClientConfig` and `ServerConfig` are no longer
+  exported (nothing used them); a negative `HandshakeTimeout` is
+  `ErrConfiguration`. A binary distribution must reproduce the notices of
+  `tlsccm/THIRD_PARTY_NOTICES.md`.
+
+### Tested
+
+Coverage: agent 99.3%, server 99.6%, security 97.3%, internal 95.9-100%;
+the module 95.7%. TLS handshake tests run over loopback TCP (they could hang
+over `net.Pipe` on Go 1.23). The interop suite passes with tlsccm's own
+CCM_8 against the GridAPPS-D and EPRI images, which offer nothing else.
+
+---
+
 ## v0.5.1
 
 **Date:** 2026-10-23  

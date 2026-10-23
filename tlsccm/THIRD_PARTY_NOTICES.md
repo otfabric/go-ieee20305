@@ -1,23 +1,32 @@
 # Third-party notices
 
-The tlsccm module depends on, and does not copy, this software.
+The tlsccm module carries copies of this software, in `internal/`. See
+[internal/gotls/UPSTREAM.md](internal/gotls/UPSTREAM.md) for what was copied,
+and what was changed.
 
-## github.com/GRIDAPPSD/ieee-2030_5-core-go
+## The Go standard library: `internal/gotls`
 
-The package `pkg/sep2tls/gotls` (a fork of the Go standard library's
-`crypto/tls` with the cipher suite TLS_ECDHE_ECDSA_WITH_AES_128_CCM_8) and the
-package `pkg/sep2tls`.
+`internal/gotls` is the package `crypto/tls` of Go 1.22.0.
+
+Copyright 2009 The Go Authors. Licensed under the BSD 3-Clause license in
+[internal/gotls/LICENSE](internal/gotls/LICENSE).
+
+## Battelle Memorial Institute: the CCM_8 registration and the stand-ins
+
+The registration of TLS_ECDHE_ECDSA_WITH_AES_128_CCM_8
+(`internal/gotls/cipher_suites_ccm.go`, and its tests) and the stand-ins of
+`internal/gotls/stubs`.
 
 Copyright (c) 2026, Battelle Memorial Institute. All rights reserved.
+Licensed under the license in
+[internal/gotls/LICENSE-BATTELLE](internal/gotls/LICENSE-BATTELLE), with the
+disclaimers of [internal/gotls/NOTICE-BATTELLE](internal/gotls/NOTICE-BATTELLE).
+A binary distribution of a program built with tlsccm must reproduce both
+files.
 
-Licensed under the license in the `LICENSE` file of that module: redistribution
-and use in source and binary forms, with or without modification, are
-permitted provided that the copyright notice, its conditions and disclaimers
-are retained in source and reproduced in the documentation of binary
-distributions, and that the name Battelle Memorial Institute is not used
-without its consent. Its `NOTICE` file carries the disclaimers of the United
-States Government sponsorship. A program that links this module in a binary
-distribution must reproduce both files.
+## Pion: `internal/ccm`
 
-The fork itself derives from the Go standard library (Copyright 2009 The Go
-Authors, BSD 3-Clause license).
+The AES-CCM mode (RFC 3610) of the Pion project.
+
+Copyright (c) The Pion community. Licensed under the MIT license in
+[internal/ccm/LICENSE](internal/ccm/LICENSE).
