@@ -114,3 +114,92 @@ func TestEnvelope(t *testing.T) {
 		t.Error("LimitsOf nil")
 	}
 }
+
+// The default limits of a program: on one without a DefaultDERControl, and
+// on one whose default has other controls, which stay.
+func TestSetDefaultLimits(t *testing.T) {
+	srv, err := server.New(csipserver.Configure(server.Config{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = srv.Close() }()
+	ctx := context.Background()
+	a := srv.Admin()
+	if err := a.Root(ctx, "DERProgramList", "/derp", a.Document("DERProgramList")); err != nil {
+		t.Fatal(err)
+	}
+	prog, err := a.Create(ctx, "/derp", &ieee20305.DERProgram{Primacy: 1}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := csipserver.SetDefaultLimits(ctx, a, prog, csipaus.Limits{Export: csipserver.Watts(5000)}); err != nil {
+		t.Fatal(err)
+	}
+	n, err := a.Get(ctx, prog+"/dderc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, ok := n.Value.(*csipaus.DefaultDERControl)
+	if !ok || d.DERControlBase.OpModExpLimW.Value != 5000 || d.UpdatedTime == nil {
+		t.Fatalf("the default: %#v", n.Value)
+	}
+
+	// Change it: the limits are replaced, the other controls kept.
+	on := true
+	d.DERControlBase.OpModConnect = &on
+	if err := a.Put(ctx, n); err != nil {
+		t.Fatal(err)
+	}
+	if err := csipserver.SetDefaultLimits(ctx, a, prog, csipaus.Limits{Import: csipserver.Watts(3000)}); err != nil {
+		t.Fatal(err)
+	}
+	n, _ = a.Get(ctx, prog+"/dderc")
+	d = n.Value.(*csipaus.DefaultDERControl)
+	if d.DERControlBase.OpModImpLimW.Value != 3000 || d.DERControlBase.OpModExpLimW != nil ||
+		d.DERControlBase.OpModConnect == nil || !*d.DERControlBase.OpModConnect {
+		t.Errorf("the default after a change: %+v", d.DERControlBase)
+	}
+
+	if err := csipserver.SetDefaultLimits(ctx, a, "/derp/9", csipaus.Limits{}); err == nil {
+		t.Error("SetDefaultLimits of a program the server does not have")
+	}
+}
+
+// The profile serves the documents of the base standard that CSIP-AUS does
+// not change with the types of the base package.
+func TestProfile(t *testing.T) {
+	p := csipserver.Profile()
+	timeName := xml.Name{Space: "urn:ieee:std:2030.5:ns", Local: "Time"}
+	if _, ok := p.NewElement(timeName).(*ieee20305.Time); !ok {
+		t.Error("NewElement of Time")
+	}
+	if _, ok := p.NewElement(xml.Name{Space: "urn:ieee:std:2030.5:ns", Local: "EndDevice"}).(*csipaus.EndDevice); !ok {
+		t.Error("NewElement of EndDevice")
+	}
+	tm := &ieee20305.Time{CurrentTime: 5}
+	if c, ok := p.Clone(tm).(*ieee20305.Time); !ok || c == tm || c.CurrentTime != 5 {
+		t.Errorf("Clone of a Time: %v", c)
+	}
+	ed := &csipaus.EndDevice{}
+	if c, ok := p.Clone(ed).(*csipaus.EndDevice); !ok || c == ed {
+		t.Error("Clone of an EndDevice")
+	}
+	if c := p.Clone("nothing"); c != nil {
+		t.Errorf("Clone of a string: %v", c)
+	}
+	if n, ok := p.ElementName(tm); !ok || n != timeName {
+		t.Errorf("ElementName of a Time: %v", n)
+	}
+	if n, ok := p.ElementName(ed); !ok || n.Local != "EndDevice" {
+		t.Errorf("ElementName of an EndDevice: %v", n)
+	}
+	if _, ok := p.ElementName("nothing"); ok {
+		t.Error("ElementName of a string")
+	}
+	if !p.Derives("DERControlResponse", "Response") || p.Derives("Time", "EndDevice") {
+		t.Error("Derives")
+	}
+	if _, ok := p.Codec(ieee20305.Edition2023).(csipaus.Codec); !ok {
+		t.Error("Codec")
+	}
+}
