@@ -3,7 +3,7 @@ module github.com/otfabric/go-ieee20305/tlsccm
 go 1.26.8
 
 require (
-	github.com/otfabric/go-ieee20305 v0.5.0
+	github.com/otfabric/go-ieee20305 v0.5.2
 	golang.org/x/crypto v0.57.0
 )
 
