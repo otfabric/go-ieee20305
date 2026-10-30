@@ -13,10 +13,15 @@ permissions:
 
 jobs:
   ci:
-    uses: otfabric/.github/.github/workflows/go-ci.yml@v2
+    uses: otfabric/.github/.github/workflows/go-ci.yml@v2.1.0
     with:
       codecov-name: go-ieee20305
       go-versions: '["1.23", "1.24", "1.25", "1.26"]'
+      run-govulncheck: true
+      # Measured 94.3 % (go-ci method). COVER_MIN in the Makefile is a
+      # separate gate, on the library packages with the race detector.
+      coverage-min: "93"
+      fuzz-time: 10s
     secrets: inherit
 
   # Downloads the pinned upstream schemas, regenerates the code and fails if
