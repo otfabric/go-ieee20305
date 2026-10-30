@@ -31,6 +31,8 @@ make test         # the library tests with the race detector
 make e2e          # the end-to-end tests
 make stress       # the tests shuffled, twice, with the race detector
 make fuzz         # every fuzz target (FUZZTIME=30s each by default)
+make bench        # the benchmarks
+make cross        # cross-compile without cgo
 make test-tlsccm  # the CCM_8 module (Go 1.26.8)
 make interop      # against the ieee20305-interop images (needs Docker)
 make features     # docs/FEATURES.md against the e2e and interop tests

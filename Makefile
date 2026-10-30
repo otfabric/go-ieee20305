@@ -4,7 +4,7 @@
 
 .DEFAULT_GOAL := help
 
-.PHONY: tlsccm-upstream help all build fmt fmt-check lint lint-ci vet vuln test stress coverage cover fuzz check clean interop test-interop test-tlsccm e2e features nodeps download schemas generate generate-verify generate-check check-updates
+.PHONY: tlsccm-upstream help all build fmt fmt-check lint lint-ci vet vuln test stress coverage cover fuzz check clean interop test-interop test-tlsccm e2e features nodeps bench cross download schemas generate generate-verify generate-check check-updates
 help: ## This help
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z0-9_-]+:.*?## / {printf "\033[36m%-30s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
@@ -110,6 +110,16 @@ coverage-gate: coverage ## Fail if the coverage of the library packages is below
 cover: coverage ## Open coverage report in browser
 	@echo "Opening coverage report"
 	@go tool cover -html=coverage.out
+
+bench: ## Run the benchmarks
+	@echo "Running benchmarks"
+	@go test -run '^$$' -bench . -benchmem $(TEST_PKGS)
+
+cross: ## Cross-compile the module without cgo for the supported platforms (the nested modules tlsccm and interop are not part of it)
+	@for p in linux/amd64 linux/arm64 linux/arm darwin/arm64 windows/amd64; do \
+		echo "Building $$p"; \
+		CGO_ENABLED=0 GOOS=$${p%/*} GOARCH=$${p#*/} go build ./... || exit 1; \
+	done
 
 # Duration each fuzz target runs. Override with FUZZTIME=... (e.g. FUZZTIME=5m).
 FUZZTIME ?= 30s

@@ -176,13 +176,16 @@ func eventFunctionSets(t *testing.T, edition ieee20305.Edition) {
 	if has(d.responsesOf(2), schedule.ResponseSuperseded) {
 		t.Error("the EndDeviceControl of the program of higher precedence was superseded")
 	}
-	mu.Lock()
+	// The agent hands transitions to the handlers from a goroutine of each
+	// function set, after the scheduler has made the event active, and
+	// Prepayment has no Response to wait for above.
 	for _, fs := range []agent.FunctionSet{agent.DRLC, agent.Messaging, agent.Pricing, agent.Prepayment} {
-		if len(got[fs]) == 0 {
-			t.Errorf("no transitions of %v", fs)
-		}
+		eventually(t, "the transitions of "+fs.String(), func() bool {
+			mu.Lock()
+			defer mu.Unlock()
+			return len(got[fs]) > 0
+		})
 	}
-	mu.Unlock()
 	if n := len(a.Events(agent.DRLC)); n != 3 {
 		t.Errorf("%d DRLC events", n)
 	}
