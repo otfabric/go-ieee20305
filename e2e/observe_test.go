@@ -183,7 +183,13 @@ func TestNotificationMetrics(t *testing.T) {
 	if _, err := env.srv.Admin().AssignFSA(ctx, lfdi, &ieee20305.FunctionSetAssignments{MRID: ieee20305.MRIDType{1}}); err != nil {
 		t.Fatal(err)
 	}
-	eventually(t, "the notification", func() bool { return c.get("server.notification.FunctionSetAssignmentsList.true") == 1 })
+	// Creating the assignment makes two changes of the list (the item, then
+	// its membership). A worker that sends between them sends twice, so the
+	// count is at least one.
+	eventually(t, "the notification", func() bool { return c.get("server.notification.FunctionSetAssignmentsList.true") >= 1 })
+	if len(box.all()) == 0 {
+		t.Error("a notification counted as delivered did not arrive")
+	}
 	// A subscription to a receiver that is gone is cancelled.
 	if _, err := cl.Subscribe(ctx, ed+"/sub", ed+"/fsa", "https://127.0.0.1:1/ntfy", 5); err != nil {
 		t.Fatal(err)
