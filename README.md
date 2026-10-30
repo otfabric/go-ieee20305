@@ -43,7 +43,7 @@ The library provides:
   against the Envoy and GridAPPS-D servers, and the GridAPPS-D, py20305 and
   EPRI clients against the server, for every operation each offers
 
-**Docs:** [API.md](API.md) (public API) · [ARCHITECTURE.md](ARCHITECTURE.md) (packages, server, agent, generator) · [INTEROPERABILITY.md](INTEROPERABILITY.md) (what is implemented, and the known deviations) · [docs/FEATURES.md](docs/FEATURES.md) (features against the tests and the other stacks) · [ERRORS.md](ERRORS.md) (error semantics) · [OBSERVABILITY.md](OBSERVABILITY.md) (logging, metrics, retries) · [SECURITY.md](SECURITY.md) · [RELEASE.md](RELEASE.md) (changelog) · [examples](examples/README.md)
+**Docs:** [API.md](API.md) (public API) · [ARCHITECTURE.md](ARCHITECTURE.md) (packages, server, agent, generator) · [INTEROPERABILITY.md](INTEROPERABILITY.md) (what is implemented, and the known deviations) · [docs/FEATURES.md](docs/FEATURES.md) (features against the tests and the other stacks) · [ERRORS.md](ERRORS.md) (error semantics) · [OBSERVABILITY.md](OBSERVABILITY.md) (logging, metrics, retries) · [TESTING.md](TESTING.md) (test tiers) · [SECURITY.md](SECURITY.md) · [RELEASE.md](RELEASE.md) (changelog) · [examples](examples/README.md)
 
 ## Table of contents
 
@@ -292,6 +292,8 @@ make test         # the library tests with the race detector
 make e2e          # the end-to-end tests
 make stress       # the tests shuffled, twice, with the race detector
 make fuzz         # every fuzz target (FUZZTIME=30s each by default)
+make bench        # the benchmarks
+make cross        # cross-compile without cgo
 make test-tlsccm  # the CCM_8 module (Go 1.26.8)
 make interop      # against the ieee20305-interop images (needs Docker)
 make features     # docs/FEATURES.md against the e2e and interop tests
