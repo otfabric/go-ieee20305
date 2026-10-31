@@ -5,6 +5,17 @@ tag, GitHub release). The section of the version below, up to the `---` that
 ends it, is the release's notes. Before v1.0.0 a minor release may change the
 API.
 
+## v0.5.4
+
+**Date:** 2026-10-31
+**Previous release:** v0.5.3
+
+### Fixed
+
+- The client now refuses links and redirects that carry userinfo, match the server's host only through Unicode case folding, or differ in the case of an IPv6 zone. Ordinary ASCII case variants of the server's host are still accepted.
+
+---
+
 ## v0.5.3
 
 **Date:** 2026-10-31
