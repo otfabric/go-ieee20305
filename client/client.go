@@ -40,9 +40,11 @@ type Codec = ieee20305.Codec
 type Config struct {
 	// Server is the URL of the server, such as https://utility.example:8443.
 	// The hrefs of resources are resolved against it, and the client does
-	// not follow links or redirects to another scheme, host or port: its
-	// device certificate identifies it to this server only. Required; the
-	// scheme must be https.
+	// not follow links or redirects to another scheme, host or port, or to
+	// a URL with userinfo: its device certificate identifies it to this
+	// server only. The host of a link matches in ASCII case only: another
+	// spelling of the server, with a trailing dot or the default port, is
+	// another server. Required; the scheme must be https.
 	Server string
 	// DeviceCapabilityPath is the path of the DeviceCapability resource;
 	// DefaultDeviceCapabilityPath when empty.
@@ -158,8 +160,41 @@ func NewHTTPClient(device tls.Certificate, roots *x509.CertPool) *http.Client {
 	}}
 }
 
+// sameOrigin reports whether u is on the client's server. A URL with
+// userinfo is not, even on the server's host: net/http would send it as
+// Basic credentials, which a document or a redirect must not choose.
 func (c *Client) sameOrigin(u *url.URL) bool {
-	return u.Scheme == c.server.Scheme && strings.EqualFold(u.Host, c.server.Host)
+	return u.Scheme == c.server.Scheme && u.User == nil && sameHost(u.Host, c.server.Host)
+}
+
+// sameHost reports whether two URL hosts, with their ports, are the same.
+// Case is insignificant in ASCII only (RFC 3986 section 6.2.2.1):
+// strings.EqualFold would also match the non-ASCII U+017F with s and U+212A
+// with k. An IPv6 zone, after the %, is not part of that rule and must match
+// exactly.
+func sameHost(a, b string) bool {
+	aHost, aZone, _ := strings.Cut(a, "%")
+	bHost, bZone, _ := strings.Cut(b, "%")
+	return aZone == bZone && equalFoldASCII(aHost, bHost)
+}
+
+func equalFoldASCII(a, b string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range len(a) {
+		if lowerASCII(a[i]) != lowerASCII(b[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+func lowerASCII(c byte) byte {
+	if 'A' <= c && c <= 'Z' {
+		return c + 'a' - 'A'
+	}
+	return c
 }
 
 // Resolve returns the URL of href, which is relative to the server or an

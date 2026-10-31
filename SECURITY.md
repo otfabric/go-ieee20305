@@ -90,7 +90,10 @@ control the device.
 ### A client
 
 - `client.Client` follows links and redirects only within its server, so a
-  document cannot send a device to another host.
+  document cannot send a device to another host, or make it send credentials
+  in a URL. A link's host matches the configured one but for ASCII case;
+  userinfo, Unicode case variants and other spellings (a trailing dot, the
+  default port) are refused.
 - `Config.MaxResponseBytes` bounds a response, and `MaxListItems` what
   `Iterate` reads from a list.
 - A `client.NotificationHandler` should check the sender: set
