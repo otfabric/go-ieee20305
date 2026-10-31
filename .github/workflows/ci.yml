@@ -50,6 +50,8 @@ jobs:
       - name: Download, verify and regenerate; fail on drift
         run: make generate-check
       - name: Test against the official examples and schemas
+        env:
+          IEEE20305_REQUIRE_SCHEMAS: "1"
         run: go test -count=1 -race . ./csipaus ./internal/...
       - name: Check docs/FEATURES.md against the tests
         run: make features
@@ -71,8 +73,10 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      - name: Coverage of at least COVER_MIN percent
-        run: make coverage-gate
+      - name: Coverage of at least COVER_MIN percent, COVER_PKG_MIN per package
+        env:
+          IEEE20305_REQUIRE_MULTICAST: "1"
+        run: make coverage-gate coverage-pkg-check
 
   # The tests shuffled and run twice with the race detector, to shake out
   # order dependencies and races: the chaos and parallelism suites of e2e

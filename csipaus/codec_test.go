@@ -102,7 +102,7 @@ func TestSchemaValid(t *testing.T) {
 	for name, src := range files {
 		data, err := os.ReadFile(src)
 		if err != nil {
-			t.Skip("upstream schemas not downloaded; run make download")
+			needSchemas(t, "upstream schemas not downloaded; run make download")
 		}
 		if name == "csipaus-core-v1.3.xsd" {
 			data = bytes.ReplaceAll(data, []byte(`<xs:element ref="RateComponentLink"`), []byte(`<xs:element name="RateComponentLink" type="RateComponentLink"`))
@@ -113,7 +113,7 @@ func TestSchemaValid(t *testing.T) {
 	}
 	xmllint, err := exec.LookPath("xmllint")
 	if err != nil {
-		t.Skip("xmllint not found")
+		needSchemas(t, "xmllint not found")
 	}
 	for name, doc := range documents() {
 		t.Run(name, func(t *testing.T) {
@@ -185,4 +185,15 @@ func TestCodec(t *testing.T) {
 	if _, err := c.Decode([]byte("<")); !errors.Is(err, ieee20305.ErrProtocol) {
 		t.Errorf("Decode of a broken document: %v", err)
 	}
+}
+
+// needSchemas skips a test that needs the downloaded schemas or xmllint, or
+// fails it when IEEE20305_REQUIRE_SCHEMAS is set: the Generated code job sets
+// it, as it installs both.
+func needSchemas(t *testing.T, why string) {
+	t.Helper()
+	if os.Getenv("IEEE20305_REQUIRE_SCHEMAS") != "" {
+		t.Fatal(why)
+	}
+	t.Skip(why + " (IEEE20305_REQUIRE_SCHEMAS=1 makes this a failure)")
 }

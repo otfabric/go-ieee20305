@@ -1,3 +1,5 @@
+//go:build interop
+
 // SPDX-License-Identifier: MIT
 
 package interop
@@ -38,13 +40,24 @@ func image(env, def string) string {
 	return def
 }
 
+// prerequisite skips a test whose prerequisite is missing, or fails it when
+// IEEE20305_REQUIRE_INTEROP is set: `make interop` sets it, so the Interop
+// workflow cannot pass by skipping everything.
+func prerequisite(t *testing.T, format string, args ...any) {
+	t.Helper()
+	if os.Getenv("IEEE20305_REQUIRE_INTEROP") != "" {
+		t.Fatalf(format, args...)
+	}
+	t.Skipf(format+" (IEEE20305_REQUIRE_INTEROP=1 makes this a failure)", args...)
+}
+
 func requireDocker(t *testing.T) {
 	t.Helper()
 	if _, err := exec.LookPath("docker"); err != nil {
-		t.Skip("the interop suite needs Docker")
+		prerequisite(t, "the interop suite needs Docker")
 	}
 	if _, err := docker(context.Background(), "info", "--format", "{{.ServerVersion}}"); err != nil {
-		t.Skipf("the interop suite needs Docker: %v", err)
+		prerequisite(t, "the interop suite needs Docker: %v", err)
 	}
 }
 

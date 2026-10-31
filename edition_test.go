@@ -26,7 +26,7 @@ func TestEditionsValidate(t *testing.T) {
 	}
 	for _, s := range schemas {
 		if _, err := os.Stat(s); err != nil || xmllint == "" {
-			t.Skip("needs xmllint and the upstream schemas (make download)")
+			needSchemas(t, "needs xmllint and the upstream schemas (make download)")
 		}
 	}
 	xsd2018, err := os.ReadFile(schemas[ieee20305.Edition2018])

@@ -50,24 +50,26 @@ as `SKIP_UNSUPPORTED`.
 
 ## Prerequisites and skips
 
-There is no `*_REQUIRE_*` switch yet, so a missing prerequisite skips rather
-than fails:
+A missing prerequisite skips, unless the switch of the test is set: then it
+fails.
 
-| Test | Skipped without |
-|---|---|
-| The interop suite | Docker |
-| `TestOfficialExamples`, the schema tests of `csipaus` | `schemas/upstream` (`make download`) |
-| `TestEditionsValidate`, schema validation in `csipaus` | `xmllint` and `schemas/upstream` |
-| Multicast tests of `discovery` | a host that delivers multicast; also skipped with `-short` |
-| Tests in `internal/gen/emit` that build a module | the `go` tool; also skipped with `-short` |
+| Test | Skipped without | Fails instead with |
+|---|---|---|
+| The interop suite (build tag `interop`) | Docker | `IEEE20305_REQUIRE_INTEROP=1`, which `make interop` sets |
+| `TestOfficialExamples`, the schema tests of `csipaus` | `schemas/upstream` (`make download`) | `IEEE20305_REQUIRE_SCHEMAS=1` |
+| `TestEditionsValidate`, schema validation in `csipaus` | `xmllint` and `schemas/upstream` | `IEEE20305_REQUIRE_SCHEMAS=1` |
+| Multicast tests of `discovery` | a host that delivers multicast; also skipped with `-short` | `IEEE20305_REQUIRE_MULTICAST=1` |
+| Tests in `internal/gen/emit` that build a module | the `go` tool; also skipped with `-short` | |
 
-CI's job Generated code installs `xmllint` and downloads the schemas, so the
-schema tests run there.
+CI's job Generated code installs `xmllint`, downloads the schemas and sets
+`IEEE20305_REQUIRE_SCHEMAS`; its Coverage gate job sets
+`IEEE20305_REQUIRE_MULTICAST`.
 
 ## Coverage
 
 `make coverage-gate` requires `COVER_MIN` percent (90) of statements with the
-race detector, over `COVER_PKGS` in the [Makefile](Makefile). The shared `go-ci`
+race detector, over `COVER_PKGS` in the [Makefile](Makefile), and
+`make coverage-pkg-check` requires `COVER_PKG_MIN` (90) of each of its packages. The shared `go-ci`
 workflow is a separate gate, with its own `coverage-min` in
 [ci.yml](.github/workflows/ci.yml). `COVER_PKGS` leaves out:
 

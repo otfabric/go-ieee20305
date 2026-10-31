@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net"
 	"net/netip"
+	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -617,6 +618,16 @@ func TestInstanceOf(t *testing.T) {
 	}
 }
 
+// needMulticast skips a test that needs multicast, or fails it when
+// IEEE20305_REQUIRE_MULTICAST is set: the CI job that measures coverage sets it.
+func needMulticast(t *testing.T, format string, args ...any) {
+	t.Helper()
+	if os.Getenv("IEEE20305_REQUIRE_MULTICAST") != "" {
+		t.Fatalf(format, args...)
+	}
+	t.Skipf(format+" (IEEE20305_REQUIRE_MULTICAST=1 makes this a failure)", args...)
+}
+
 // TestMulticast browses for a service advertised on this host over real
 // multicast sockets. It is skipped where multicast is not available.
 func TestMulticast(t *testing.T) {
@@ -625,21 +636,21 @@ func TestMulticast(t *testing.T) {
 	}
 	ta, err := NewMulticastTransport(nil)
 	if err != nil {
-		t.Skipf("multicast not available: %v", err)
+		needMulticast(t, "multicast not available: %v", err)
 	}
 	s := meter("go-ieee20305-test-"+time.Now().Format("150405.000000000"), 1, "_derp")
 	s.Addrs = []netip.Addr{netip.MustParseAddr("127.0.0.1")}
 	a, err := Advertise(context.Background(), s, AdvertiseOptions{Transport: ta})
 	if err != nil {
 		_ = ta.Close()
-		t.Skipf("multicast not available: %v", err)
+		needMulticast(t, "multicast not available: %v", err)
 	}
 	defer func() { _ = a.Close() }()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	ch, err := Browse(ctx, BrowseOptions{Subtypes: []string{"_derp"}})
 	if err != nil {
-		t.Skipf("multicast not available: %v", err)
+		needMulticast(t, "multicast not available: %v", err)
 	}
 	for found := range ch {
 		if found.Instance == s.Instance {
@@ -649,5 +660,5 @@ func TestMulticast(t *testing.T) {
 			return
 		}
 	}
-	t.Skip("multicast packets are not delivered on this host")
+	needMulticast(t, "multicast packets are not delivered on this host")
 }
