@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -287,5 +288,73 @@ func TestResolve(t *testing.T) {
 		if _, err := c.Resolve(href); !errors.Is(err, ieee20305.ErrProtocol) {
 			t.Errorf("Resolve(%q) err = %v", href, err)
 		}
+	}
+}
+
+// TestResolveSameServer pins which spellings of a server's authority are that
+// server: the links of a document decide where the client sends its requests.
+func TestResolveSameServer(t *testing.T) {
+	for _, tc := range []struct {
+		server string
+		same   []string
+		other  []string
+	}{{
+		server: "https://sk.example:8443",
+		same:   []string{"//sk.example:8443/x", "//SK.Example:8443/x", "HTTPS://sk.example:8443/x"},
+		other: []string{
+			// Userinfo, in any form, on the server's own host.
+			"//user@sk.example:8443/x", "//user:pw@sk.example:8443/x", "//@sk.example:8443/x", "https://:@sk.example:8443/x",
+			// Unicode case folding, raw and percent-encoded: not RFC 3986 case.
+			"//\u017fk.example:8443/x", "//s\u212a.example:8443/x", "//%C5%BFk.example:8443/x", "//s%E2%84%AA.example:8443/x",
+			// Other spellings are refused, not normalised.
+			"//sk.example.:8443/x", "//sk.example:08443/x", "//sk.example:/x", "//sk.example:443/x", "//sk.example/x",
+			// Other hosts behind the server's name.
+			"//sk.example:8443@evil.example/x", "//sk.example:8443.evil.example/x", "//sk.example.evil.example:8443/x",
+		},
+	}, {
+		server: "https://sk.example",
+		same:   []string{"//SK.example/x"},
+		other:  []string{"//sk.example:443/x", "//sk.example:/x", "//sk.example./x", "//user@sk.example/x"},
+	}, {
+		server: "https://[fe80::a%25en0]:8443",
+		same:   []string{"//[fe80::a%25en0]:8443/x", "//[FE80::A%25en0]:8443/x"},
+		other:  []string{"//[fe80::a%25EN0]:8443/x", "//[fe80::a%25eth1]:8443/x", "//[fe80::a]:8443/x", "//[fe80:0::a%25en0]:8443/x"},
+	}} {
+		c, err := client.New(client.Config{Server: tc.server, HTTPClient: &http.Client{}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, href := range tc.same {
+			if _, err := c.Resolve(href); err != nil {
+				t.Errorf("%s: Resolve(%q): %v", tc.server, href, err)
+			}
+		}
+		for _, href := range tc.other {
+			if u, err := c.Resolve(href); err == nil {
+				t.Errorf("%s: Resolve(%q) = %s, on the server", tc.server, href, u)
+			}
+		}
+	}
+}
+
+// A redirect to the server's host with userinfo leaves the server like one
+// to another host: the client does not follow it.
+func TestRedirectWithUserinfo(t *testing.T) {
+	var followed atomic.Bool
+	p := newPKI(t)
+	srv := server(t, p, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/dcap" {
+			followed.Store(true)
+			return
+		}
+		http.Redirect(w, r, "https://user:pw@"+r.Host+"/dcap", http.StatusFound)
+	})
+	c := newClient(t, p, srv, client.Config{})
+	var dc ieee20305.DeviceCapability
+	if err := c.Get(context.Background(), "/away", &dc); !errors.Is(err, ieee20305.ErrProtocol) {
+		t.Errorf("redirect with userinfo: %v", err)
+	}
+	if followed.Load() {
+		t.Error("the redirect with userinfo was followed")
 	}
 }
