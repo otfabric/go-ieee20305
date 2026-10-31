@@ -5,6 +5,17 @@ tag, GitHub release). The section of the version below, up to the `---` that
 ends it, is the release's notes. Before v1.0.0 a minor release may change the
 API.
 
+## v0.5.3
+
+**Date:** 2026-10-31
+**Previous release:** v0.5.2
+
+### Changed
+
+- Policy 1.2: build output in `bin/` and `release/`, a per-package coverage floor, and more tests and CI. No change in behaviour.
+
+---
+
 ## v0.5.2
 
 **Date:** 2026-10-23  
