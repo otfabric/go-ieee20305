@@ -309,7 +309,7 @@ func TestResolveSameServer(t *testing.T) {
 			// Other spellings are refused, not normalised.
 			"//sk.example.:8443/x", "//sk.example:08443/x", "//sk.example:/x", "//sk.example:443/x", "//sk.example/x",
 			// Other hosts behind the server's name.
-			"//sk.example:8443@evil.example/x", "//sk.example:8443.evil.example/x", "//sk.example.evil.example:8443/x",
+			"//sk.example:8443@evil.example/x", "//sk.example:8443.evil.example/x", "//sk.example.evil.example:8443/x", "//sj.example:8443/x",
 		},
 	}, {
 		server: "https://sk.example",
