@@ -4,7 +4,7 @@
 
 .DEFAULT_GOAL := help
 
-.PHONY: tlsccm-upstream help all build fmt fmt-check lint lint-ci vet vuln test stress coverage cover fuzz check clean interop test-interop test-tlsccm e2e features nodeps bench cross download schemas generate generate-verify generate-check check-updates
+.PHONY: tlsccm-upstream help all build fmt fmt-check lint lint-ci vet vuln test stress coverage coverage-pkg-check cover fuzz check clean interop test-interop test-tlsccm e2e features nodeps bench cross download schemas generate generate-verify generate-check check-updates
 help: ## This help
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z0-9_-]+:.*?## / {printf "\033[36m%-30s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
@@ -28,6 +28,8 @@ TEST_PKGS := $(shell go list ./... | grep -v '/examples')
 COVER_PKGS := $(shell go list ./... | grep -v '/examples' | grep -v '/internal/gen$$' | grep -v '/e2e$$' | paste -sd, -)
 # The statement coverage make coverage-gate (and CI) requires, in percent.
 COVER_MIN ?= 90
+# Per-package floor (TEST-012), over the packages of COVER_PKGS.
+COVER_PKG_MIN := 90
 
 all: build ## Default target: build the examples
 
@@ -99,6 +101,12 @@ coverage: ## Run tests with coverage on the library packages (writes coverage.ou
 	@go test -count=1 -race -coverprofile=coverage.out -covermode=atomic -coverpkg=$(COVER_PKGS) $(TEST_PKGS)
 	@go tool cover -func=coverage.out | tail -n1
 
+coverage-pkg-check: coverage ## Fail when a package of COVER_PKGS is below COVER_PKG_MIN (reads coverage.out)
+	@awk -v m="$(COVER_PKG_MIN)" -v pkgs="$(COVER_PKGS)" 'BEGIN { split(pkgs, l, ","); for (i in l) want[l[i]] = 1 } \
+	NR > 1 { n[$$1] = $$2; if ($$3 > 0) h[$$1] = 1 } \
+	END { for (k in n) { p = k; sub(/\/[^\/]*$$/, "", p); if (p in want) { s[p] += n[k]; if (k in h) c[p] += n[k] } } \
+	for (p in s) { v = 100 * c[p] / s[p]; if (v < m) { printf "%s: %.1f%% < %s%%\n", p, v, m; bad = 1 } } exit bad }' coverage.out
+
 coverage-gate: coverage ## Fail if the coverage of the library packages is below COVER_MIN percent
 	@total=$$(go tool cover -func=coverage.out | awk '/^total:/ {sub("%", "", $$3); print $$3}'); \
 	if awk -v t="$$total" -v m="$(COVER_MIN)" 'BEGIN { exit !(t + 0 >= m + 0) }'; then \
@@ -137,7 +145,8 @@ fuzz: ## Run the fuzz targets for FUZZTIME each (default 30s)
 
 test-interop: ## Run the client and the server against the ieee20305-interop images, pinned in interop/images.go (the interop module; needs Docker; INTEROP_TESTFLAGS=-v for every test)
 	@echo "Running interop tests"
-	@cd interop && go vet ./... && staticcheck ./... && golangci-lint run ./... && go test -race -count=1 -timeout=30m $(INTEROP_TESTFLAGS) ./...
+	@cd interop && go vet -tags interop ./... && staticcheck -tags interop ./... && golangci-lint run --build-tags interop ./... && \
+		IEEE20305_REQUIRE_INTEROP=1 go test -tags interop -race -count=1 -timeout=30m $(INTEROP_TESTFLAGS) ./...
 
 interop: test-interop ## Alias for test-interop
 
@@ -148,7 +157,7 @@ test-tlsccm: ## Vet, lint and test the tlsccm module (CCM_8, Go 1.26.8 and depen
 	@echo "Testing the tlsccm module"
 	@cd tlsccm && go vet ./... && staticcheck $$(go list ./... | grep -v /internal/) && golangci-lint run ./... && govulncheck ./... && go test -count=1 -race ./...
 
-check: fmt fmt-check nodeps features generate-verify lint lint-ci vet vuln test coverage-gate test-tlsccm ## Run format + generated-code check + lint + vet + vuln + test + coverage gate + the tlsccm module
+check: fmt fmt-check nodeps features generate-verify lint lint-ci vet vuln test coverage-gate coverage-pkg-check test-tlsccm ## Run format + generated-code check + lint + vet + vuln + test + coverage gate + the tlsccm module
 
 # ── Code generation ──────────────────────────────────────────────────────────
 

@@ -1,3 +1,5 @@
+//go:build interop
+
 // SPDX-License-Identifier: MIT
 
 package interop
@@ -12,7 +14,7 @@ import (
 func TestWorkflowPins(t *testing.T) {
 	data, err := os.ReadFile("../.github/workflows/interop.yml")
 	if err != nil {
-		t.Skipf("no workflow: %v", err)
+		prerequisite(t, "no workflow: %v", err)
 	}
 	for _, img := range []string{EnvoyImage, GridAPPSDImage, Py20305Image, EPRIImage} {
 		if !strings.Contains(string(data), "'"+img+"'") {

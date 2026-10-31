@@ -1,0 +1,16 @@
+# Recorded exceptions to otfabric/engineering rules (docs/exceptions/ there).
+exceptions:
+  - rule: GO-011
+    scope: tlsccm/internal
+    justification: >-
+      Every hand-written Go file of this repository carries the header except
+      the 29 files under tlsccm/internal, which are vendored: internal/gotls is
+      crypto/tls of Go 1.22.0 (BSD-3-Clause) with Battelle's CCM_8 added, and
+      internal/ccm is Pion's AES-CCM (MIT). They keep their upstream headers
+      and stay byte for byte the upstream files, which internal/upstream
+      checks (tlsccm/internal/gotls/UPSTREAM.md); standards/go.md#headers asks
+      the same of vendored files.
+    owner: bartvanbos
+    reviewed: "2026-10-31"
+    reconsider: "when Go's crypto/tls implements TLS_ECDHE_ECDSA_WITH_AES_128_CCM_8 and tlsccm goes away"
+    ref: tlsccm/internal/gotls/UPSTREAM.md

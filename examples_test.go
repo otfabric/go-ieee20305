@@ -15,13 +15,24 @@ import (
 
 const upstream = "schemas/upstream/ieee-2030.5-2023"
 
+// needSchemas skips a test that needs the downloaded schemas or xmllint, or
+// fails it when IEEE20305_REQUIRE_SCHEMAS is set: the Generated code job sets
+// it, as it installs both.
+func needSchemas(t *testing.T, why string) {
+	t.Helper()
+	if os.Getenv("IEEE20305_REQUIRE_SCHEMAS") != "" {
+		t.Fatal(why)
+	}
+	t.Skip(why + " (IEEE20305_REQUIRE_SCHEMAS=1 makes this a failure)")
+}
+
 // TestOfficialExamples round-trips the examples of the IEEE 2030.5-2023
 // supplemental material, and checks with xmllint that what Marshal writes
 // is valid against the official sep.xsd whenever the example is.
 func TestOfficialExamples(t *testing.T) {
 	files, _ := filepath.Glob(filepath.Join(upstream, "Examples", "*.xml"))
 	if len(files) == 0 {
-		t.Skip("upstream schemas not downloaded; run make download")
+		needSchemas(t, "upstream schemas not downloaded; run make download")
 	}
 	xmllint, _ := exec.LookPath("xmllint")
 	if xmllint == "" {
