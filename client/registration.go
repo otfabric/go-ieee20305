@@ -11,6 +11,7 @@ import (
 	"time"
 
 	ieee20305 "github.com/otfabric/go-ieee20305"
+	"github.com/otfabric/go-ieee20305/internal/clamp"
 	"github.com/otfabric/go-ieee20305/security"
 )
 
@@ -64,7 +65,7 @@ func (c *Client) FindEndDevice(ctx context.Context, listHref string, id Identity
 				return &list.EndDevice[i], nil
 			}
 		}
-		n := uint32(len(list.EndDevice))
+		n := clamp.Uint32(len(list.EndDevice))
 		start += n
 		if n == 0 || start >= uint32(list.All) {
 			return nil, nil

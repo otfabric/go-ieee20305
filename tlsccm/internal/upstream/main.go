@@ -124,7 +124,7 @@ func normalize(name string, src []byte) ([]byte, error) {
 func diff() ([]string, error) {
 	var findings []string
 	for _, name := range shared {
-		ours, err := os.ReadFile(filepath.Join(dir, name))
+		ours, err := os.ReadFile(filepath.Clean(filepath.Join(dir, name)))
 		if err != nil {
 			return nil, err
 		}
@@ -194,7 +194,7 @@ func vulns() ([]string, error) {
 	if err := json.Unmarshal(data, &modules); err != nil {
 		return nil, err
 	}
-	reviewed, err := os.ReadFile(filepath.Join(dir, "SECURITY.md"))
+	reviewed, err := os.ReadFile(filepath.Clean(filepath.Join(dir, "SECURITY.md")))
 	if err != nil {
 		return nil, err
 	}
@@ -273,7 +273,7 @@ func main() {
 	text := "tlsccm/internal/gotls needs attention:\n\n" + strings.Join(out, "\n") + "\n"
 	fmt.Print(text)
 	if *report != "" {
-		if err := os.WriteFile(*report, []byte(text), 0o644); err != nil {
+		if err := os.WriteFile(filepath.Clean(*report), []byte(text), 0o600); err != nil {
 			fmt.Fprintln(os.Stderr, "upstream:", err)
 			os.Exit(2)
 		}

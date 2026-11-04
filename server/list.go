@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	ieee20305 "github.com/otfabric/go-ieee20305"
+	"github.com/otfabric/go-ieee20305/internal/clamp"
 )
 
 // list builds the page of the list node the request asks for: the items
@@ -91,7 +92,7 @@ func (s *Server) listOf(ctx context.Context, req *Request, source string, keep f
 	if err := l.SetListItems(page); err != nil {
 		return nil, httpError(http.StatusInternalServerError, "%s: %v", req.Node.Href, err)
 	}
-	l.SetListCounts(uint32(all), uint32(len(page)))
+	l.SetListCounts(clamp.Uint32(all), clamp.Uint32(len(page)))
 	setHref(doc, req.Node.Href)
 	return doc, nil
 }

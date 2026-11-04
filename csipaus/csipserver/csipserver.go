@@ -23,6 +23,7 @@ import (
 
 	ieee20305 "github.com/otfabric/go-ieee20305"
 	"github.com/otfabric/go-ieee20305/csipaus"
+	"github.com/otfabric/go-ieee20305/internal/clamp"
 	"github.com/otfabric/go-ieee20305/server"
 )
 
@@ -86,12 +87,13 @@ func Watts(w int16) *ieee20305.ActivePower { return &ieee20305.ActivePower{Value
 // Envelope returns a DERControl of mRID mrid that sets the limits from start
 // for d, created now by the local clock (set its CreationTime to that of the
 // server's Admin.Now when the two differ: it orders events of the same
-// primacy).
+// primacy). The duration is d in whole seconds, 0 for a negative d and at
+// most 2^32 - 1 s, the range of the wire.
 func Envelope(mrid ieee20305.MRIDType, start time.Time, d time.Duration, l csipaus.Limits) *csipaus.DERControl {
 	c := &csipaus.DERControl{}
 	c.MRID = mrid
 	c.CreationTime = ieee20305.TimeType(time.Now().Unix())
-	c.Interval = ieee20305.DateTimeInterval{Start: ieee20305.TimeType(start.Unix()), Duration: ieee20305.UInt32(d / time.Second)}
+	c.Interval = ieee20305.DateTimeInterval{Start: ieee20305.TimeType(start.Unix()), Duration: ieee20305.UInt32(clamp.Uint32FromInt64(int64(d / time.Second)))}
 	l.Apply(&c.DERControlBase)
 	return c
 }

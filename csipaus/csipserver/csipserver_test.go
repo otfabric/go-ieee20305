@@ -8,6 +8,7 @@ import (
 	"crypto/x509"
 	"encoding/xml"
 	"io"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -112,6 +113,20 @@ func TestEnvelope(t *testing.T) {
 	}
 	if _, ok := csipaus.LimitsOf((*csipaus.DERControlBase)(nil)); ok {
 		t.Error("LimitsOf nil")
+	}
+}
+
+// A duration outside the wire's range is clamped, not wrapped: a negative
+// one used to become a control of 136 years.
+func TestEnvelopeDurationRange(t *testing.T) {
+	start := time.Unix(1_800_000_000, 0)
+	for _, c := range []struct {
+		d    time.Duration
+		want ieee20305.UInt32
+	}{{-time.Second, 0}, {1500 * time.Millisecond, 1}, {math.MaxInt64, math.MaxUint32}} {
+		if got := csipserver.Envelope(ieee20305.MRIDType{1}, start, c.d, csipaus.Limits{}).Interval.Duration; got != c.want {
+			t.Errorf("Envelope duration %v = %d, want %d", c.d, got, c.want)
+		}
 	}
 }
 

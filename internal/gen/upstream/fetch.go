@@ -84,7 +84,7 @@ func Verify(m *manifest.Manifest, dir string) error {
 				}
 				continue
 			}
-			data, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(f.To)))
+			data, err := os.ReadFile(filepath.Clean(filepath.Join(dir, filepath.FromSlash(f.To))))
 			if err != nil {
 				return fmt.Errorf("%s: %w (run make schemas)", f.To, err)
 			}
@@ -129,7 +129,7 @@ func sourceComplete(s manifest.Source, dir string) bool {
 			}
 			continue
 		}
-		data, err := os.ReadFile(p)
+		data, err := os.ReadFile(filepath.Clean(p))
 		if err != nil || SHA256(data) != f.SHA256 {
 			return false
 		}
@@ -205,8 +205,8 @@ func writeFile(dir, rel string, data []byte, wantSHA string) error {
 		}
 	}
 	p := filepath.Join(dir, filepath.FromSlash(clean))
-	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Clean(filepath.Dir(p)), 0o750); err != nil {
 		return err
 	}
-	return os.WriteFile(p, data, 0o644)
+	return os.WriteFile(filepath.Clean(p), data, 0o600)
 }

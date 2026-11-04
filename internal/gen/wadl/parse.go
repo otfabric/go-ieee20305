@@ -6,13 +6,14 @@ import (
 	"encoding/xml"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 )
 
 // ParseFile reads and parses a WADL file.
 func ParseFile(path string) (*Application, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(filepath.Clean(path))
 	if err != nil {
 		return nil, err
 	}

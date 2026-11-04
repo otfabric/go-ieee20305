@@ -10,6 +10,7 @@ import (
 	"time"
 
 	ieee20305 "github.com/otfabric/go-ieee20305"
+	"github.com/otfabric/go-ieee20305/internal/clamp"
 )
 
 // Mirror creates the MirrorUsagePoint mup of the device in the server's
@@ -41,7 +42,8 @@ func (a *Agent) PostReadings(ctx context.Context, mup string, readings ...ieee20
 		return err
 	}
 	l := &ieee20305.MirrorMeterReadingList{MirrorMeterReading: readings}
-	l.All, l.Results = ieee20305.UInt32(len(readings)), ieee20305.UInt32(len(readings))
+	n := ieee20305.UInt32(clamp.Uint32(len(readings)))
+	l.All, l.Results = n, n
 	_, err := a.c.Post(ctx, mup, l)
 	return err
 }

@@ -122,7 +122,15 @@ type subscription struct {
 }
 
 func newNotifier(s *Server) *notifier {
-	n := &notifier{s: s, client: s.cfg.NotificationClient, subs: map[string]*subscription{}}
+	n := &notifier{s: s, subs: map[string]*subscription{}}
+	if c := s.cfg.NotificationClient; c != nil {
+		// A copy that follows no redirect: a listener's 307 or 308 would
+		// otherwise send the POST, with the server's certificate, to a
+		// host NotificationURIAllowed never saw. A 3xx is a failure.
+		nc := *c
+		nc.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+		n.client = &nc
+	}
 	workers := s.cfg.NotificationWorkers
 	if workers <= 0 {
 		workers = 16
@@ -418,10 +426,17 @@ func (n *notifier) principal(lfdi string) Principal {
 }
 
 // post sends a notification to uri.
+// The URI is checked again here, not only when the subscription was
+// posted: a persistent store may hold subscriptions an earlier
+// configuration accepted.
 func (n *notifier) post(uri string, body []byte) error {
+	u, err := n.s.notificationURL(uri)
+	if err != nil {
+		return err
+	}
 	n.sem <- struct{}{}
 	defer func() { <-n.sem }()
-	req, err := http.NewRequestWithContext(n.ctx, http.MethodPost, uri, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(n.ctx, http.MethodPost, u.String(), bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
@@ -470,16 +485,11 @@ func (s *Server) checkSubscription(ctx context.Context, r *Request) error {
 	if sub.Encoding != 0 {
 		return bad(ReasonUnsupported, "encoding %d: the server sends XML (0)", sub.Encoding)
 	}
-	u, err := url.Parse(sub.NotificationURI)
-	if err != nil || u.Scheme != "https" || u.Host == "" {
+	if _, err := s.notificationURL(sub.NotificationURI); err != nil {
+		if errors.Is(err, ieee20305.ErrForbidden) {
+			return httpError(http.StatusForbidden, "notificationURI %q is not allowed", sub.NotificationURI)
+		}
 		return bad(ReasonInvalidRequest, "notificationURI %q is no https URL", sub.NotificationURI)
-	}
-	allowed := s.cfg.NotificationURIAllowed
-	if allowed == nil {
-		allowed = DefaultNotificationURIAllowed
-	}
-	if !allowed(u) {
-		return httpError(http.StatusForbidden, "notificationURI %q is not allowed", sub.NotificationURI)
 	}
 	target, err := s.store.Get(ctx, sub.SubscribedResource)
 	if err != nil || target.Value == nil || !s.canRead(r.Principal, target) {
@@ -489,6 +499,24 @@ func (s *Server) checkSubscription(ctx context.Context, r *Request) error {
 		return bad(ReasonUnsupported, "%s takes no subscriptions", sub.SubscribedResource)
 	}
 	return nil
+}
+
+// notificationURL parses a notificationURI and checks it: an https URL
+// with a host (ieee20305.ErrBadRequest otherwise) that
+// NotificationURIAllowed allows (ieee20305.ErrForbidden otherwise).
+func (s *Server) notificationURL(uri string) (*url.URL, error) {
+	u, err := url.Parse(uri)
+	if err != nil || u.Scheme != "https" || u.Host == "" {
+		return nil, fmt.Errorf("%w: notificationURI %q is no https URL", ieee20305.ErrBadRequest, uri)
+	}
+	allowed := s.cfg.NotificationURIAllowed
+	if allowed == nil {
+		allowed = DefaultNotificationURIAllowed
+	}
+	if !allowed(u) {
+		return nil, fmt.Errorf("%w: notificationURI %q is not allowed", ieee20305.ErrForbidden, uri)
+	}
+	return u, nil
 }
 
 // subscribable reports whether a document takes subscriptions: its type

@@ -16,6 +16,7 @@ import (
 	"time"
 
 	ieee20305 "github.com/otfabric/go-ieee20305"
+	"github.com/otfabric/go-ieee20305/internal/clamp"
 	"github.com/otfabric/go-ieee20305/internal/dnsmsg"
 )
 
@@ -417,7 +418,7 @@ func records(s Service) []dnsmsg.Resource {
 	}
 	rs = append(rs,
 		rec(enumName, false, otherTTL, &dnsmsg.PTR{Target: typeName}),
-		rec(inst, true, hostTTL, &dnsmsg.SRV{Port: uint16(s.Port), Target: s.Host}),
+		rec(inst, true, hostTTL, &dnsmsg.SRV{Port: clamp.Uint16(s.Port), Target: s.Host}),
 		rec(inst, true, otherTTL, &dnsmsg.TXT{Strings: txtStrings(s.TXT)}),
 	)
 	for _, a := range s.Addrs {

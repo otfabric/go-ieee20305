@@ -570,7 +570,7 @@ func TestVerifyFailsClosed(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg := security.ServerTLSConfig(tlsCert(srv, srvKey), nil)
-	if err := cfg.VerifyPeerCertificate([][]byte{dev.Raw}, nil); !errors.Is(err, ieee20305.ErrCertificate) {
+	if err := cfg.VerifyConnection(tls.ConnectionState{PeerCertificates: []*x509.Certificate{dev}}); !errors.Is(err, ieee20305.ErrCertificate) {
 		t.Errorf("a server without client CAs: %v", err)
 	}
 }

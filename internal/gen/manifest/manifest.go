@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"path/filepath"
 	"regexp"
 	"strings"
 )
@@ -124,7 +125,7 @@ var sha256Hex = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
 // Load reads and validates the manifest at path.
 func Load(path string) (*Manifest, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(filepath.Clean(path))
 	if err != nil {
 		return nil, err
 	}

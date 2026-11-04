@@ -13,6 +13,7 @@ import (
 	"time"
 
 	ieee20305 "github.com/otfabric/go-ieee20305"
+	"github.com/otfabric/go-ieee20305/internal/clamp"
 )
 
 // Head checks that the resource at href exists, without its document.
@@ -72,7 +73,7 @@ func (c *Client) iterate(ctx context.Context, href string, start, pageSize uint3
 				return err
 			}
 		}
-		start += uint32(len(items))
+		start += clamp.Uint32(len(items))
 		if start > c.maxItems {
 			return fmt.Errorf("%w: %s has more than %d items", ieee20305.ErrProtocol, href, c.maxItems)
 		}
@@ -90,7 +91,7 @@ func listAll(l ieee20305.Lister) uint32 {
 		return 0
 	}
 	if f := v.Elem().FieldByName("All"); f.IsValid() && f.CanUint() {
-		return uint32(f.Uint())
+		return clamp.Uint32FromUint64(f.Uint())
 	}
 	return 0
 }
@@ -149,8 +150,8 @@ func (c *Client) Walk(ctx context.Context, root string, opts WalkOptions, visit 
 		if l, ok := doc.(ieee20305.Lister); ok {
 			// The items of the first page, then the rest of the list.
 			items := l.ListItems()
-			if all := listAll(l); uint32(len(items)) < all && len(items) > 0 {
-				if err := c.iterate(ctx, cur.href, uint32(len(items)), opts.PageSize, func(it any) error {
+			if all, n := listAll(l), clamp.Uint32(len(items)); n < all && n > 0 {
+				if err := c.iterate(ctx, cur.href, n, opts.PageSize, func(it any) error {
 					items = append(items, it)
 					return nil
 				}); err != nil {
@@ -168,7 +169,8 @@ func (c *Client) Walk(ctx context.Context, root string, opts WalkOptions, visit 
 			if err := l.SetListItems(items); err != nil {
 				return err
 			}
-			l.SetListCounts(uint32(len(items)), uint32(len(items)))
+			n := clamp.Uint32(len(items))
+			l.SetListCounts(n, n)
 			docs = append(docs, items...)
 		}
 		if err := visit(Step{Href: cur.href, Link: cur.link, Doc: doc, Depth: cur.depth}); err != nil {

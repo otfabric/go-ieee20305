@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	ieee20305 "github.com/otfabric/go-ieee20305"
+	"github.com/otfabric/go-ieee20305/internal/clamp"
 )
 
 var listLinkType = reflect.TypeFor[ieee20305.ListLink]()
@@ -98,7 +99,7 @@ func (s *Server) dressLink(ctx context.Context, p Principal, f reflect.Value) {
 	if !ll.IsValid() || ll.Type() != listLinkType || !ll.CanAddr() {
 		return
 	}
-	all := ieee20305.UInt32(s.count(ctx, p, n))
+	all := ieee20305.UInt32(clamp.Uint32(s.count(ctx, p, n)))
 	ll.Addr().Interface().(*ieee20305.ListLink).All = &all
 }
 
@@ -160,7 +161,7 @@ func listAll(l ieee20305.Lister) uint32 {
 		return 0
 	}
 	if f := v.Elem().FieldByName("All"); f.IsValid() && f.CanUint() {
-		return uint32(f.Uint())
+		return clamp.Uint32FromUint64(f.Uint())
 	}
 	return 0
 }
