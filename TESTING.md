@@ -32,6 +32,20 @@ latency, unavailability, aborts, connection resets, corruption and truncation
 through `internal/chaos`, with fixed seeds. This shows that the two sides agree
 with each other, not that they agree with anyone else.
 
+## Hostile peers
+
+`client/hostile_test.go` runs the client against a server that lies about
+its lists (`all` of 0 or 2^32-1, pages that ignore `s`), fans out links
+without end, loops redirects or leaves the server, sends bodies that never
+end or stall, and documents that are no XML or nest deeply.
+`server/hostile_test.go` sends the server query parameters at and beyond
+their limits, oversized, malformed and nested bodies, subscription floods,
+notification URIs that spell loopback and link-local addresses, receivers
+that redirect, stall or never end their answer. `discovery/hostile_test.go`
+floods the browser's cache and feeds it malformed packets, and
+`internal/dnsmsg/boundary_test.go` checks the limits of names, labels,
+pointers, sections and record data.
+
 ## Interop
 
 `interop/` is a module of its own, because it depends on `tlsccm`. It runs the

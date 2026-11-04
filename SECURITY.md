@@ -42,7 +42,8 @@ present a certificate, and each verifies the other's chain.
   set `InsecureSkipVerify` only to replace the verification of crypto/tls,
   which rejects the critical HardwareModuleName subjectAltName of IEEE
   2030.5 device certificates, with `security.Verify`, which accepts it and
-  checks the chain, validity, key usage and names.
+  checks the chain, validity, key usage and names. The check runs in
+  `VerifyConnection`, which crypto/tls calls on resumed sessions too.
 - The standard's cipher suite, TLS_ECDHE_ECDSA_WITH_AES_128_CCM_8, is not in
   crypto/tls. The core module offers the ECDHE-ECDSA AES-GCM suites, which
   are as strong; the module `tlsccm` adds CCM_8 for peers that offer nothing
@@ -81,9 +82,16 @@ control the device.
   without bound. Ended events are pruned after `EventRetention`.
 - **Notifications are outbound requests** to a URI the device chooses. The
   default `NotificationURIAllowed` refuses loopback, link-local, multicast
-  and unspecified addresses; tighten it to the networks of your devices.
-  The notifier presents the server's certificate and verifies the
-  listener's (`server.NewNotificationClient`).
+  and unspecified addresses (also with an IPv6 zone), and hosts whose last
+  label is a number (`127.1`, `0x7f000001`), which some system resolvers
+  read as IPv4 addresses; tighten it to the networks of your devices.
+  It is checked when a subscription is posted or put and again before each
+  notification, so subscriptions a persistent store kept from an earlier
+  configuration are held to the current one. Host names are not resolved:
+  a name that resolves to an internal address passes the default. The
+  notifier follows no redirect (a 3xx fails the notification), presents
+  the server's certificate and verifies the listener's
+  (`server.NewNotificationClient`).
 - **Set `http.Server` timeouts** (`ReadHeaderTimeout` at least), as with any
   Go HTTP server.
 

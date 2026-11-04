@@ -107,3 +107,29 @@ func TestNotificationURIRecheckedAfterRestart(t *testing.T) {
 		t.Errorf("%d notifications sent to a refused notificationURI", calls)
 	}
 }
+
+// Names whose last label is a number are refused; ordinary names, and
+// routable literals with or without a zone, are not.
+func TestDefaultNotificationURIAllowedSpellings(t *testing.T) {
+	for host, want := range map[string]bool{
+		"listener.example":     true,
+		"10.0.0.7":             true,
+		"[2001:db8::1]":        true,
+		"1e100.net":            true,
+		"host.0x":              false,
+		"a.0x1f":               false,
+		"10.1":                 false,
+		"[::1%25lo]":           false,
+		"[ff02::1%25eth0]":     false,
+		"[::ffff:127.0.0.1]":   false,
+		"[::ffff:169.254.1.1]": false,
+	} {
+		u, err := url.Parse("https://" + host + "/n")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := server.DefaultNotificationURIAllowed(u); got != want {
+			t.Errorf("%s: allowed %v, want %v", host, got, want)
+		}
+	}
+}

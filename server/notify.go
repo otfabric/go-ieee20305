@@ -12,6 +12,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"path"
 	"reflect"
@@ -558,20 +559,37 @@ func (s *Server) updateSubscription(ctx context.Context, r *Request) error {
 // without one: it refuses the hosts a device must not make the server
 // connect to with its certificate: localhost, and literal loopback,
 // unspecified, link-local and multicast addresses (cloud metadata services
-// are link-local). A host name is not resolved: what the names of a network
-// reach is for the operator's own NotificationURIAllowed, or its network,
-// to decide.
+// are link-local), with or without an IPv6 zone. It also refuses hosts
+// whose last label is a number, such as 127.1, 2130706433 or 0x7f000001:
+// they are no DNS names (RFC 1123, section 2.1), and the system resolver
+// of some platforms reads them as IPv4 addresses (inet_aton). A host name
+// is not resolved: what the names of a network reach is for the operator's
+// own NotificationURIAllowed, or its network, to decide.
 func DefaultNotificationURIAllowed(u *url.URL) bool {
 	host := strings.ToLower(strings.TrimSuffix(u.Hostname(), "."))
 	if host == "" || host == "localhost" || strings.HasSuffix(host, ".localhost") {
 		return false
 	}
-	ip := net.ParseIP(host)
-	if ip == nil {
-		return true
+	addr, err := netip.ParseAddr(host)
+	if err != nil {
+		return !numericLabel(host[strings.LastIndexByte(host, '.')+1:])
 	}
+	ip := net.IP(addr.Unmap().AsSlice())
 	return !ip.IsLoopback() && !ip.IsUnspecified() && !ip.IsLinkLocalUnicast() &&
 		!ip.IsLinkLocalMulticast() && !ip.IsMulticast() && !ip.IsInterfaceLocalMulticast()
+}
+
+// numericLabel reports whether a label is a decimal, octal or hexadecimal
+// number, as inet_aton reads the parts of an address.
+func numericLabel(l string) bool {
+	if rest, ok := strings.CutPrefix(l, "0x"); ok {
+		l = rest
+		if l == "" {
+			return true
+		}
+		return strings.Trim(l, "0123456789abcdef") == ""
+	}
+	return l != "" && strings.Trim(l, "0123456789") == ""
 }
 
 // NewNotificationClient returns an http.Client for Config.NotificationClient:

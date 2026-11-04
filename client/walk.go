@@ -68,15 +68,18 @@ func (c *Client) iterate(ctx context.Context, href string, start, pageSize uint3
 			return err
 		}
 		items := l.ListItems()
+		// Checked before fn sees the page: a server may send more items
+		// than were asked for.
+		next := uint64(start) + uint64(len(items))
+		if next > uint64(c.maxItems) {
+			return fmt.Errorf("%w: %s has more than %d items", ieee20305.ErrProtocol, href, c.maxItems)
+		}
 		for _, it := range items {
 			if err := fn(it); err != nil {
 				return err
 			}
 		}
-		start += clamp.Uint32(len(items))
-		if start > c.maxItems {
-			return fmt.Errorf("%w: %s has more than %d items", ieee20305.ErrProtocol, href, c.maxItems)
-		}
+		start = clamp.Uint32FromUint64(next)
 		if len(items) == 0 || start >= listAll(l) {
 			return nil
 		}
@@ -118,15 +121,26 @@ type WalkOptions struct {
 	Follow func(l ieee20305.LinkRef) bool
 	// PageSize is the page size of lists; see Iterate.
 	PageSize uint32
+	// MaxResources is the number of resources Walk visits at most; 4096
+	// when zero. A walk that finds more links fails with ErrProtocol, so
+	// that a server whose documents keep linking to new resources cannot
+	// make it run without end.
+	MaxResources int
 }
+
+// defaultWalkResources is the MaxResources of WalkOptions when zero.
+const defaultWalkResources = 4096
 
 // Walk visits the resource at root and the resources its links lead to,
 // breadth first, each once: lists with their items, and the links of the
-// items. A link to a resource the server does not have (404) is skipped.
+// items, up to opts.MaxResources resources. A link to a resource the server does not have (404) is skipped.
 // visit's error stops the walk and is returned.
 func (c *Client) Walk(ctx context.Context, root string, opts WalkOptions, visit func(Step) error) error {
 	if opts.MaxDepth == 0 {
 		opts.MaxDepth = 8
+	}
+	if opts.MaxResources <= 0 {
+		opts.MaxResources = defaultWalkResources
 	}
 	type todo struct {
 		href  string
@@ -186,6 +200,9 @@ func (c *Client) Walk(ctx context.Context, root string, opts WalkOptions, visit 
 				}
 				if _, err := c.Resolve(l.Href); err != nil {
 					continue // another server: not followed
+				}
+				if len(seen) >= opts.MaxResources {
+					return fmt.Errorf("%w: %s links to more than %d resources", ieee20305.ErrProtocol, root, opts.MaxResources)
 				}
 				seen[l.Href] = true
 				queue = append(queue, todo{href: l.Href, link: l, depth: cur.depth + 1})
