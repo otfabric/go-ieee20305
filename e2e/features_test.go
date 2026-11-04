@@ -417,7 +417,7 @@ func TestPrepaymentReads(t *testing.T) {
 	if err := a.Put(ctx, &server.Node{Href: ppy + "/os", Resource: "PrepayOperationStatus", Value: examples.PrepayOperationStatus(0)}); err != nil {
 		t.Fatal(err)
 	}
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		if _, err := a.Create(ctx, ppy+"/cr", examples.CreditRegister(0), ""); err != nil {
 			t.Fatal(err)
 		}

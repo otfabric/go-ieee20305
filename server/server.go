@@ -8,6 +8,7 @@ import (
 	"encoding/xml"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/url"
 	"sync"
@@ -223,9 +224,7 @@ func New(cfg Config) (*Server, error) {
 		}
 		s.resources[r.ID] = r
 	}
-	for id, h := range builtinHooks(s) {
-		s.hooks[id] = h
-	}
+	maps.Copy(s.hooks, builtinHooks(s))
 	for id, h := range cfg.Hooks {
 		if _, ok := s.resources[id]; !ok {
 			return nil, fmt.Errorf("%w: hooks for %s, which is no resource", ieee20305.ErrConfiguration, id)

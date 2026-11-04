@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"mime"
 	"net"
 	"net/http"
@@ -341,9 +342,7 @@ func (c *Client) do(ctx context.Context, method, href string, q url.Values, body
 	}
 	if q != nil {
 		merged := u.Query()
-		for k, vs := range q {
-			merged[k] = vs
-		}
+		maps.Copy(merged, q)
 		u.RawQuery = merged.Encode()
 	}
 	var data []byte
@@ -418,6 +417,11 @@ func (c *Client) send(ctx context.Context, method string, u *url.URL, data []byt
 	c.log.Debugf("%s %s: %d in %v", method, u.Path, resp.StatusCode, time.Since(start))
 	defer func() { _ = resp.Body.Close() }()
 	out, err := io.ReadAll(io.LimitReader(resp.Body, c.maxBytes+1))
+	if err == nil {
+		// A body cut short by a deadline or a cancellation may still end
+		// without a read error; what it holds is not the server's answer.
+		err = ctx.Err()
+	}
 	if err != nil {
 		return nil, nil, transportError(ctx, method, u, err)
 	}

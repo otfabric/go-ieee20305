@@ -185,7 +185,7 @@ func writePEM(path, kind string, der []byte) error {
 }
 
 func loadCert(path string) (*x509.Certificate, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(filepath.Clean(path))
 	if err != nil {
 		return nil, err
 	}

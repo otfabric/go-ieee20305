@@ -12,6 +12,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"path"
 	"reflect"
@@ -122,7 +123,15 @@ type subscription struct {
 }
 
 func newNotifier(s *Server) *notifier {
-	n := &notifier{s: s, client: s.cfg.NotificationClient, subs: map[string]*subscription{}}
+	n := &notifier{s: s, subs: map[string]*subscription{}}
+	if c := s.cfg.NotificationClient; c != nil {
+		// A copy that follows no redirect: a listener's 307 or 308 would
+		// otherwise send the POST, with the server's certificate, to a
+		// host NotificationURIAllowed never saw. A 3xx is a failure.
+		nc := *c
+		nc.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+		n.client = &nc
+	}
 	workers := s.cfg.NotificationWorkers
 	if workers <= 0 {
 		workers = 16
@@ -418,10 +427,17 @@ func (n *notifier) principal(lfdi string) Principal {
 }
 
 // post sends a notification to uri.
+// The URI is checked again here, not only when the subscription was
+// posted: a persistent store may hold subscriptions an earlier
+// configuration accepted.
 func (n *notifier) post(uri string, body []byte) error {
+	u, err := n.s.notificationURL(uri)
+	if err != nil {
+		return err
+	}
 	n.sem <- struct{}{}
 	defer func() { <-n.sem }()
-	req, err := http.NewRequestWithContext(n.ctx, http.MethodPost, uri, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(n.ctx, http.MethodPost, u.String(), bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
@@ -470,16 +486,11 @@ func (s *Server) checkSubscription(ctx context.Context, r *Request) error {
 	if sub.Encoding != 0 {
 		return bad(ReasonUnsupported, "encoding %d: the server sends XML (0)", sub.Encoding)
 	}
-	u, err := url.Parse(sub.NotificationURI)
-	if err != nil || u.Scheme != "https" || u.Host == "" {
+	if _, err := s.notificationURL(sub.NotificationURI); err != nil {
+		if errors.Is(err, ieee20305.ErrForbidden) {
+			return httpError(http.StatusForbidden, "notificationURI %q is not allowed", sub.NotificationURI)
+		}
 		return bad(ReasonInvalidRequest, "notificationURI %q is no https URL", sub.NotificationURI)
-	}
-	allowed := s.cfg.NotificationURIAllowed
-	if allowed == nil {
-		allowed = DefaultNotificationURIAllowed
-	}
-	if !allowed(u) {
-		return httpError(http.StatusForbidden, "notificationURI %q is not allowed", sub.NotificationURI)
 	}
 	target, err := s.store.Get(ctx, sub.SubscribedResource)
 	if err != nil || target.Value == nil || !s.canRead(r.Principal, target) {
@@ -489,6 +500,24 @@ func (s *Server) checkSubscription(ctx context.Context, r *Request) error {
 		return bad(ReasonUnsupported, "%s takes no subscriptions", sub.SubscribedResource)
 	}
 	return nil
+}
+
+// notificationURL parses a notificationURI and checks it: an https URL
+// with a host (ieee20305.ErrBadRequest otherwise) that
+// NotificationURIAllowed allows (ieee20305.ErrForbidden otherwise).
+func (s *Server) notificationURL(uri string) (*url.URL, error) {
+	u, err := url.Parse(uri)
+	if err != nil || u.Scheme != "https" || u.Host == "" {
+		return nil, fmt.Errorf("%w: notificationURI %q is no https URL", ieee20305.ErrBadRequest, uri)
+	}
+	allowed := s.cfg.NotificationURIAllowed
+	if allowed == nil {
+		allowed = DefaultNotificationURIAllowed
+	}
+	if !allowed(u) {
+		return nil, fmt.Errorf("%w: notificationURI %q is not allowed", ieee20305.ErrForbidden, uri)
+	}
+	return u, nil
 }
 
 // subscribable reports whether a document takes subscriptions: its type
@@ -530,20 +559,37 @@ func (s *Server) updateSubscription(ctx context.Context, r *Request) error {
 // without one: it refuses the hosts a device must not make the server
 // connect to with its certificate: localhost, and literal loopback,
 // unspecified, link-local and multicast addresses (cloud metadata services
-// are link-local). A host name is not resolved: what the names of a network
-// reach is for the operator's own NotificationURIAllowed, or its network,
-// to decide.
+// are link-local), with or without an IPv6 zone. It also refuses hosts
+// whose last label is a number, such as 127.1, 2130706433 or 0x7f000001:
+// they are no DNS names (RFC 1123, section 2.1), and the system resolver
+// of some platforms reads them as IPv4 addresses (inet_aton). A host name
+// is not resolved: what the names of a network reach is for the operator's
+// own NotificationURIAllowed, or its network, to decide.
 func DefaultNotificationURIAllowed(u *url.URL) bool {
 	host := strings.ToLower(strings.TrimSuffix(u.Hostname(), "."))
 	if host == "" || host == "localhost" || strings.HasSuffix(host, ".localhost") {
 		return false
 	}
-	ip := net.ParseIP(host)
-	if ip == nil {
-		return true
+	addr, err := netip.ParseAddr(host)
+	if err != nil {
+		return !numericLabel(host[strings.LastIndexByte(host, '.')+1:])
 	}
+	ip := net.IP(addr.Unmap().AsSlice())
 	return !ip.IsLoopback() && !ip.IsUnspecified() && !ip.IsLinkLocalUnicast() &&
 		!ip.IsLinkLocalMulticast() && !ip.IsMulticast() && !ip.IsInterfaceLocalMulticast()
+}
+
+// numericLabel reports whether a label is a decimal, octal or hexadecimal
+// number, as inet_aton reads the parts of an address.
+func numericLabel(l string) bool {
+	if rest, ok := strings.CutPrefix(l, "0x"); ok {
+		l = rest
+		if l == "" {
+			return true
+		}
+		return strings.Trim(l, "0123456789abcdef") == ""
+	}
+	return l != "" && strings.Trim(l, "0123456789") == ""
 }
 
 // NewNotificationClient returns an http.Client for Config.NotificationClient:

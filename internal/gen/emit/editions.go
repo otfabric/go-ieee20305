@@ -4,6 +4,7 @@ package emit
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -242,12 +243,7 @@ func (g *gen) ancestorsAll(q xsd.QName) []string {
 // derivesFromAny reports whether q derives from the type named base,
 // through complex or simple content.
 func (g *gen) derivesFromAny(q xsd.QName, base string) bool {
-	for _, a := range g.ancestorsAll(q) {
-		if a == base {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(g.ancestorsAll(q), base)
 }
 
 type flatItem struct {
@@ -260,13 +256,13 @@ type flatItem struct {
 func flatItems(s *xsd.Set, ct *xsd.ComplexType) []flatItem {
 	chain := append([]*xsd.ComplexType{ct}, s.BaseChain(ct)...)
 	var out []flatItem
-	for i := len(chain) - 1; i >= 0; i-- {
-		for _, p := range chain[i].Particles {
+	for _, c := range slices.Backward(chain) {
+		for _, p := range c.Particles {
 			if p.Element != nil {
 				out = append(out, flatItem{p.Element.Name.Local, p.Element.Type})
 			}
 		}
-		for _, a := range chain[i].Attributes {
+		for _, a := range c.Attributes {
 			out = append(out, flatItem{"@" + a.Name, a.Type})
 		}
 	}

@@ -133,7 +133,8 @@ cross: ## Cross-compile the module without cgo for the supported platforms (the 
 FUZZTIME ?= 30s
 # The fuzz targets, as <package>:<target>.
 FUZZ_TARGETS := ./server:FuzzHandler ./security:FuzzHardwareModuleName ./schedule:FuzzResolve ./internal/dnsmsg:FuzzParse \
-	.:FuzzDecode ./csipaus:FuzzDecode ./client:FuzzResolve
+	.:FuzzDecode ./csipaus:FuzzDecode ./client:FuzzResolve \
+	./client:FuzzWalk ./client:FuzzNotificationHandler ./discovery:FuzzBrowse
 
 fuzz: ## Run the fuzz targets for FUZZTIME each (default 30s)
 	@echo "Fuzzing (FUZZTIME=$(FUZZTIME))"

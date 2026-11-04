@@ -1,6 +1,7 @@
 package gotls
 
 import (
+	"slices"
 	"testing"
 )
 
@@ -21,23 +22,11 @@ func TestCCMRegistered(t *testing.T) {
 	}
 
 	// Check it's in cipherSuitesPreferenceOrder
-	foundInPref := false
-	for _, id := range cipherSuitesPreferenceOrder {
-		if id == TLS_ECDHE_ECDSA_WITH_AES_128_CCM_8 {
-			foundInPref = true
-			break
-		}
-	}
+	foundInPref := slices.Contains(cipherSuitesPreferenceOrder, TLS_ECDHE_ECDSA_WITH_AES_128_CCM_8)
 	t.Logf("cipherSuitesPreferenceOrder len=%d, has CCM=%v", len(cipherSuitesPreferenceOrder), foundInPref)
 
 	// Also check cipherSuitesPreferenceOrderNoAES
-	foundInNoAES := false
-	for _, id := range cipherSuitesPreferenceOrderNoAES {
-		if id == TLS_ECDHE_ECDSA_WITH_AES_128_CCM_8 {
-			foundInNoAES = true
-			break
-		}
-	}
+	foundInNoAES := slices.Contains(cipherSuitesPreferenceOrderNoAES, TLS_ECDHE_ECDSA_WITH_AES_128_CCM_8)
 	t.Logf("cipherSuitesPreferenceOrderNoAES len=%d, has CCM=%v", len(cipherSuitesPreferenceOrderNoAES), foundInNoAES)
 
 	// Check it can be found by mutualCipherSuite

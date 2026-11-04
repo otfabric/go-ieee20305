@@ -144,7 +144,9 @@ type Options struct {
 	Clock Clock
 	// Seed seeds the randomization. Each event draws its random
 	// offsets from Seed and its MRID, so they do not depend on the
-	// order in which events arrive.
+	// order in which events arrive. Schedulers with the same Seed draw
+	// the same offsets for an event: give each device its own, such as
+	// its SFDI (as agent.Config does when its Seed is zero).
 	Seed uint64
 	// Randomize applies the randomizeStart and randomizeDuration of the
 	// events, as a client does. A server leaves it off.
@@ -219,7 +221,7 @@ func New(o Options) *Scheduler {
 // rng returns the random source of the event mrid.
 func (s *Scheduler) rng(mrid string) *rand.Rand {
 	h := fnv.New64a()
-	h.Write([]byte(mrid))
+	_, _ = h.Write([]byte(mrid)) // a hash.Hash never returns an error
 	return rand.New(rand.NewPCG(s.seed, h.Sum64()))
 }
 
@@ -647,11 +649,9 @@ func (s *Scheduler) Subscribe() (<-chan Transition, func()) {
 		exited: make(chan struct{}),
 	}
 	s.subs[sub] = struct{}{}
-	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
+	s.wg.Go(func() {
 		sub.run()
-	}()
+	})
 	return sub.ch, func() {
 		s.mu.Lock()
 		delete(s.subs, sub)

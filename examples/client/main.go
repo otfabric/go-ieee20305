@@ -19,6 +19,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -28,11 +29,16 @@ import (
 func main() {
 	dir := flag.String("pki", "ieee20305-pki", "directory with ca.crt, device.crt and device.key")
 	url := flag.String("url", "https://127.0.0.1:8443/dcap", "URL of the server's DeviceCapability")
-	pin := flag.Uint("pin", 111115, "PIN the device was given out of band")
+	pin := uint32(111115)
+	flag.Func("pin", "PIN the device was given out of band (default 111115)", func(s string) error {
+		v, err := strconv.ParseUint(s, 10, 32)
+		pin = uint32(v)
+		return err
+	})
 	flag.Parse()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	if err := run(ctx, *dir, *url, uint32(*pin)); err != nil {
+	if err := run(ctx, *dir, *url, pin); err != nil {
 		log.Fatal(err)
 	}
 }
@@ -47,7 +53,7 @@ func run(ctx context.Context, dir, url string, pin uint32) error {
 			return err
 		}
 	}
-	data, err := os.ReadFile(filepath.Join(dir, "ca.crt"))
+	data, err := os.ReadFile(filepath.Clean(filepath.Join(dir, "ca.crt")))
 	if err != nil {
 		return err
 	}

@@ -5,6 +5,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sort"
 	"sync"
 	"time"
@@ -154,10 +155,8 @@ func (s *memStore) AddMember(_ context.Context, list, member string) error {
 	if _, ok := s.nodes[member]; !ok {
 		return ErrNoNode
 	}
-	for _, m := range s.members[list] {
-		if m == member {
-			return nil
-		}
+	if slices.Contains(s.members[list], member) {
+		return nil
 	}
 	s.members[list] = append(s.members[list], member)
 	return nil

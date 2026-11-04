@@ -69,7 +69,7 @@ func (l *loader) load(path string) error {
 	}
 	l.loaded[abs] = true
 
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(filepath.Clean(path))
 	if err != nil {
 		return err
 	}
@@ -181,8 +181,8 @@ func (d *doc) errorf(format string, args ...any) error {
 // declarations. IEEE 2030.5 schemas declare namespaces on xs:schema only.
 func (d *doc) qname(s string) (QName, error) {
 	prefix, local := "", s
-	if i := strings.IndexByte(s, ':'); i >= 0 {
-		prefix, local = s[:i], s[i+1:]
+	if before, after, ok0 := strings.Cut(s, ":"); ok0 {
+		prefix, local = before, after
 	}
 	space, ok := d.ns[prefix]
 	if !ok {

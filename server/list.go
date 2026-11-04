@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	ieee20305 "github.com/otfabric/go-ieee20305"
+	"github.com/otfabric/go-ieee20305/internal/clamp"
 )
 
 // list builds the page of the list node the request asks for: the items
@@ -77,14 +78,8 @@ func (s *Server) listOf(ctx context.Context, req *Request, source string, keep f
 		limit = s.cfg.MaxLimit
 	}
 	all := len(items)
-	start := int(req.Query.Start)
-	if start > all {
-		start = all
-	}
-	end := start + int(limit)
-	if end > all {
-		end = all
-	}
+	start := min(int(req.Query.Start), all)
+	end := min(start+int(limit), all)
 	doc := s.profile.Clone(req.Node.Value)
 	l, ok := doc.(ieee20305.Lister)
 	if !ok {
@@ -97,7 +92,7 @@ func (s *Server) listOf(ctx context.Context, req *Request, source string, keep f
 	if err := l.SetListItems(page); err != nil {
 		return nil, httpError(http.StatusInternalServerError, "%s: %v", req.Node.Href, err)
 	}
-	l.SetListCounts(uint32(all), uint32(len(page)))
+	l.SetListCounts(clamp.Uint32(all), clamp.Uint32(len(page)))
 	setHref(doc, req.Node.Href)
 	return doc, nil
 }
@@ -158,7 +153,7 @@ func eventStart(v any) (int64, bool) {
 		return 0, false
 	}
 	f := rv.Elem().FieldByName("Interval")
-	if !f.IsValid() || f.Type() != reflect.TypeOf(ieee20305.DateTimeInterval{}) {
+	if !f.IsValid() || f.Type() != reflect.TypeFor[ieee20305.DateTimeInterval]() {
 		return 0, false
 	}
 	return int64(f.Interface().(ieee20305.DateTimeInterval).Start), true

@@ -111,7 +111,7 @@ Where the standard leaves room, the library takes these decisions:
 - **Against four other implementations**, Envoy, GridAPPS-D (server and
   client), py20305 and EPRI, through
   [ieee20305-interop](https://github.com/otfabric/ieee20305-interop)
-  v0.2.0, on every push ([README](README.md#interop-tests)).
+  v0.3.1, on every push ([README](README.md#interop-tests)).
 - **Generated types** against the examples of the IEEE 2030.5-2023
   supplemental material, and encoded documents against `sep.xsd`.
 - **Not** against certified test equipment (the SunSpec or UL harnesses)

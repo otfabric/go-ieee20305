@@ -11,6 +11,7 @@ import (
 	"time"
 
 	ieee20305 "github.com/otfabric/go-ieee20305"
+	"github.com/otfabric/go-ieee20305/internal/clamp"
 	"github.com/otfabric/go-ieee20305/security"
 )
 
@@ -51,7 +52,8 @@ const findPageSize = 100
 // FindEndDevice returns the EndDevice of the device id in the EndDeviceList
 // at listHref, or nil if the list has none. It asks the server to select the
 // device by its SFDI, and pages through the whole list in case the server
-// ignores the selection.
+// ignores the selection, up to Config.MaxListItems devices (ErrProtocol
+// beyond).
 func (c *Client) FindEndDevice(ctx context.Context, listHref string, id Identity) (*ieee20305.EndDevice, error) {
 	var start uint32
 	for {
@@ -64,11 +66,15 @@ func (c *Client) FindEndDevice(ctx context.Context, listHref string, id Identity
 				return &list.EndDevice[i], nil
 			}
 		}
-		n := uint32(len(list.EndDevice))
-		start += n
-		if n == 0 || start >= uint32(list.All) {
+		n := len(list.EndDevice)
+		next := uint64(start) + uint64(n)
+		if n == 0 || next >= uint64(list.All) {
 			return nil, nil
 		}
+		if next > uint64(c.maxItems) {
+			return nil, fmt.Errorf("%w: %s has more than %d items", ieee20305.ErrProtocol, listHref, c.maxItems)
+		}
+		start = clamp.Uint32FromUint64(next)
 	}
 }
 

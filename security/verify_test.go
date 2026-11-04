@@ -134,8 +134,7 @@ func TestHMNCertificatesNeedVerify(t *testing.T) {
 	}
 	// The reason Verify exists: crypto/x509 rejects these certificates.
 	_, err = dev.Verify(x509.VerifyOptions{Roots: p.pool, KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageAny}})
-	var uce x509.UnhandledCriticalExtension
-	if !errors.As(err, &uce) {
+	if _, ok := errors.AsType[x509.UnhandledCriticalExtension](err); !ok {
 		t.Fatalf("x509 Verify error = %v, want UnhandledCriticalExtension", err)
 	}
 }
@@ -550,8 +549,7 @@ func TestVerifyFailsClosed(t *testing.T) {
 		}
 	}
 	err = security.Verify([]*x509.Certificate{dev}, security.VerifyOptions{Roots: other.pool})
-	var unknown x509.UnknownAuthorityError
-	if !errors.As(err, &unknown) {
+	if _, ok := errors.AsType[x509.UnknownAuthorityError](err); !ok {
 		t.Errorf("the error of crypto/x509 is lost: %v", err)
 	}
 	if err := security.Verify(nil, security.VerifyOptions{Roots: p.pool}); !errors.Is(err, ieee20305.ErrCertificate) {
@@ -572,7 +570,7 @@ func TestVerifyFailsClosed(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg := security.ServerTLSConfig(tlsCert(srv, srvKey), nil)
-	if err := cfg.VerifyPeerCertificate([][]byte{dev.Raw}, nil); !errors.Is(err, ieee20305.ErrCertificate) {
+	if err := cfg.VerifyConnection(tls.ConnectionState{PeerCertificates: []*x509.Certificate{dev}}); !errors.Is(err, ieee20305.ErrCertificate) {
 		t.Errorf("a server without client CAs: %v", err)
 	}
 }

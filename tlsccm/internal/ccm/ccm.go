@@ -57,15 +57,15 @@ func NewCCM(b cipher.Block, tagsize, noncesize int) (CCM, error) {
 
 func (c *ccm) NonceSize() int { return 15 - int(c.L) }
 func (c *ccm) Overhead() int  { return int(c.M) }
-func (c *ccm) MaxLength() int { return maxlen(c.L, c.Overhead()) }
+func (c *ccm) MaxLength() int { return maxlen(c.L, c.M) }
 
-func maxlen(l uint8, tagsize int) int {
+func maxlen(l, tagsize uint8) int {
 	mLen := (uint64(1) << (8 * l)) - 1
 	if m64 := uint64(math.MaxInt64) - uint64(tagsize); l > 8 || mLen > m64 {
 		mLen = m64
 	}
 	if mLen != uint64(int(mLen)) {
-		return math.MaxInt32 - tagsize
+		return math.MaxInt32 - int(tagsize)
 	}
 	return int(mLen)
 }

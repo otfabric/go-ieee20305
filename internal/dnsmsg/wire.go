@@ -17,14 +17,12 @@ const headerLen = 12
 func (m *Message) Encode() ([]byte, error) {
 	e := encoder{b: make([]byte, headerLen, 512), names: map[string]int{}}
 	counts := []int{len(m.Questions), len(m.Answers), len(m.Authorities), len(m.Additionals)}
-	for _, n := range counts {
-		if n > 0xffff {
-			return nil, errorf("%d entries in a section", n)
-		}
-	}
 	binary.BigEndian.PutUint16(e.b[0:], m.ID)
 	binary.BigEndian.PutUint16(e.b[2:], m.flags())
 	for i, n := range counts {
+		if n < 0 || n > 0xffff {
+			return nil, errorf("%d entries in a section", n)
+		}
 		binary.BigEndian.PutUint16(e.b[4+2*i:], uint16(n))
 	}
 	for _, q := range m.Questions {
@@ -75,13 +73,15 @@ func (e *encoder) name(name string) error {
 	for i, l := range labels {
 		suffix := strings.Join(escaped[i:], ".")
 		if off, ok := e.names[suffix]; ok {
-			e.b = binary.BigEndian.AppendUint16(e.b, 0xc000|uint16(off))
+			// off <= maxPtr (0x3fff), as stored below.
+			e.b = binary.BigEndian.AppendUint16(e.b, 0xc000|uint16(off&maxPtr))
 			return nil
 		}
 		if len(e.b) <= maxPtr {
 			e.names[suffix] = len(e.b)
 		}
-		e.b = append(e.b, byte(len(l)))
+		// len(l) <= maxLabel (63), as checked above.
+		e.b = append(e.b, byte(len(l)&maxLabel))
 		e.b = append(e.b, l...)
 	}
 	e.b = append(e.b, 0)
@@ -123,10 +123,11 @@ func (e *encoder) resource(r Resource) error {
 			e.b = append(e.b, 0)
 		}
 		for _, s := range d.Strings {
-			if len(s) > 255 {
-				return errorf("TXT string of %d bytes in %q", len(s), r.Name)
+			n := len(s)
+			if n > 255 {
+				return errorf("TXT string of %d bytes in %q", n, r.Name)
 			}
-			e.b = append(e.b, byte(len(s)))
+			e.b = append(e.b, byte(n))
 			e.b = append(e.b, s...)
 		}
 	case *A:
@@ -147,7 +148,7 @@ func (e *encoder) resource(r Resource) error {
 		return errorf("record %q has data of type %T", r.Name, r.Data)
 	}
 	n := len(e.b) - lenAt - 2
-	if n > 0xffff {
+	if n < 0 || n > 0xffff {
 		return errorf("record %q has %d bytes of data", r.Name, n)
 	}
 	binary.BigEndian.PutUint16(e.b[lenAt:], uint16(n))
@@ -162,7 +163,7 @@ func Parse(b []byte) (*Message, error) {
 	d := decoder{b: b, off: headerLen}
 	m := &Message{Header: headerFrom(d.u16at(0), d.u16at(2))}
 	qd := int(d.u16at(4))
-	for i := 0; i < qd; i++ {
+	for range qd {
 		name, err := d.name()
 		if err != nil {
 			return nil, err
@@ -181,7 +182,7 @@ func Parse(b []byte) (*Message, error) {
 	}
 	for i, section := range []*[]Resource{&m.Answers, &m.Authorities, &m.Additionals} {
 		n := int(d.u16at(6 + 2*i))
-		for j := 0; j < n; j++ {
+		for range n {
 			r, err := d.resource()
 			if err != nil {
 				return nil, err

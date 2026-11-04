@@ -45,7 +45,7 @@ func ExampleRetryable() {
 // The delays of an exponential backoff, without jitter.
 func ExampleExponentialBackoff() {
 	b := ieee20305.ExponentialBackoff{Initial: time.Second, Max: 10 * time.Second, NoJitter: true}
-	for attempt := 0; attempt < 5; attempt++ { // 0 is the first call
+	for attempt := range 5 { // 0 is the first call
 		fmt.Print(b.Delay(attempt), " ")
 	}
 	fmt.Println()

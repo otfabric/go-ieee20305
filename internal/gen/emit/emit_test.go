@@ -148,7 +148,7 @@ func TestProfileOwnership(t *testing.T) {
 	_, profile, _, _ := generate(t)
 	src := string(profile["types_gen.go"])
 	var types []string
-	for _, line := range strings.Split(src, "\n") {
+	for line := range strings.SplitSeq(src, "\n") {
 		if strings.HasPrefix(line, "type ") {
 			types = append(types, strings.Fields(line)[1])
 		}
@@ -416,7 +416,7 @@ func TestGeneratedCodeCompilesAndBehaves(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	write("go.mod", []byte("module "+module+"\n\ngo 1.23\n"))
+	write("go.mod", []byte("module "+module+"\n\ngo 1.26\n"))
 	write("support.go", []byte(support))
 	write("behaviour_test.go", []byte(behaviour))
 	for name, src := range base {

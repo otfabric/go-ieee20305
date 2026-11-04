@@ -22,7 +22,7 @@ func TestRetryPolicies(t *testing.T) {
 			t.Errorf("Delay(%d) = %v", attempt, got)
 		}
 	}
-	for attempt := 0; attempt < 5; attempt++ {
+	for attempt := range 5 {
 		retry, wait := b.ShouldRetry(attempt, unavailable)
 		if retry != (attempt < 3) || (retry && wait != b.Delay(attempt)) {
 			t.Errorf("ShouldRetry(%d) = %v, %v", attempt, retry, wait)
@@ -38,7 +38,7 @@ func TestRetryPolicies(t *testing.T) {
 	}
 	// Jitter stays within half the delay and the delay.
 	j := ieee20305.ExponentialBackoff{Initial: 100 * time.Millisecond}
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		if d := j.Delay(2); d < 200*time.Millisecond || d > 400*time.Millisecond {
 			t.Fatalf("jittered delay %v", d)
 		}

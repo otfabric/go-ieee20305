@@ -148,7 +148,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		dcap, err := c.DeviceCapability(ctx)
 		if err != nil {
 			return err

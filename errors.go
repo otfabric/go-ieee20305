@@ -124,8 +124,7 @@ func Retryable(err error) bool {
 // RetryAfter returns the delay a server asked for in the StatusError of
 // err, or zero.
 func RetryAfter(err error) time.Duration {
-	var se *StatusError
-	if errors.As(err, &se) {
+	if se, ok := errors.AsType[*StatusError](err); ok {
 		return se.RetryAfter
 	}
 	return 0

@@ -207,7 +207,7 @@ func TestAdvertiseCancel(t *testing.T) {
 	if _, err := Advertise(ctx, meter("m", 1, "_derp"), AdvertiseOptions{Transport: b.join()}); err != nil {
 		t.Fatal(err)
 	}
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		m, _ := obs.recv(t)
 		if len(m.Answers) != 7 || m.Answers[0].TTL != otherTTL {
 			t.Fatalf("announcement %d: %+v", i, m.Answers)

@@ -393,16 +393,16 @@ func TestTLSConfigCallbacks(t *testing.T) {
 	if server.ClientAuth != tls.RequireAnyClientCert || server.ClientCAs != p.pool || server.MinVersion != tls.VersionTLS12 {
 		t.Errorf("server config = %+v", server)
 	}
-	if err := server.VerifyPeerCertificate([][]byte{dev.Raw}, nil); err != nil {
+	if err := server.VerifyConnection(tls.ConnectionState{PeerCertificates: []*x509.Certificate{dev}}); err != nil {
 		t.Errorf("server device: %v", err)
 	}
-	if err := server.VerifyPeerCertificate([][]byte{srv.Raw}, nil); !errors.Is(err, ieee20305.ErrCertificate) {
+	if err := server.VerifyConnection(tls.ConnectionState{PeerCertificates: []*x509.Certificate{srv}}); !errors.Is(err, ieee20305.ErrCertificate) {
 		t.Errorf("server with a server-auth client: %v", err)
 	}
-	if err := server.VerifyPeerCertificate([][]byte{foreign.Raw}, nil); !errors.Is(err, ieee20305.ErrCertificate) {
+	if err := server.VerifyConnection(tls.ConnectionState{PeerCertificates: []*x509.Certificate{foreign}}); !errors.Is(err, ieee20305.ErrCertificate) {
 		t.Errorf("server other CA: %v", err)
 	}
-	if err := server.VerifyPeerCertificate(nil, nil); !errors.Is(err, ieee20305.ErrCertificate) {
+	if err := server.VerifyConnection(tls.ConnectionState{}); !errors.Is(err, ieee20305.ErrCertificate) {
 		t.Errorf("server no certificates: %v", err)
 	}
 

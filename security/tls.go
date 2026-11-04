@@ -45,18 +45,23 @@ func ClientTLSConfig(device tls.Certificate, roots *x509.CertPool) *tls.Config {
 // one of clientCAs must have issued for client authentication. The client
 // chain is verified by Verify, which accepts the critical subject
 // alternative name that holds the HardwareModuleName of IEEE 2030.5 device
-// certificates; ConnectionState.VerifiedChains is therefore empty. See
-// ClientTLSConfig about the cipher suite of IEEE 2030.5.
+// certificates; ConnectionState.VerifiedChains is therefore empty. The
+// chain is verified in VerifyConnection, which crypto/tls also calls on a
+// resumed session: a client certificate that expired since the session was
+// issued is refused then too. See ClientTLSConfig about the cipher suite of
+// IEEE 2030.5.
 func ServerTLSConfig(server tls.Certificate, clientCAs *x509.CertPool) *tls.Config {
 	return &tls.Config{
 		MinVersion:   tls.VersionTLS12,
 		Certificates: []tls.Certificate{server},
 		ClientAuth:   tls.RequireAnyClientCert,
 		ClientCAs:    clientCAs,
-		VerifyPeerCertificate: VerifyPeerCertificate(VerifyOptions{
-			Roots: clientCAs,
-			Usage: x509.ExtKeyUsageClientAuth,
-		}),
+		VerifyConnection: func(cs tls.ConnectionState) error {
+			return Verify(cs.PeerCertificates, VerifyOptions{
+				Roots: clientCAs,
+				Usage: x509.ExtKeyUsageClientAuth,
+			})
+		},
 	}
 }
 

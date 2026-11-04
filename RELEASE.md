@@ -5,6 +5,43 @@ tag, GitHub release). The section of the version below, up to the `---` that
 ends it, is the release's notes. Before v1.0.0 a minor release may change the
 API.
 
+## v0.6.0
+
+**Date:** 2026-11-04
+**Previous release:** v0.5.4
+
+### Summary
+
+A SAST review (gosec, opengrep) and hostile-peer tests. Go 1.26 is now the
+minimum Go version. Several limits are new or stricter; see Changed.
+
+### Security
+
+- server: notifications no longer follow redirects. A listener's 307 or 308 sent the POST, with the server's certificate, to a URL `NotificationURIAllowed` never checked. A 3xx now fails the notification.
+- server: the notificationURI is checked again before each notification, not only when the subscription is posted or put. Subscriptions a persistent store kept from an earlier configuration are held to the current one.
+- server: `DefaultNotificationURIAllowed` also refuses zoned IPv6 literals (`[fe80::1%25en0]`) and hosts whose last label is a number (`127.1`, `2130706433`, `0x7f000001`, `0`), which some system resolvers read as loopback or unspecified addresses.
+- security: `ServerTLSConfig` checks the client chain in `VerifyConnection`. crypto/tls skips `VerifyPeerCertificate` on resumed sessions, so a client could get back in on a session ticket after its certificate stopped being accepted.
+- discovery: the browser's cache is bounded: 1024 instances and 1024 hosts, 16 addresses per host. SRV and TXT records are cached only for instances of the service type. Before this, a peer on the link could grow the cache without limit, and reconciling 20,000 instances took seconds per packet.
+
+### Changed
+
+- Go 1.26 or later; CI runs Go 1.26 and 1.27. `go fix` applied. tlsccm's copy of crypto/tls is left unchanged, so that it stays identical to upstream.
+- client: `FindEndDevice` stops with `ErrProtocol` after `Config.MaxListItems` devices. A server claiming `all` = 2^32-1 had it page without end, and its offset could wrap.
+- client: `Walk` visits at most `WalkOptions.MaxResources` resources (new field, 4096 when zero) and fails with `ErrProtocol` beyond. A server whose documents keep linking to new resources made it run without end.
+- client: `Iterate` and `Walk` check `MaxListItems` before handing a page to the callback, so a server that sends more items than asked for no longer gets them past the limit.
+- client: a response body that ends when the context's deadline passes, or after a cancellation, fails with `ErrTimeout` or `ErrCanceled`, not with `ErrProtocol` for the truncated document.
+- csipserver: `Envelope` clamps the duration to the wire's range. A negative duration used to wrap to about 136 years.
+- Counts sent as UInt32 or UInt16 saturate at their range instead of wrapping.
+- The generator writes new files 0600 and directories 0750.
+- Interop runs against ieee20305-interop v0.3.1 (same adapters and container contract as v0.2.0). Shared workflows are v3.3.1.
+
+### Tests
+
+- Hostile peers: `client/hostile_test.go`, `server/hostile_test.go`, `discovery/hostile_test.go`, `internal/dnsmsg/boundary_test.go`, notification redirect and recheck tests, and TLS resumption tests for TLS 1.2 and 1.3.
+- New fuzz targets: `client:FuzzWalk`, `client:FuzzNotificationHandler`, `discovery:FuzzBrowse`.
+
+---
+
 ## v0.5.4
 
 **Date:** 2026-10-31

@@ -1,6 +1,6 @@
 # go-ieee20305 - IEEE 2030.5 Client and Server Library for Go
 
-[![Go Version](https://img.shields.io/badge/Go-1.23%2B-00ADD8?style=flat&logo=go)](https://go.dev/)
+[![Go Version](https://img.shields.io/badge/Go-1.26%2B-00ADD8?style=flat&logo=go)](https://go.dev/)
 [![Go Reference](https://pkg.go.dev/badge/github.com/otfabric/go-ieee20305.svg)](https://pkg.go.dev/github.com/otfabric/go-ieee20305)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![CI Status](https://github.com/otfabric/go-ieee20305/actions/workflows/ci.yml/badge.svg)](https://github.com/otfabric/go-ieee20305/actions/workflows/ci.yml)
@@ -114,7 +114,7 @@ platform. Choose **py20305** for a Python client with CSIP-AUS. Choose the
 go get github.com/otfabric/go-ieee20305@latest
 ```
 
-Go 1.23 or later. The CCM_8 module needs Go 1.26.8:
+Go 1.26 or later. The CCM_8 module needs Go 1.26.8:
 
 ```sh
 go get github.com/otfabric/go-ieee20305/tlsccm@latest
@@ -345,7 +345,7 @@ cloned or built here. Fixtures come from the images; the scenarios and
 assertions live in this repository.
 
 This version is qualified against
-[ieee20305-interop v0.2.0](https://github.com/otfabric/ieee20305-interop/releases/tag/v0.2.0)
+[ieee20305-interop v0.3.1](https://github.com/otfabric/ieee20305-interop/releases/tag/v0.3.1)
 (container contract 0.3: Envoy v2.5.0, GridAPPS-D server v0.18.0 and client
 v0.1.0, py20305 v0.16.0, EPRI client v0.2.11). The images are pinned by
 digest in `interop/images.go` and the Interop workflow, which runs on every

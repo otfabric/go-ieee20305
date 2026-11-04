@@ -199,7 +199,7 @@ func baseEndDevice(v any) *ieee20305.EndDevice {
 		return nil
 	}
 	f := rv.Elem().FieldByName("EndDevice")
-	if !f.IsValid() || f.Type() != reflect.TypeOf(ieee20305.EndDevice{}) {
+	if !f.IsValid() || f.Type() != reflect.TypeFor[ieee20305.EndDevice]() {
 		return nil
 	}
 	return f.Addr().Interface().(*ieee20305.EndDevice)

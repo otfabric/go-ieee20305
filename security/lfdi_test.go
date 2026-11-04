@@ -80,7 +80,7 @@ func TestSFDI(t *testing.T) {
 
 func TestSFDICheckDigit(t *testing.T) {
 	// Generate several certs and check that every SFDI has a valid check digit.
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		ca, caKey, err := security.TestCA("Test Org")
 		if err != nil {
 			t.Fatalf("TestCA: %v", err)

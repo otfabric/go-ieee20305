@@ -72,10 +72,8 @@ func main() {
 		}
 		text := upstream.Report(findings)
 		fmt.Print(text)
-		if *report != "" {
-			if err := os.WriteFile(*report, []byte(text), 0o644); err != nil {
-				fail(err)
-			}
+		if err := writeReport(*report, text); err != nil {
+			fail(err)
 		}
 		os.Exit(exitUpdates)
 	default:
@@ -84,6 +82,14 @@ func main() {
 	if err != nil {
 		fail(err)
 	}
+}
+
+// writeReport writes the check-updates report to path, when one is given.
+func writeReport(path, text string) error {
+	if path == "" {
+		return nil
+	}
+	return os.WriteFile(filepath.Clean(path), []byte(text), 0o600)
 }
 
 func usage() {
@@ -134,7 +140,7 @@ func generate(m *manifest.Manifest, upstreamDir, root string) error {
 	for i := range m.Targets {
 		t := &m.Targets[i]
 		for _, in := range inputs(t) {
-			data, err := os.ReadFile(filepath.Join(upstreamDir, filepath.FromSlash(in)))
+			data, err := os.ReadFile(filepath.Clean(filepath.Join(upstreamDir, filepath.FromSlash(in))))
 			if err != nil {
 				return fmt.Errorf("%s: %w (run make download)", in, err)
 			}
@@ -251,7 +257,7 @@ func targetDirs(t *manifest.Target) []string {
 // write replaces the generated files of dir with files, removing files this
 // generator wrote earlier that it no longer produces.
 func write(dir string, files emit.Files) error {
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Clean(dir), 0o750); err != nil {
 		return err
 	}
 	existing, err := generatedFiles(dir)
@@ -260,13 +266,13 @@ func write(dir string, files emit.Files) error {
 	}
 	for _, name := range existing {
 		if _, keep := files[name]; !keep {
-			if err := os.Remove(filepath.Join(dir, name)); err != nil {
+			if err := os.Remove(filepath.Clean(filepath.Join(dir, name))); err != nil {
 				return err
 			}
 		}
 	}
 	for name, src := range files {
-		if err := os.WriteFile(filepath.Join(dir, name), src, 0o644); err != nil {
+		if err := os.WriteFile(filepath.Clean(filepath.Join(dir, name)), src, 0o600); err != nil {
 			return err
 		}
 	}
@@ -284,7 +290,7 @@ func generatedFiles(dir string) ([]string, error) {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".go") {
 			continue
 		}
-		data, err := os.ReadFile(filepath.Join(dir, e.Name()))
+		data, err := os.ReadFile(filepath.Clean(filepath.Join(dir, e.Name())))
 		if err != nil {
 			return nil, err
 		}
@@ -345,7 +351,7 @@ func verifyDir(rel, dir string, want map[string]string) (int, error) {
 }
 
 func recordedSources(path string) (map[string]string, error) {
-	f, err := os.Open(path)
+	f, err := os.Open(filepath.Clean(path))
 	if err != nil {
 		return nil, err
 	}

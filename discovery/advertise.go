@@ -10,11 +10,13 @@ import (
 	"net"
 	"net/netip"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"time"
 
 	ieee20305 "github.com/otfabric/go-ieee20305"
+	"github.com/otfabric/go-ieee20305/internal/clamp"
 	"github.com/otfabric/go-ieee20305/internal/dnsmsg"
 )
 
@@ -103,9 +105,7 @@ func Advertise(ctx context.Context, s Service, o AdvertiseOptions) (*Advertiseme
 		_ = t.Close()
 		return nil, err
 	}
-	a.wg.Add(1)
-	go func() {
-		defer a.wg.Done()
+	a.wg.Go(func() {
 		select {
 		case <-time.After(announceInterval):
 			if err := a.announce(); err != nil {
@@ -113,7 +113,7 @@ func Advertise(ctx context.Context, s Service, o AdvertiseOptions) (*Advertiseme
 			}
 		case <-a.closing:
 		}
-	}()
+	})
 	go a.serve()
 	go func() {
 		select {
@@ -257,12 +257,7 @@ func (a *Advertisement) additionals(r dnsmsg.Resource) []dnsmsg.Resource {
 }
 
 func containsType(ts []dnsmsg.Type, t dnsmsg.Type) bool {
-	for _, x := range ts {
-		if x == t {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(ts, t)
 }
 
 func matches(q dnsmsg.Question, r dnsmsg.Resource) bool {
@@ -423,7 +418,7 @@ func records(s Service) []dnsmsg.Resource {
 	}
 	rs = append(rs,
 		rec(enumName, false, otherTTL, &dnsmsg.PTR{Target: typeName}),
-		rec(inst, true, hostTTL, &dnsmsg.SRV{Port: uint16(s.Port), Target: s.Host}),
+		rec(inst, true, hostTTL, &dnsmsg.SRV{Port: clamp.Uint16(s.Port), Target: s.Host}),
 		rec(inst, true, otherTTL, &dnsmsg.TXT{Strings: txtStrings(s.TXT)}),
 	)
 	for _, a := range s.Addrs {

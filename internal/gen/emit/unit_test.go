@@ -29,8 +29,6 @@ func TestLiteral(t *testing.T) {
 	}
 }
 
-func ip(n int) *int { return &n }
-
 func TestHexSample(t *testing.T) {
 	q := xsd.QName{Local: "H"}
 	s, err := hexSample(q, xsd.Facets{}, []string{"0A"}, "H")
@@ -40,11 +38,11 @@ func TestHexSample(t *testing.T) {
 	if _, err := hexSample(q, xsd.Facets{}, []string{"zz"}, "H"); err == nil {
 		t.Error("a malformed enumeration was accepted")
 	}
-	s, err = hexSample(q, xsd.Facets{Length: ip(2)}, nil, "H")
+	s, err = hexSample(q, xsd.Facets{Length: new(2)}, nil, "H")
 	if err != nil || s.valid != "H{0x01, 0x01}" || len(s.invalid) != 1 {
 		t.Errorf("length: %+v, %v", s, err)
 	}
-	s, err = hexSample(q, xsd.Facets{MinLength: ip(3), MaxLength: ip(2)}, nil, "H")
+	s, err = hexSample(q, xsd.Facets{MinLength: new(3), MaxLength: new(2)}, nil, "H")
 	if err != nil || s.valid != "H{0x01, 0x01}" || len(s.invalid) != 2 {
 		t.Errorf("min and max length: %+v, %v", s, err)
 	}

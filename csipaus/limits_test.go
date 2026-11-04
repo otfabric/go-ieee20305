@@ -14,7 +14,7 @@ func watts(w int16) *ieee20305.ActivePower { return &ieee20305.ActivePower{Value
 func TestLimits(t *testing.T) {
 	l := csipaus.Limits{Export: watts(1), Import: watts(2), Generation: watts(3), Load: watts(4), StorageTarget: watts(5)}
 	var b csipaus.DERControlBase
-	b.OpModConnect = ptr(true) // a control of the base standard is left alone
+	b.OpModConnect = new(true) // a control of the base standard is left alone
 	l.Apply(&b)
 	if b.OpModExpLimW.Value != 1 || b.OpModImpLimW.Value != 2 || b.OpModGenLimW.Value != 3 ||
 		b.OpModLoadLimW.Value != 4 || b.OpModStorageTargetW.Value != 5 || !*b.OpModConnect {

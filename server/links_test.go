@@ -30,7 +30,7 @@ func TestLinksOfResponses(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		if _, err := a.Create(ctx, prog+"/derc", examples.DERControl(0), ""); err != nil {
 			t.Fatal(err)
 		}

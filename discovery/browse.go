@@ -29,6 +29,16 @@ var (
 	resolveInterval = time.Second
 )
 
+// Bounds of the browser's cache, so that a peer on the link that floods
+// records cannot grow it without end: a record of a new instance or host
+// beyond them is dropped until records expire.
+const (
+	// maxCacheEntries bounds the instances, and the hosts, cached.
+	maxCacheEntries = 1024
+	// maxHostAddrs bounds the addresses cached of one host.
+	maxHostAddrs = 16
+)
+
 // BrowseOptions configures Browse.
 type BrowseOptions struct {
 	// Subtypes restricts browsing to servers announced under these
@@ -241,6 +251,9 @@ func (b *browser) handle(p packet, now time.Time) []Service {
 				delete(b.ptr[inst], key)
 				continue
 			}
+			if b.ptr[inst] == nil && len(b.ptr) >= maxCacheEntries {
+				continue
+			}
 			if b.ptr[inst] == nil {
 				b.ptr[inst] = map[string]time.Time{}
 			}
@@ -251,10 +264,16 @@ func (b *browser) handle(p packet, now time.Time) []Service {
 				delete(b.srv, key)
 				continue
 			}
+			if !cacheable(key, b.srv) {
+				continue
+			}
 			b.srv[key] = srvEntry{target: d.Target, port: d.Port, expiry: expiry}
 		case *dnsmsg.TXT:
 			if r.TTL == 0 {
 				delete(b.txt, key)
+				continue
+			}
+			if !cacheable(key, b.txt) {
 				continue
 			}
 			b.txt[key] = txtEntry{txt: parseTXT(d.Strings), expiry: expiry}
@@ -265,6 +284,18 @@ func (b *browser) handle(p packet, now time.Time) []Service {
 		}
 	}
 	return b.reconcile(now)
+}
+
+// cacheable reports whether the SRV or TXT record of name may be cached in
+// m: name is an instance of the service type, and m has room for it.
+func cacheable[V any](name string, m map[string]V) bool {
+	if _, ok := m[name]; ok {
+		return true
+	}
+	if _, ok := instanceOf(name); !ok {
+		return false
+	}
+	return len(m) < maxCacheEntries
 }
 
 // addAddr caches an address of host. The first cache-flush record of a
@@ -278,10 +309,18 @@ func (b *browser) addAddr(host string, a netip.Addr, r dnsmsg.Resource, expiry t
 		delete(b.addrs[host], a)
 		return
 	}
-	if b.addrs[host] == nil {
-		b.addrs[host] = map[netip.Addr]time.Time{}
+	as := b.addrs[host]
+	if as == nil {
+		if len(b.addrs) >= maxCacheEntries {
+			return
+		}
+		as = map[netip.Addr]time.Time{}
+		b.addrs[host] = as
 	}
-	b.addrs[host][a] = expiry
+	if _, ok := as[a]; !ok && len(as) >= maxHostAddrs {
+		return
+	}
+	as[a] = expiry
 }
 
 // expire removes the records that expired at now.
