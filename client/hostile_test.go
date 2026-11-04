@@ -256,6 +256,29 @@ func TestHostileBodies(t *testing.T) {
 	}
 }
 
+// A body that ends cleanly once the deadline has passed is a timeout, not a
+// truncated document: which side notices first must not change the error.
+func TestBodyEndsAtDeadline(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	p := newPKI(t)
+	srv := server(t, p, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", client.MediaType)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("<DeviceCapability"))
+		w.(http.Flusher).Flush()
+		select {
+		case <-ctx.Done(): // the client's deadline: end the body normally
+		case <-r.Context().Done():
+		}
+	})
+	c := newClient(t, p, srv, client.Config{})
+	var dc ieee20305.DeviceCapability
+	if err := c.Get(ctx, "/x", &dc); !errors.Is(err, ieee20305.ErrTimeout) {
+		t.Errorf("body ended at the deadline: %v, want ErrTimeout", err)
+	}
+}
+
 // Content types that are no XML document are refused; a deeply nested
 // document fails or decodes, without exhausting the stack.
 func TestHostileDocuments(t *testing.T) {

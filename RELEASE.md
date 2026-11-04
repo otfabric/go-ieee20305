@@ -29,6 +29,7 @@ minimum Go version. Several limits are new or stricter; see Changed.
 - client: `FindEndDevice` stops with `ErrProtocol` after `Config.MaxListItems` devices. A server claiming `all` = 2^32-1 had it page without end, and its offset could wrap.
 - client: `Walk` visits at most `WalkOptions.MaxResources` resources (new field, 4096 when zero) and fails with `ErrProtocol` beyond. A server whose documents keep linking to new resources made it run without end.
 - client: `Iterate` and `Walk` check `MaxListItems` before handing a page to the callback, so a server that sends more items than asked for no longer gets them past the limit.
+- client: a response body that ends when the context's deadline passes, or after a cancellation, fails with `ErrTimeout` or `ErrCanceled`, not with `ErrProtocol` for the truncated document.
 - csipserver: `Envelope` clamps the duration to the wire's range. A negative duration used to wrap to about 136 years.
 - Counts sent as UInt32 or UInt16 saturate at their range instead of wrapping.
 - The generator writes new files 0600 and directories 0750.
