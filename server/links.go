@@ -11,7 +11,7 @@ import (
 	ieee20305 "github.com/otfabric/go-ieee20305"
 )
 
-var listLinkType = reflect.TypeOf(ieee20305.ListLink{})
+var listLinkType = reflect.TypeFor[ieee20305.ListLink]()
 
 // dressLinks prepares the links of a document the server sends to p:
 //

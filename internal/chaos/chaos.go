@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"errors"
 	"io"
+	"maps"
 	"math/rand"
 	"net"
 	"net/http"
@@ -93,9 +94,7 @@ func (d *dice) snapshot() Counts {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	c := Counts{}
-	for k, v := range d.counts {
-		c[k] = v
-	}
+	maps.Copy(c, d.counts)
 	return c
 }
 

@@ -712,9 +712,7 @@ func TestConcurrency(t *testing.T) {
 		var wg sync.WaitGroup
 		stop := make(chan struct{})
 		for w := range 4 {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
+			wg.Go(func() {
 				for i := range 200 {
 					now := clock.Now()
 					s.Upsert(Event{
@@ -729,12 +727,10 @@ func TestConcurrency(t *testing.T) {
 						s.Remove(fmt.Sprintf("W%d-%d", w, (i+3)%20))
 					}
 				}
-			}()
+			})
 		}
 		for range 3 {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
+			wg.Go(func() {
 				for i := range 100 {
 					ch, unsub := s.Subscribe()
 					for range i % 5 {
@@ -745,11 +741,9 @@ func TestConcurrency(t *testing.T) {
 					}
 					unsub()
 				}
-			}()
+			})
 		}
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for {
 				select {
 				case <-stop:
@@ -764,16 +758,14 @@ func TestConcurrency(t *testing.T) {
 					fc.Advance(time.Millisecond)
 				}
 			}
-		}()
+		})
 		// A subscriber that never reads, and one that reads until Close.
 		s.Subscribe()
 		reader, _ := s.Subscribe()
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for range reader {
 			}
-		}()
+		})
 		time.Sleep(50 * time.Millisecond)
 		close(stop)
 		s.Close()

@@ -378,11 +378,9 @@ func (a *Agent) Run(ctx context.Context) error {
 	a.log.Infof("started as EndDevice %s", a.State().EndDevice.GetHref())
 	var wg sync.WaitGroup
 	defer wg.Wait()
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		a.mirror(ctx)
-	}()
+	})
 	defer a.unsubscribe()
 	wait, failures := a.pollRate(), 0
 	for {

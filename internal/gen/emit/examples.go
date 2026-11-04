@@ -381,8 +381,8 @@ func (g *gen) shape(f field, elem, one string) string {
 	case kindValue:
 		return one
 	case kindPointer:
-		if strings.HasPrefix(one, "*") {
-			return strings.TrimPrefix(one, "*")
+		if after, ok := strings.CutPrefix(one, "*"); ok {
+			return after
 		}
 		return g.ptrFunc() + "(" + one + ")"
 	default:
@@ -515,10 +515,7 @@ func (g *gen) exampleField(b *strings.Builder, q xsd.QName, f field) error {
 			fmt.Fprintf(b, "\tv.%s = %s\n", f.goName, expr)
 		}
 	default:
-		n := f.min
-		if n < 1 {
-			n = 1
-		}
+		n := max(f.min, 1)
 		parts := make([]string, n)
 		for i := range parts {
 			parts[i] = one

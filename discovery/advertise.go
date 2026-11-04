@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/netip"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -103,9 +104,7 @@ func Advertise(ctx context.Context, s Service, o AdvertiseOptions) (*Advertiseme
 		_ = t.Close()
 		return nil, err
 	}
-	a.wg.Add(1)
-	go func() {
-		defer a.wg.Done()
+	a.wg.Go(func() {
 		select {
 		case <-time.After(announceInterval):
 			if err := a.announce(); err != nil {
@@ -113,7 +112,7 @@ func Advertise(ctx context.Context, s Service, o AdvertiseOptions) (*Advertiseme
 			}
 		case <-a.closing:
 		}
-	}()
+	})
 	go a.serve()
 	go func() {
 		select {
@@ -257,12 +256,7 @@ func (a *Advertisement) additionals(r dnsmsg.Resource) []dnsmsg.Resource {
 }
 
 func containsType(ts []dnsmsg.Type, t dnsmsg.Type) bool {
-	for _, x := range ts {
-		if x == t {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(ts, t)
 }
 
 func matches(q dnsmsg.Question, r dnsmsg.Resource) bool {

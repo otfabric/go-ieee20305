@@ -128,7 +128,7 @@ func TestObservability(t *testing.T) {
 	run(t, a)
 	s.admit(t, lfdi)
 	s.converges(t, a, 1)
-	for i := 0; i < 50; i++ {
+	for range 50 {
 		_, _ = cl.DeviceCapability(context.Background())
 	}
 

@@ -117,7 +117,7 @@ func eventStatus(v any) *ieee20305.EventStatus {
 		return nil
 	}
 	f := rv.Elem().FieldByName("EventStatus")
-	if !f.IsValid() || f.Type() != reflect.TypeOf(ieee20305.EventStatus{}) {
+	if !f.IsValid() || f.Type() != reflect.TypeFor[ieee20305.EventStatus]() {
 		return nil
 	}
 	return f.Addr().Interface().(*ieee20305.EventStatus)
@@ -235,7 +235,7 @@ func intervalOf(v any) (ieee20305.DateTimeInterval, bool) {
 		if f.IsValid() && f.Kind() == reflect.Pointer && !f.IsNil() {
 			f = f.Elem()
 		}
-		if f.IsValid() && f.Type() == reflect.TypeOf(ieee20305.DateTimeInterval{}) {
+		if f.IsValid() && f.Type() == reflect.TypeFor[ieee20305.DateTimeInterval]() {
 			return f.Interface().(ieee20305.DateTimeInterval), true
 		}
 	}
@@ -322,7 +322,7 @@ func responseOf(v any) *ieee20305.Response {
 		return r
 	}
 	f := rv.Elem().FieldByName("Response")
-	if !f.IsValid() || f.Type() != reflect.TypeOf(ieee20305.Response{}) {
+	if !f.IsValid() || f.Type() != reflect.TypeFor[ieee20305.Response]() {
 		return nil
 	}
 	return f.Addr().Interface().(*ieee20305.Response)

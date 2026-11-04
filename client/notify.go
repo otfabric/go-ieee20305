@@ -116,8 +116,7 @@ func (h *NotificationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 	}
 	data, err := io.ReadAll(http.MaxBytesReader(w, r.Body, h.cfg.MaxBytes))
 	if err != nil {
-		var tooLarge *http.MaxBytesError
-		if errors.As(err, &tooLarge) {
+		if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
 			w.WriteHeader(http.StatusRequestEntityTooLarge)
 			return
 		}

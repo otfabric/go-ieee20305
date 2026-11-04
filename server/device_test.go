@@ -196,12 +196,10 @@ func TestConcurrentRegistration(t *testing.T) {
 	var wg sync.WaitGroup
 	locs := make([]string, 20)
 	for i := range locs {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			_, hdr, _ := h.do(t, "dev", http.MethodPost, server.EndDeviceListHref, body)
 			locs[i] = hdr.Get("Location")
-		}()
+		})
 	}
 	wg.Wait()
 	for _, l := range locs {
@@ -337,7 +335,7 @@ func TestMaxListItems(t *testing.T) {
 		t.Errorf("%d LogEvents, %v", len(ms), err)
 	}
 	// An operator's are not capped.
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		if _, err := h.srv.Admin().Create(context.Background(), ed+"/lel", examples.LogEvent(0), h.lfdi("dev")); err != nil {
 			t.Fatal(err)
 		}

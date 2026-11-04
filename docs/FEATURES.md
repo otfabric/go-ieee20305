@@ -2,7 +2,7 @@
 
 What go-ieee20305 implements, how it is tested, and how far each
 implementation of [ieee20305-interop](https://github.com/otfabric/ieee20305-interop)
-(v0.2.0, container contract 0.3) goes with it.
+(v0.3.1, container contract 0.3) goes with it.
 
 - **Server** and **Client / agent**: the packages `server` and `client`,
   `agent`.

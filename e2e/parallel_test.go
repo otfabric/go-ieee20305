@@ -100,7 +100,7 @@ func TestConcurrentOperatorAndDevices(t *testing.T) {
 	const devices = 8
 	var clients []*client.Client
 	var eds []string
-	for i := 0; i < devices; i++ {
+	for i := range devices {
 		dev := env.pki.device(t, fmt.Sprintf("dev-%d", i))
 		ed, err := a.ProvisionDevice(ctx, server.DeviceSpec{LFDI: security.CertificateLFDI(dev.Leaf), Register: true})
 		if err != nil {
@@ -113,16 +113,14 @@ func TestConcurrentOperatorAndDevices(t *testing.T) {
 	var failures atomic.Int64
 	var wg sync.WaitGroup
 	// The operator: creates, changes and deletes programs and controls.
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		for i := 0; time.Now().Before(deadline); i++ {
 			prog, err := a.Create(ctx, "/derp", examples.DERProgram(0), "")
 			if err != nil {
 				t.Error(err)
 				return
 			}
-			for j := 0; j < 3; j++ {
+			for range 3 {
 				if _, err := a.Create(ctx, prog+"/derc", examples.DERControl(0), ""); err != nil {
 					t.Error(err)
 					return
@@ -135,7 +133,7 @@ func TestConcurrentOperatorAndDevices(t *testing.T) {
 				}
 			}
 		}
-	}()
+	})
 	// The devices: walk the tree, page through the programs, post log
 	// events.
 	for i, c := range clients {

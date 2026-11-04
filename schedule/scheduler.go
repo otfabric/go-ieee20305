@@ -647,11 +647,9 @@ func (s *Scheduler) Subscribe() (<-chan Transition, func()) {
 		exited: make(chan struct{}),
 	}
 	s.subs[sub] = struct{}{}
-	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
+	s.wg.Go(func() {
 		sub.run()
-	}()
+	})
 	return sub.ch, func() {
 		s.mu.Lock()
 		delete(s.subs, sub)

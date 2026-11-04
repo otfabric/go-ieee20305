@@ -77,14 +77,8 @@ func (s *Server) listOf(ctx context.Context, req *Request, source string, keep f
 		limit = s.cfg.MaxLimit
 	}
 	all := len(items)
-	start := int(req.Query.Start)
-	if start > all {
-		start = all
-	}
-	end := start + int(limit)
-	if end > all {
-		end = all
-	}
+	start := min(int(req.Query.Start), all)
+	end := min(start+int(limit), all)
 	doc := s.profile.Clone(req.Node.Value)
 	l, ok := doc.(ieee20305.Lister)
 	if !ok {
@@ -158,7 +152,7 @@ func eventStart(v any) (int64, bool) {
 		return 0, false
 	}
 	f := rv.Elem().FieldByName("Interval")
-	if !f.IsValid() || f.Type() != reflect.TypeOf(ieee20305.DateTimeInterval{}) {
+	if !f.IsValid() || f.Type() != reflect.TypeFor[ieee20305.DateTimeInterval]() {
 		return 0, false
 	}
 	return int64(f.Interface().(ieee20305.DateTimeInterval).Start), true

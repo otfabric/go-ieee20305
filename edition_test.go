@@ -69,7 +69,7 @@ func TestEditionsValidate(t *testing.T) {
 		args := append([]string{"--noout", "--schema", schemas[e]}, unique(list)...)
 		if out, err := exec.Command(xmllint, args...).CombinedOutput(); err != nil {
 			var bad []string
-			for _, line := range strings.Split(string(out), "\n") {
+			for line := range strings.SplitSeq(string(out), "\n") {
 				if !strings.HasSuffix(line, " validates") && line != "" {
 					bad = append(bad, line)
 				}

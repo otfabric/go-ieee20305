@@ -19,7 +19,7 @@ Thank you for your interest in contributing to `go-ieee20305`! This document cov
 
 ### Prerequisites
 
-- Go 1.23+ (see [go.mod](go.mod)); the code must build and pass on Go 1.23, so do not use newer language or standard-library features
+- Go 1.26+ (see [go.mod](go.mod)); the code must build and pass on Go 1.26, so do not use newer language or standard-library features
 - [staticcheck](https://staticcheck.dev/), [golangci-lint](https://golangci-lint.run/) and [govulncheck](https://pkg.go.dev/golang.org/x/vuln/cmd/govulncheck) for the checks
 - Docker, for `make interop` only
 

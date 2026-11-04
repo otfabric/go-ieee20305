@@ -4,6 +4,7 @@ package xsd
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 )
 
@@ -225,8 +226,8 @@ func (s *Set) EffectiveFacets(q QName) Facets {
 		}
 	}
 	var f Facets
-	for i := len(chain) - 1; i >= 0; i-- {
-		c := chain[i]
+	for _, c := range slices.Backward(chain) {
+
 		if c.Length != nil {
 			f.Length = c.Length
 		}

@@ -29,6 +29,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -158,12 +159,7 @@ func diff() ([]string, error) {
 }
 
 func contains(list []string, s string) bool {
-	for _, x := range list {
-		if x == s {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(list, s)
 }
 
 // vuln is an entry of vuln.go.dev.

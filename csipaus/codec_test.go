@@ -16,8 +16,6 @@ import (
 	"github.com/otfabric/go-ieee20305/csipaus"
 )
 
-func ptr[T any](v T) *T { return &v }
-
 func documents() map[string]any {
 	ctl := &csipaus.DERControl{}
 	ctl.MRID = ieee20305.MRIDType{0x01, 0x02, 0x03, 0x04}
@@ -30,12 +28,12 @@ func documents() map[string]any {
 	ctl.DERControlBase.OpModGenLimW = &ieee20305.ActivePower{Multiplier: 0, Value: 7000}
 
 	edev := &csipaus.EndDevice{}
-	edev.Href = ptr("/edev/1")
+	edev.Href = new("/edev/1")
 	edev.SFDI = 16726121139
 	edev.ConnectionPointLink = &ieee20305.Link{Href: "/edev/1/cp"}
 
 	cp := &csipaus.ConnectionPointType{ConnectionPointId: "4103859023"}
-	cp.Href = ptr("/edev/1/cp")
+	cp.Href = new("/edev/1/cp")
 
 	set := &csipaus.DERSettings{}
 	set.UpdatedTime = 1700000000
@@ -126,7 +124,7 @@ func TestSchemaValid(t *testing.T) {
 			msg, err := cmd.CombinedOutput()
 			if err != nil {
 				var lines []string
-				for _, l := range strings.Split(string(msg), "\n") {
+				for l := range strings.SplitSeq(string(msg), "\n") {
 					if !strings.Contains(l, "Skipping import") {
 						lines = append(lines, l)
 					}

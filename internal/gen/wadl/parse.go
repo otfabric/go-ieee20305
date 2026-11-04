@@ -103,7 +103,7 @@ func convertResource(rr *rawResource, ns map[string]string) (*Resource, error) {
 		}
 		for _, resp := range rm.Responses {
 			out := Response{}
-			for _, s := range strings.Fields(resp.Status) {
+			for s := range strings.FieldsSeq(resp.Status) {
 				n, err := strconv.Atoi(s)
 				if err != nil {
 					return nil, fmt.Errorf("%s: bad status %q", where, s)

@@ -200,7 +200,7 @@ func TestListsLinksAndWrappers(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	write("go.mod", []byte("module "+module+"\n\ngo 1.23\n"))
+	write("go.mod", []byte("module "+module+"\n\ngo 1.26\n"))
 	write("support.go", []byte(support+listSupport))
 	for name, src := range pkg {
 		write(name, src)

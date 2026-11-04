@@ -256,7 +256,7 @@ func TestCorruptResponses(t *testing.T) {
 	}
 	ctx := context.Background()
 	failures := 0
-	for i := 0; i < 200; i++ {
+	for range 200 {
 		err := c.Walk(ctx, client.DefaultDeviceCapabilityPath, client.WalkOptions{PageSize: 2}, func(client.Step) error { return nil })
 		if err != nil {
 			failures++
@@ -320,13 +320,11 @@ func TestNoGoroutineLeak(t *testing.T) {
 		s.control(t, s.prog, 1, time.Now(), 3600)
 		ctx, cancel := context.WithCancel(context.Background())
 		var wg sync.WaitGroup
-		for i := 0; i < 5; i++ {
+		for i := range 5 {
 			a, lfdi := chaosAgent(t, s.env, "leak-"+string(rune('a'+i)), nil, agent.Config{})
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
+			wg.Go(func() {
 				_ = a.Run(ctx)
-			}()
+			})
 			s.admit(t, lfdi)
 			eventually(t, "the control to apply", func() bool { return len(a.Active(agent.DER)) == 1 })
 		}

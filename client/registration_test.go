@@ -142,7 +142,7 @@ func TestFindEndDevicePagesWhenTheServerIgnoresTheFilter(t *testing.T) {
 	p := newPKI(t)
 	id := client.IdentityOf(p.device.Leaf)
 	f := &fakeServer{}
-	for i := 0; i < 250; i++ {
+	for i := range 250 {
 		f.add(uint64(1000+i), nil)
 	}
 	// Same SFDI, another LFDI: not this device.

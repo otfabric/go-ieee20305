@@ -229,7 +229,7 @@ func (s *Server) allowed(spec ieee20305.ResourceSpec) []string {
 }
 
 func acceptsXML(accept string) bool {
-	for _, part := range strings.Split(accept, ",") {
+	for part := range strings.SplitSeq(accept, ",") {
 		mt, _, err := mime.ParseMediaType(strings.TrimSpace(part))
 		if err != nil {
 			continue
@@ -258,8 +258,7 @@ func (s *Server) decodeBody(w http.ResponseWriter, req *Request) error {
 	}
 	data, err := io.ReadAll(http.MaxBytesReader(w, req.Body, s.cfg.MaxRequestBytes))
 	if err != nil {
-		var tooLarge *http.MaxBytesError
-		if errors.As(err, &tooLarge) {
+		if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
 			return httpError(http.StatusRequestEntityTooLarge, "request body over %d bytes", s.cfg.MaxRequestBytes)
 		}
 		return httpError(http.StatusBadRequest, "reading the body: %v", err)
@@ -401,8 +400,7 @@ func (s *Server) fail(w http.ResponseWriter, p Principal, err error) {
 // status of the sentinel it matches (a hook may return ErrNotFound,
 // ErrForbidden, ErrInvalid, ErrConflict, ...), or 500.
 func asHTTPError(err error) *HTTPError {
-	var he *HTTPError
-	if errors.As(err, &he) {
+	if he, ok := errors.AsType[*HTTPError](err); ok {
 		if he.Status == 0 {
 			c := *he
 			c.Status = http.StatusInternalServerError

@@ -52,8 +52,6 @@ func newPKI(t *testing.T) pki {
 	}
 }
 
-func ptr[T any](v T) *T { return &v }
-
 func writeDoc(t *testing.T, w http.ResponseWriter, status int, v any) {
 	data, err := ieee20305.Marshal(v)
 	if err != nil {
@@ -101,8 +99,8 @@ func TestDeviceCapabilityAndLinks(t *testing.T) {
 		switch r.URL.Path {
 		case "/dcap":
 			dc := ieee20305.DeviceCapability{EndDeviceListLink: &ieee20305.EndDeviceListLink{}}
-			dc.EndDeviceListLink.Href, dc.EndDeviceListLink.All = "/edev", ptr(ieee20305.UInt32(1))
-			dc.PollRate = ptr(ieee20305.UInt32(300))
+			dc.EndDeviceListLink.Href, dc.EndDeviceListLink.All = "/edev", new(ieee20305.UInt32(1))
+			dc.PollRate = new(ieee20305.UInt32(300))
 			writeDoc(t, w, http.StatusOK, &dc)
 		case "/edev":
 			if r.URL.Query().Get("s") != "0" || r.URL.Query().Get("l") != "10" {

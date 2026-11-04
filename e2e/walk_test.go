@@ -42,7 +42,7 @@ func tree(t *testing.T, srv *server.Server, owner string) {
 	must(err)
 	must(a.AddMember(ctx, fsa+"/derp", prog))
 	must(a.NewList(ctx, "DERControlList", prog+"/derc", prog, "DERControlListLink", ""))
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		_, err := a.Create(ctx, prog+"/derc", examples.DERControl(0), "")
 		must(err)
 	}

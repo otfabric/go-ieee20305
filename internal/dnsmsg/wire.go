@@ -162,7 +162,7 @@ func Parse(b []byte) (*Message, error) {
 	d := decoder{b: b, off: headerLen}
 	m := &Message{Header: headerFrom(d.u16at(0), d.u16at(2))}
 	qd := int(d.u16at(4))
-	for i := 0; i < qd; i++ {
+	for range qd {
 		name, err := d.name()
 		if err != nil {
 			return nil, err
@@ -181,7 +181,7 @@ func Parse(b []byte) (*Message, error) {
 	}
 	for i, section := range []*[]Resource{&m.Answers, &m.Authorities, &m.Additionals} {
 		n := int(d.u16at(6 + 2*i))
-		for j := 0; j < n; j++ {
+		for range n {
 			r, err := d.resource()
 			if err != nil {
 				return nil, err

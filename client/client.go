@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"mime"
 	"net"
 	"net/http"
@@ -341,9 +342,7 @@ func (c *Client) do(ctx context.Context, method, href string, q url.Values, body
 	}
 	if q != nil {
 		merged := u.Query()
-		for k, vs := range q {
-			merged[k] = vs
-		}
+		maps.Copy(merged, q)
 		u.RawQuery = merged.Encode()
 	}
 	var data []byte

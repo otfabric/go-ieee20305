@@ -4,6 +4,7 @@ package emit
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -86,12 +87,7 @@ func (g *gen) derivesFrom(q xsd.QName, base string) bool {
 	if q.Local == base {
 		return true
 	}
-	for _, a := range g.ancestors(q) {
-		if a == base {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(g.ancestors(q), base)
 }
 
 // localType returns the Go type of the element type of f as code in the

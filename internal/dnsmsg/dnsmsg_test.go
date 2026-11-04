@@ -109,7 +109,7 @@ func TestParseErrors(t *testing.T) {
 		return cat(hdr(0, 1), []byte{0, 0, t, 0, 1, 0, 0, 0, 1, 0, byte(len(rdata))}, rdata)
 	}
 	long := make([]byte, 0, 300)
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		long = append(long, 63)
 		long = append(long, bytes.Repeat([]byte{'a'}, 63)...)
 	}

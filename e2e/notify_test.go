@@ -240,9 +240,9 @@ func TestNotificationStorm(t *testing.T) {
 		return nil
 	}, client.NotificationConfig{}))
 	var subs []string
-	for d := 0; d < devices; d++ {
+	for d := range devices {
 		c, ed, _ := env.provisioned(t, fmt.Sprintf("device-%d", d), ieee20305.Edition2023)
-		for i := 0; i < perDevice; i++ {
+		for range perDevice {
 			sub, err := c.Subscribe(ctx, ed+"/sub", prog, url, 1)
 			if err != nil {
 				t.Fatal(err)
@@ -250,7 +250,7 @@ func TestNotificationStorm(t *testing.T) {
 			subs = append(subs, sub)
 		}
 	}
-	for i := 0; i < changes; i++ {
+	for i := range changes {
 		node, err := a.Get(ctx, prog)
 		if err != nil {
 			t.Fatal(err)
