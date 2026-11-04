@@ -72,10 +72,8 @@ func main() {
 		}
 		text := upstream.Report(findings)
 		fmt.Print(text)
-		if *report != "" {
-			if err := os.WriteFile(filepath.Clean(*report), []byte(text), 0o600); err != nil {
-				fail(err)
-			}
+		if err := writeReport(*report, text); err != nil {
+			fail(err)
 		}
 		os.Exit(exitUpdates)
 	default:
@@ -84,6 +82,14 @@ func main() {
 	if err != nil {
 		fail(err)
 	}
+}
+
+// writeReport writes the check-updates report to path, when one is given.
+func writeReport(path, text string) error {
+	if path == "" {
+		return nil
+	}
+	return os.WriteFile(filepath.Clean(path), []byte(text), 0o600)
 }
 
 func usage() {
