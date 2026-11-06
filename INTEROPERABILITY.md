@@ -111,7 +111,7 @@ Where the standard leaves room, the library takes these decisions:
 - **Against four other implementations**, Envoy, GridAPPS-D (server and
   client), py20305 and EPRI, through
   [ieee20305-interop](https://github.com/otfabric/ieee20305-interop)
-  v0.3.1, on every push ([README](README.md#interop-tests)).
+  v0.4.1, on every push ([README](README.md#interop-tests)).
 - **Against its own published releases**, by hand: the Self-interop
   workflow runs a commit against `ieee20305-interop-otfabric:latest`, in both
   roles. That is compatibility between releases, not independent

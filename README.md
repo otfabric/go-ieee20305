@@ -345,9 +345,9 @@ cloned or built here. Fixtures come from the images; the scenarios and
 assertions live in this repository.
 
 This version is qualified against
-[ieee20305-interop v0.3.1](https://github.com/otfabric/ieee20305-interop/releases/tag/v0.3.1)
-(container contract 0.3: Envoy v2.5.0, GridAPPS-D server v0.18.0 and client
-v0.1.0, py20305 v0.16.0, EPRI client v0.2.11). The images are pinned by
+[ieee20305-interop v0.4.1](https://github.com/otfabric/ieee20305-interop/releases/tag/v0.4.1)
+(container contract 0.3: Envoy v2.5.0, GridAPPS-D server v0.19.0 and client
+v0.1.0, py20305 v0.16.2, EPRI client v0.2.11). The images are pinned by
 digest in `interop/images.go` and the Interop workflow, which runs on every
 push and pull request. To test another build, set
 `IEEE20305_INTEROP_ENVOY_IMAGE`, `IEEE20305_INTEROP_GRIDAPPSD_IMAGE`,
@@ -367,7 +367,6 @@ reproduce and fail once they no longer do:
 | Stack | Bug | Effect |
 |-------|-----|--------|
 | EPRI client | Writes documents in the namespace of the draft sep.xsd 2.0.4 | Its `report` and `respond` get 400 from a server of IEEE 2030.5 |
-| py20305 | Does not model the `RateComponentLink` CSIP-AUS 1.3 requires in a TimeTariffInterval | Finds no interval of a CSIP-AUS tariff |
 
 ## Limitations
 

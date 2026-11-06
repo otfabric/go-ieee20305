@@ -14,7 +14,7 @@ and verification in [INTEROPERABILITY.md](INTEROPERABILITY.md).
 ## Verification
 
 - Tested against Envoy, GridAPPS-D (server and client), py20305 and EPRI, through
-  [ieee20305-interop](https://github.com/otfabric/ieee20305-interop) v0.3.1.
+  [ieee20305-interop](https://github.com/otfabric/ieee20305-interop) v0.4.1.
   The matrix per feature is in [docs/FEATURES.md](docs/FEATURES.md).
 - Not verified across implementations:
   - Prepayment, billing and files: no other stack implements them, so they are

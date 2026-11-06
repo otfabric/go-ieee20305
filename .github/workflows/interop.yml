@@ -33,14 +33,14 @@ permissions:
   packages: read
 
 env:
-  # otfabric/ieee20305-interop v0.3.1 (container contract 0.3): Envoy v2.5.0,
-  # GridAPPS-D server v0.18.0 and client v0.1.0, py20305 v0.16.0, EPRI client
+  # otfabric/ieee20305-interop v0.4.1 (container contract 0.3): Envoy v2.5.0,
+  # GridAPPS-D server v0.19.0 and client v0.1.0, py20305 v0.16.2, EPRI client
   # v0.2.11. Pinned by the multi-arch index digests of its release manifest.
   # Keep in step with interop/images.go.
-  IEEE20305_INTEROP_ENVOY_IMAGE: ${{ inputs.envoy_image || 'ghcr.io/otfabric/ieee20305-interop-envoy@sha256:850d16d293866fbd424716df6f3fb5ebb954a87616e10b082dbe5ea16c3f1bdb' }}
-  IEEE20305_INTEROP_GRIDAPPSD_IMAGE: ${{ inputs.gridappsd_image || 'ghcr.io/otfabric/ieee20305-interop-gridappsd@sha256:c72fbdb7c91fae1a59ee87938cc834651db2924317dd362814dc682d57a5b3af' }}
-  IEEE20305_INTEROP_PY20305_IMAGE: ${{ inputs.py20305_image || 'ghcr.io/otfabric/ieee20305-interop-py20305@sha256:d48c7680428fd4f438fae2f187d547fdf5e85e0961e5c9a582e3501dd20e38e9' }}
-  IEEE20305_INTEROP_EPRI_IMAGE: ${{ inputs.epri_image || 'ghcr.io/otfabric/ieee20305-interop-epri@sha256:364ce856b5eeeb715dbeb07ee7533ab389129a456426ae5895a6bba91f8fa4ee' }}
+  IEEE20305_INTEROP_ENVOY_IMAGE: ${{ inputs.envoy_image || 'ghcr.io/otfabric/ieee20305-interop-envoy@sha256:7e040b623dd8fb95b05330270c0d52eb75f5cbf54e243a5b18f6fa8235697359' }}
+  IEEE20305_INTEROP_GRIDAPPSD_IMAGE: ${{ inputs.gridappsd_image || 'ghcr.io/otfabric/ieee20305-interop-gridappsd@sha256:40d77b1ecb8a2f7e98a04267c5f25baca96a619c66c79a7b762685975e7ba082' }}
+  IEEE20305_INTEROP_PY20305_IMAGE: ${{ inputs.py20305_image || 'ghcr.io/otfabric/ieee20305-interop-py20305@sha256:e42a719905aa2b464d1d9458e2f36d34b8e1533b251a4c9707dc91b4d37389f3' }}
+  IEEE20305_INTEROP_EPRI_IMAGE: ${{ inputs.epri_image || 'ghcr.io/otfabric/ieee20305-interop-epri@sha256:ce2be5554928c0dcd4b7f2d78c26c3768f5896b120e38f16a066423946dbcd2d' }}
   GOWORK: "off"
 
 jobs:
