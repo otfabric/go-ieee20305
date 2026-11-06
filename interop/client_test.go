@@ -31,9 +31,10 @@ func TestClient(t *testing.T) {
 	for _, s := range []struct{ name, env, def string }{
 		{"envoy", "IEEE20305_INTEROP_ENVOY_IMAGE", EnvoyImage},
 		{"gridappsd", "IEEE20305_INTEROP_GRIDAPPSD_IMAGE", GridAPPSDImage},
+		{"otfabric", "IEEE20305_INTEROP_OTFABRIC_IMAGE", ""},
 	} {
 		t.Run(s.name, func(t *testing.T) {
-			img := image(s.env, s.def)
+			img := selected(t, s.name, image(s.env, s.def))
 			caps := capabilitiesOf(t, img)
 			for _, version := range []string{"2018", "2023"} {
 				sv := caps.Versions[version].Server
@@ -244,7 +245,7 @@ func clientScenario(t *testing.T, img string, caps capabilities, version, fx str
 			// The fixture's DER may set CSIP-AUS elements.
 			dc = newClient(t, srv, p, p.device, via, csipaus.Codec{})
 		}
-		checkDER(ctx, t, dc, ed, f)
+		checkDER(ctx, t, dc, ed, f, edition == ieee20305.Edition2018)
 	})
 
 	run("flow-reservation", func(t *testing.T) {
@@ -444,8 +445,10 @@ func activeControl(ctx context.Context, t *testing.T, c *client.Client, ed *ieee
 }
 
 // checkDER puts the fixture's DER resources to the first DER of ed, and
-// reads its settings back.
-func checkDER(ctx context.Context, t *testing.T, c *client.Client, ed *ieee20305.EndDevice, f fixture) {
+// reads its settings back. Without aus (IEEE 2030.5-2023, which CSIP-AUS
+// does not profile) it puts them without the CSIP-AUS elements the
+// fixture may set: the codec of 2023 has no CSIP-AUS types.
+func checkDER(ctx context.Context, t *testing.T, c *client.Client, ed *ieee20305.EndDevice, f fixture, aus bool) {
 	t.Helper()
 	if ed.DERListLink == nil {
 		t.Fatal("the EndDevice has no DERListLink")
@@ -464,6 +467,14 @@ func checkDER(ctx context.Context, t *testing.T, c *client.Client, ed *ieee20305
 		t.Fatal("the EndDevice has no DER")
 	}
 	capability, settings, status, availability := f.ders(t)
+	if !aus {
+		if x, ok := capability.(*csipaus.DERCapability); ok {
+			capability = &x.DERCapability
+		}
+		if x, ok := settings.(*csipaus.DERSettings); ok {
+			settings = &x.DERSettings
+		}
+	}
 	hrefs := map[string]string{}
 	if der.DERCapabilityLink != nil {
 		hrefs["DERCapability"] = der.DERCapabilityLink.Href

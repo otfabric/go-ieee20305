@@ -36,9 +36,10 @@ func TestServer(t *testing.T) {
 		{"gridappsd", "IEEE20305_INTEROP_GRIDAPPSD_IMAGE", GridAPPSDImage},
 		{"py20305", "IEEE20305_INTEROP_PY20305_IMAGE", Py20305Image},
 		{"epri", "IEEE20305_INTEROP_EPRI_IMAGE", EPRIImage},
+		{"otfabric", "IEEE20305_INTEROP_OTFABRIC_IMAGE", ""},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			img := image(c.env, c.def)
+			img := selected(t, c.name, image(c.env, c.def))
 			caps := capabilitiesOf(t, img)
 			if !caps.offers(suiteCCM8) && !caps.offers(suiteGCM128) {
 				t.Skipf("SKIP_UNSUPPORTED: %s offers no cipher suite of this server", c.name)

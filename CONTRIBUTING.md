@@ -35,6 +35,8 @@ make bench        # the benchmarks
 make cross        # cross-compile without cgo
 make test-tlsccm  # the CCM_8 module (Go 1.26.8)
 make interop      # against the ieee20305-interop images (needs Docker)
+# against the latest published go-ieee20305 (the Self-interop workflow, run by hand)
+IEEE20305_INTEROP_ADAPTERS=otfabric IEEE20305_INTEROP_OTFABRIC_IMAGE=ghcr.io/otfabric/ieee20305-interop-otfabric:latest make interop
 make features     # docs/FEATURES.md against the e2e and interop tests
 make build        # the examples into ./bin
 make download     # the pinned upstream schemas, for make generate and the schema tests

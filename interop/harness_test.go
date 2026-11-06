@@ -51,6 +51,26 @@ func prerequisite(t *testing.T, format string, args ...any) {
 	t.Skipf(format+" (IEEE20305_REQUIRE_INTEROP=1 makes this a failure)", args...)
 }
 
+// selected returns the image of the adapter name, or skips its tests: when
+// it has no image, or IEEE20305_INTEROP_ADAPTERS (a comma-separated list)
+// does not name it.
+//
+// otfabric is go-ieee20305 itself, as published by otfabric/ieee20305-interop
+// (ieee20305-interop-otfabric). It is not a reference: it runs only when
+// IEEE20305_INTEROP_OTFABRIC_IMAGE names an image, and what it shows is
+// compatibility between releases of this library, not independent
+// verification.
+func selected(t *testing.T, name, img string) string {
+	t.Helper()
+	if only := os.Getenv("IEEE20305_INTEROP_ADAPTERS"); only != "" && !slices.Contains(strings.Split(only, ","), name) {
+		t.Skipf("SKIP_UNSELECTED: IEEE20305_INTEROP_ADAPTERS=%s", only)
+	}
+	if img == "" {
+		t.Skipf("SKIP_UNSELECTED: no image for %s (IEEE20305_INTEROP_OTFABRIC_IMAGE)", name)
+	}
+	return img
+}
+
 func requireDocker(t *testing.T) {
 	t.Helper()
 	if _, err := exec.LookPath("docker"); err != nil {
