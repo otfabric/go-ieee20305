@@ -26,10 +26,6 @@ var knownBugs = []knownBug{
 		"https://github.com/epri-dev/IEEE-2030.5-Client/blob/505ee47d9c3ed43ce63087198d09f77338da627d/se_schema.c#L2235",
 		"client_test writes every document in the name space of the draft sep.xsd 2.0.4, http://ieee.org/2030.5; " +
 			"the server takes urn:ieee:std:2030.5:ns only and refuses its MirrorUsagePoint and Responses with 400"},
-	{"py20305", "client", regexp.MustCompile(`^2018/csip-aus/poll-pricing$`),
-		"https://github.com/DERSecurity/py20305/tree/79844938eea3d05f5432cdc5f2d07a103e87912b/src/py20305/models/csipaus",
-		"py20305 does not model the RateComponentLink that csipaus-core-v1.3.xsd requires in a CSIP-AUS " +
-			"TimeTariffInterval, rejects the TimeTariffIntervalList and finds no interval"},
 }
 
 // known returns the known bug of the test id of adapter in role, if any.

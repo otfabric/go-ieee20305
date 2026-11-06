@@ -2,7 +2,7 @@
 
 What go-ieee20305 implements, how it is tested, and how far each
 implementation of [ieee20305-interop](https://github.com/otfabric/ieee20305-interop)
-(v0.3.1, container contract 0.3) goes with it.
+(v0.4.1, container contract 0.3) goes with it.
 
 - **Server** and **Client / agent**: the packages `server` and `client`,
   `agent`.
@@ -57,15 +57,15 @@ every row marked tested names an interop operation the suite runs.
 | CSIP-AUS: site limits, DOE modes, ConnectionPoint (`csipaus`) | ✅ | ✅ | `TestCSIPAUS`, `TestCSIPClientErrors` | ✅ tested | — | — | ✅ tested | — | `poll-controls`, `put-der` |
 | **Other function sets** | | | | | | | | | |
 | Metering mirrors (MirrorUsagePoint, readings) | ✅ | ✅ | `TestMirrorMetering`, `TestFlowPolicy` | ✅ tested | ✅ tested | ✅ tested | ✅ tested | ⚠ bug ⁵ | `report` |
-| Pricing: TariffProfile, RateComponent, TimeTariffInterval, ConsumptionTariffInterval | ✅ | ✅ | `TestEventFunctionSets` | ✅ tested | — | — | ◐ tested ⁶ | — | `poll-pricing` |
-| Demand response and load control (EndDeviceControl) | ✅ | ✅ | `TestEventFunctionSets` | — | · | · | · | ◐ ⁷ | |
+| Pricing: TariffProfile, RateComponent, TimeTariffInterval, ConsumptionTariffInterval | ✅ | ✅ | `TestEventFunctionSets` | ✅ tested | — | — | ✅ tested | — | `poll-pricing` |
+| Demand response and load control (EndDeviceControl) | ✅ | ✅ | `TestEventFunctionSets` | — | · | · | · | ◐ ⁶ | |
 | Messaging (TextMessage) | ✅ | ✅ | `TestEventFunctionSets` | — | ◐ ³ | · | — | — | |
 | Flow reservation | ✅ | ✅ | `TestFilesAndFlowReservation`, `TestFlowPolicy` | — | ✅ tested | ✅ tested | — | — | `flow-reservation` |
 | Prepayment | ✅ | ✅ | `TestPrepaymentReads` | — | — | — | — | — | |
 | Billing | ✅ | ✅ | `TestBilling` | — | — | — | — | — | |
 | Software download (File, FileStatus) | ✅ | ✅ | `TestFilesAndFlowReservation` | — | — | — | — | — | |
 | **Subscriptions** | | | | | | | | | |
-| Subscription and Notification | ✅ | ✅ agent and `NotificationHandler` | `TestNotifications`, `TestAgentNotificationsServed`, `TestNotificationStorm`, `TestUndeliverable` | ◐ ⁸ | ✅ tested | ✅ | ✅ tested | — | `subscribe` |
+| Subscription and Notification | ✅ | ✅ agent and `NotificationHandler` | `TestNotifications`, `TestAgentNotificationsServed`, `TestNotificationStorm`, `TestUndeliverable` | ◐ ⁷ | ✅ tested | ✅ | ✅ tested | — | `subscribe` |
 | **Roles and editions** | | | | | | | | | |
 | Aggregator managing devices | ✅ | ✅ | `TestAggregatorClient`, `TestAggregationByEdition` | ✅ | · | ✅ | · | · | |
 | IEEE 2030.5-2018 | ✅ | ✅ | `TestAgentProvisioned2018`, `TestEventFunctionSets` | ✅ tested | ✅ tested | ✅ tested | ✅ tested | ✅ tested | `register` |
@@ -83,12 +83,9 @@ every row marked tested names an interop operation the suite runs.
 5. EPRI's client writes its documents in the name space of the draft sep.xsd
    2.0.4, `http://ieee.org/2030.5`; a server of IEEE 2030.5 refuses them
    with 400.
-6. Tested with the baseline and csip fixtures. With csip-aus, py20305 does
-   not model the `RateComponentLink` that CSIP-AUS 1.3 requires in a
-   TimeTariffInterval, and finds no interval: a known bug.
-7. EPRI's client handles some EndDeviceControls upstream; its image does not
+6. EPRI's client handles some EndDeviceControls upstream; its image does not
    offer them.
-8. Envoy accepts subscriptions from aggregator certificates only, and its
+7. Envoy accepts subscriptions from aggregator certificates only, and its
    image runs without notifications.
 
 ## Library
