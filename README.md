@@ -352,7 +352,13 @@ digest in `interop/images.go` and the Interop workflow, which runs on every
 push and pull request. To test another build, set
 `IEEE20305_INTEROP_ENVOY_IMAGE`, `IEEE20305_INTEROP_GRIDAPPSD_IMAGE`,
 `IEEE20305_INTEROP_PY20305_IMAGE` or `IEEE20305_INTEROP_EPRI_IMAGE`;
-`IEEE20305_INTEROP_TRACE=1` logs every request and answer.
+`IEEE20305_INTEROP_TRACE=1` logs every request and answer; to run one
+stack only, `IEEE20305_INTEROP_ADAPTERS=envoy`.
+
+The Self-interop workflow, run by hand, runs a commit against the latest
+published go-ieee20305 (`ieee20305-interop-otfabric:latest`), in both roles. It
+finds a change on the wire that breaks an earlier release. A pass is not
+independent verification: it is go-ieee20305 on both sides.
 
 The suite asks each image what it declares (`print-capabilities`) and skips
 what it lacks. Known upstream bugs (`interop/known_test.go`) skip while they

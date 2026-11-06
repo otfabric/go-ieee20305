@@ -112,6 +112,10 @@ Where the standard leaves room, the library takes these decisions:
   client), py20305 and EPRI, through
   [ieee20305-interop](https://github.com/otfabric/ieee20305-interop)
   v0.3.1, on every push ([README](README.md#interop-tests)).
+- **Against its own published releases**, by hand: the Self-interop
+  workflow runs a commit against `ieee20305-interop-otfabric:latest`, in both
+  roles. That is compatibility between releases, not independent
+  verification.
 - **Generated types** against the examples of the IEEE 2030.5-2023
   supplemental material, and encoded documents against `sep.xsd`.
 - **Not** against certified test equipment (the SunSpec or UL harnesses)
