@@ -4,7 +4,7 @@
 
 .DEFAULT_GOAL := help
 
-.PHONY: tlsccm-upstream help all build fmt fmt-check lint lint-ci vet vuln test stress coverage coverage-pkg-check cover fuzz check clean interop test-interop test-tlsccm e2e features nodeps bench cross download schemas generate generate-verify generate-check check-updates
+.PHONY: tlsccm-upstream help all build fmt fmt-check lint lint-ci vet vuln test stress coverage coverage-pkg-check cover fuzz check clean interop test-interop test-tlsccm e2e features nodeps bench cross download schemas generate generate-verify generate-check check-updates docs-check
 help: ## This help
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z0-9_-]+:.*?## / {printf "\033[36m%-30s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
@@ -30,6 +30,9 @@ COVER_PKGS := $(shell go list ./... | grep -v '/examples' | grep -v '/internal/g
 COVER_MIN ?= 90
 # Per-package floor (TEST-012), over the packages of COVER_PKGS.
 COVER_PKG_MIN := 90
+
+# docsync release of docs-check (DOC-008).
+DOCSYNC_VERSION := v0.2.0
 
 all: build ## Default target: build the examples
 
@@ -158,7 +161,7 @@ test-tlsccm: ## Vet, lint and test the tlsccm module (CCM_8, Go 1.26.8 and depen
 	@echo "Testing the tlsccm module"
 	@cd tlsccm && go vet ./... && staticcheck $$(go list ./... | grep -v /internal/) && golangci-lint run ./... && govulncheck ./... && go test -count=1 -race ./...
 
-check: fmt fmt-check nodeps features generate-verify lint lint-ci vet vuln test coverage-gate coverage-pkg-check test-tlsccm ## Run format + generated-code check + lint + vet + vuln + test + coverage gate + the tlsccm module
+check: fmt fmt-check nodeps features generate-verify lint lint-ci vet vuln test coverage-gate coverage-pkg-check test-tlsccm docs-check ## Run format + generated-code check + lint + vet + vuln + test + coverage gate + the tlsccm module
 
 # ── Code generation ──────────────────────────────────────────────────────────
 
@@ -189,3 +192,7 @@ check-updates: ## Report upstream schema changes and new releases (exit status 3
 clean: ## Remove generated binaries and coverage artifacts
 	@echo "Cleaning up"
 	@rm -rf $(BIN_DIR) coverage.out coverage.html
+
+# The documents against the code (DOC-008): docsync, as docs-check.yml runs it.
+docs-check: ## Check that the documents agree with the code (docsync)
+	@go run github.com/otfabric/docsync@$(DOCSYNC_VERSION) check .
