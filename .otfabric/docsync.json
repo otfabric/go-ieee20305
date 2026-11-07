@@ -1,0 +1,29 @@
+{
+  "ignore": [
+    {
+      "rule": "DS-SIG",
+      "subject": "Options.AllowGCM",
+      "reason": "API.md 'Module tlsccm' section: tlsccm.Options (AllowGCM, HandshakeTimeout, Logger in tlsccm/tlsccm.go:47) lives in the nested module tlsccm, which docsync does not load"
+    },
+    {
+      "rule": "DS-SIG",
+      "subject": "Options.HandshakeTimeout",
+      "reason": "API.md 'Module tlsccm' section: tlsccm.Options (AllowGCM, HandshakeTimeout, Logger in tlsccm/tlsccm.go:47) lives in the nested module tlsccm, which docsync does not load"
+    },
+    {
+      "rule": "DS-SIG",
+      "subject": "Options.Logger",
+      "reason": "API.md 'Module tlsccm' section: tlsccm.Options (AllowGCM, HandshakeTimeout, Logger in tlsccm/tlsccm.go:47) lives in the nested module tlsccm, which docsync does not load"
+    },
+    {
+      "rule": "DS-REF",
+      "subject": "ErrNoConnection",
+      "reason": "tlsccm.ErrNoConnection is declared in the nested module tlsccm (tlsccm/tlsccm.go:176), which docsync does not load"
+    },
+    {
+      "rule": "DS-VER",
+      "subject": "go 1.26.8",
+      "reason": "README states the Go version of the nested module tlsccm (tlsccm/go.mod: go 1.26.8), not of the root module (go 1.26)"
+    }
+  ]
+}

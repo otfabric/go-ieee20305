@@ -161,18 +161,18 @@ type Config struct {
 
 ```go
 func IdentityOf(cert *x509.Certificate) Identity // LFDI and SFDI of a certificate
-func (c *Client) FindEndDevice(ctx, listHref string, id Identity) (*ieee20305.EndDevice, error)
-func (c *Client) Register(ctx, listHref string, id Identity) (ed *ieee20305.EndDevice, created bool, err error)
-func (c *Client) Registration(ctx, ed *ieee20305.EndDevice) (*ieee20305.Registration, error)
+func (c *Client) FindEndDevice(ctx context.Context, listHref string, id Identity) (*ieee20305.EndDevice, error)
+func (c *Client) Register(ctx context.Context, listHref string, id Identity) (ed *ieee20305.EndDevice, created bool, err error)
+func (c *Client) Registration(ctx context.Context, ed *ieee20305.EndDevice) (*ieee20305.Registration, error)
 func CheckPIN(r *ieee20305.Registration, pin uint32) error // ErrPINMismatch
-var ErrNotRegistered, ErrPINMismatch
+var ErrNotRegistered, ErrPINMismatch error
 ```
 
 ### Subscriptions
 
 ```go
-func (c *Client) Subscribe(ctx, list, resource, notificationURI string, limit uint32) (string, error)
-func (c *Client) Unsubscribe(ctx, href string) error
+func (c *Client) Subscribe(ctx context.Context, list, resource, notificationURI string, limit uint32) (string, error)
+func (c *Client) Unsubscribe(ctx context.Context, href string) error
 
 func NewNotificationHandler(handle func(ctx context.Context, n *ieee20305.Notification) error,
 	cfg NotificationConfig) (*NotificationHandler, error) // an http.Handler
