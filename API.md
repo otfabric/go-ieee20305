@@ -65,6 +65,7 @@ var (
 	ErrTimeout       // no answer in time
 	ErrUnavailable   // refused or reset connection, DNS failure, 503, 429
 	ErrNotFound      // 404
+	ErrUnauthorized  // 401
 	ErrForbidden     // 403
 	ErrBadRequest    // 400
 	ErrConflict      // 409

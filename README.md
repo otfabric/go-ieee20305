@@ -261,7 +261,7 @@ posts. `go run ./examples/quickstart` runs both sides in one process.
 
 | Situation | How it is reported |
 |-----------|--------------------|
-| The server answered 4xx or 5xx | `*ieee20305.StatusError` with the Error document, matching `ErrNotFound`, `ErrForbidden`, `ErrBadRequest`, `ErrConflict`, `ErrServer`, `ErrUnavailable` |
+| The server answered 4xx or 5xx | `*ieee20305.StatusError` with the Error document, matching `ErrNotFound`, `ErrUnauthorized`, `ErrForbidden`, `ErrBadRequest`, `ErrConflict`, `ErrServer`, `ErrUnavailable` |
 | No answer in time | `ieee20305.ErrTimeout` |
 | Refused or reset connection, DNS failure | `ieee20305.ErrUnavailable` |
 | Certificate rejected, by either end | `ieee20305.ErrCertificate` |
