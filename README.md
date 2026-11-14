@@ -39,7 +39,7 @@ The library provides:
 - What production use needs: `context.Context` everywhere, one taxonomy of
   errors, retry policies, structured logging and metrics hooks, bounded lists
   and queues
-- **Verified against third-party stacks**: every push runs the client
+- **Verified against third-party stacks**: every pull request runs the client
   against the Envoy and GridAPPS-D servers, and the GridAPPS-D, py20305 and
   EPRI clients against the server, for every operation each offers
 
@@ -317,7 +317,7 @@ make check-updates   # report upstream changes and new releases
 ```
 
 Never edit a generated file: fix the generator in `internal/gen` or its inputs
-in the manifest, and regenerate. CI regenerates on every push and fails on any
+in the manifest, and regenerate. CI regenerates on every pull request and fails on any
 difference, validates encoded documents against the official schemas, and
 checks weekly for upstream updates. See [`schemas/README.md`](schemas/README.md).
 

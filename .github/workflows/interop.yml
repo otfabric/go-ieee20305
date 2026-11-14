@@ -1,3 +1,5 @@
+# Called by pr.yml on every pull request that is not documentation only;
+# dispatch it to run it on a branch without a pull request.
 name: Interop
 run-name: "Interop (${{ github.event_name }}) on ${{ github.ref_name }} by @${{ github.actor }}"
 
@@ -9,12 +11,24 @@ run-name: "Interop (${{ github.event_name }}) on ${{ github.ref_name }} by @${{ 
 # consumed as published: nothing of ieee20305-interop is cloned or built here.
 
 on:
-  push:
-    branches: ["**"]
-    paths-ignore: ["**/*.md"]
-  pull_request:
-    branches: ["**"]
-    paths-ignore: ["**/*.md"]
+  workflow_call:
+    inputs:
+      envoy_image:
+        description: "Envoy reference image (default: the pinned release)"
+        type: string
+        default: ""
+      gridappsd_image:
+        description: "GridAPPS-D reference image (default: the pinned release)"
+        type: string
+        default: ""
+      py20305_image:
+        description: "py20305 reference image (default: the pinned release)"
+        type: string
+        default: ""
+      epri_image:
+        description: "EPRI reference image (default: the pinned release)"
+        type: string
+        default: ""
   workflow_dispatch:
     inputs:
       envoy_image:
