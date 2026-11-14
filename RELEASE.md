@@ -5,6 +5,198 @@ tag, GitHub release). The section of the version below, up to the `---` that
 ends it, is the release's notes. Before v1.0.0 a minor release may change the
 API.
 
+## v0.7.0
+
+**Date:** 2026-11-14
+**Previous release:** v0.6.0
+
+### Summary
+
+Bounds on what an agent, a scheduler and a server keep for a peer, and a
+defined lifecycle for the agent and the server. `Agent.Close` ends `Run`.
+A handler or a `Metrics` method may call `Close`. Code of the application
+that does not return normally is stopped where the library calls it and
+logged. Four limits are new and on by default, each with a value that
+turns it off; see Breaking. No exported identifier is removed or changed.
+
+### Breaking
+
+- **schedule**: a `Scheduler` keeps at most `Options.MaxEvents` events,
+  1000 (`DefaultMaxEvents`) by default. A new event beyond that is refused:
+  `Upsert` and `UpsertAll` leave it out and `Stats().Refused` counts it. An
+  update of an event the Scheduler keeps is never refused, and a removed
+  event makes room. `MaxEvents: -1` keeps every event, as v0.6.0 did.
+- **schedule**: the transitions that wait for a subscriber that does not
+  read them are bounded by `Options.QueueSize`, four times `MaxEvents` by
+  default. A call queues at most two transitions per event, so a subscriber
+  that is less than `QueueSize` transitions behind sees every transition,
+  as in v0.6.0. A full queue keeps the latest transition of each event and
+  then drops the oldest; `Stats().Coalesced` and `Dropped` count what it
+  leaves out. `QueueSize: -1` (or `MaxEvents: -1`) queues without bound, as
+  v0.6.0 did.
+- **agent**: an agent keeps at most `Config.MaxEvents` events of a function
+  set, 1000 by default, and with them at most 4000 transitions that wait
+  for the handler of that function set. Of the events a server lists
+  beyond that, the agent keeps those it has and leaves out the new ones in
+  the order of the lists; it logs that at Warn level and counts them in
+  `Agent.EventStats`. `MaxEvents: -1` keeps every event and every
+  transition, as v0.6.0 did.
+- **agent**: the events of a poll are resolved together, after the events
+  the server no longer lists are forgotten. In v0.6.0 each event was
+  resolved as it was read, so which of several overlapping events was
+  superseded could depend on the order of the server's list, and an event
+  the server had just dropped could still supersede a new one. The outcome
+  is now the same for every order of the list. No option restores the old
+  one.
+- **server**: one device owns at most `Config.MaxDeviceResources`
+  resources, 100 times `MaxListItems` (100000) by default: its EndDevice with
+  the lists the server creates in it, and what clients create for it (DERs,
+  LogEvents, Responses, subscriptions, mirrors with their MeterReadings,
+  ReadingSets and Readings, flow reservation requests and their answers). A
+  request of a client that would create a resource beyond that is answered
+  403 and counted in `Server.Stats().RefusedResources`; a flow reservation
+  request or a new mirror is refused before any of its resources is made.
+  The operator's requests and `Admin` are not capped. `MaxListItems` caps
+  each list of LogEvents, Responses, Readings and subscriptions by deleting
+  its oldest items, but nothing deletes ReadingSets, MeterReadings, mirrors
+  or the answers to flow reservation requests: a device that goes on adding
+  those reaches the cap. `MaxDeviceResources: -1` (or a larger value)
+  restores v0.6.0, where a device's resources were not counted; a negative
+  `MaxListItems` without a `MaxDeviceResources` does too. The memory store
+  counts the resources of each device; with another `Store` the server
+  counts them by reading the store for each resource a client creates,
+  unless the store implements `server.OwnerCounter`.
+- **agent, server, client**: code of the application that does not return
+  normally is stopped where the library calls it, logged at Error level as
+  `<callback> did not return normally: <value>` with the stack, and the
+  library goes on:
+  - **agent**: a handler of events, `OnAssignments`, `OnFile`,
+    `OnDefaultDERControl` and `Readings` are treated as if they had
+    returned an error: the Response of the event is still posted, the poll
+    fails and `Run` tries it again, `Start` returns an error that names the
+    function. A `Metrics` method is treated as if it had returned.
+  - **server**: after a `Metrics`, `NotificationMetrics` or `EventMetrics`
+    method the request is answered, the notification counted as delivered
+    or not, and the status of the event written, as if the method had
+    returned.
+  - **client**: after a `Metrics` or `AttemptMetrics` method the call goes
+    on.
+  - **loggers**: an entry whose `Logger` method does not return normally is
+    lost.
+
+  In v0.6.0 the value reached the goroutine that made the call: the
+  application's own for `Start`, `Run`'s polls and the client, one of the
+  library's for the handlers of events, `Readings`, the notifier and the
+  events of the server. Nothing restores that; a callback that needs the
+  value keeps it itself. A `Store`, `Hooks`, a `FlowPolicy`, a
+  `RetryPolicy`, a `Clock` and a `PacketTransport` are called as before.
+
+### Added
+
+- **schedule**: `Options.MaxEvents`, `Options.QueueSize`,
+  `DefaultMaxEvents`, `Stats` and `Scheduler.Stats`.
+- **schedule**: `Scheduler.UpsertAll` takes the events of a poll and
+  resolves them once, and `Scheduler.RemoveAll` forgets several events and
+  resolves the others once. `Upsert` and `Remove` resolve after each event.
+- **schedule**: `Options.NoConflicts` for events that never supersede each
+  other: they are resolved without comparing them and without calling
+  `Conflicts`.
+- **agent**: `Config.MaxEvents` and `Agent.EventStats`.
+- **server**: `Config.MaxDeviceResources`, `Server.Stats`, `Stats`, and the
+  optional `OwnerCounter` of a `Store`.
+
+### Changed
+
+- **schedule**: resolving the events compares an event only with the
+  planned windows that can overlap it, found by their start: n events that
+  do not overlap take n log n steps where v0.6.0 took n². The result is
+  the same; `FuzzResolve` compares it with a Scheduler that compares every
+  pair.
+- **schedule**: `Get`, `Events`, `Window`, `Active` and `Timeline` resolve
+  the events again only when a change is due, not on every call. With a
+  `Clock` that never goes back the answers are those of v0.6.0. A `Clock`
+  that goes back no longer moves an event back to an earlier state before
+  the next change is due.
+- **schedule**: the interval of an event is kept in wall-clock time. The
+  monotonic reading of a `Start` made with `time.Now` is not used, so the
+  order of the planned windows does not depend on how the times were made.
+  Events decoded from the wire never carried one.
+- **server**: the server's scheduler uses `NoConflicts`, and forgets the
+  events of a deleted resource, and those past `EventRetention`, in one
+  step each. It keeps every event of the store, as before.
+- **server**: the memory store finds the nodes created in a node, and the
+  lists a node is in, by index. `Delete` looks at the nodes it removes, not
+  at every node and list of the store.
+- **agent**: the context that `OnAssignments`, `OnFile`,
+  `OnDefaultDERControl` and `Readings` get from `Run` also ends when the
+  agent is closed.
+- `make fuzz` finds the fuzz targets with `go test -list`; `make
+  fuzz-targets` lists them. `FUZZ_TARGETS` is no longer a list kept by
+  hand, and selects targets when set.
+
+### Fixed
+
+- **server**: list paging computes the page in 64 bits and converts to
+  `int` once the bounds are within the list, so `s` and `l` take every
+  value of their range on 32-bit platforms as on 64-bit ones. The count of
+  a list a hook computes is clamped to `int` in the same way.
+- **agent**: `Close` ends a `Run` in progress, which returns an error that
+  matches `ErrClosed`, as its documentation said. In v0.6.0 `Run` went on
+  polling until its context ended.
+- **agent**: `Close` called from a handler of events, or from a `Metrics`
+  method called for an event or a Response, returns. It does not wait for
+  the handlers, which end as they return; a `Close` on another goroutine
+  waits for them as before. In v0.6.0 such a call did not return.
+- **server**: `Close` called from a `NotificationMetrics` or `EventMetrics`
+  method, or from a hook that reads a resource for a notification, returns
+  in the same way. In v0.6.0 such a call did not return.
+- **server**: a DERProgram posted to the AssociatedDERProgramList of a DER
+  is stored as a `DERProgram`, without lists of its own, and a GET of it
+  answers 200. In v0.6.0 it was stored under a resource the server does not
+  have, and its GET answered 500.
+- **discovery**: each `Service` that `Browse` delivers has a TXT map and
+  slices of its own. In v0.6.0 they were shared with the browser, so a
+  receiver that changed its `Service` changed what the browser compared
+  the next records with.
+- **schedule**: `Close` called while another `Close` is in progress waits
+  for the subscriptions to end, as the first does.
+
+### Documentation
+
+- SECURITY.md: one table of the limits with their defaults. The client
+  does not check what a server sends against the schema (`Validate`); the
+  server checks every PUT and POST. A nil pool of roots is not
+  `ErrConfiguration` from the TLS configurations of `security`: every
+  handshake fails with `ErrCertificate`.
+- README.md: `ExponentialBackoff` draws its delay between half the backoff
+  and the whole, not with full jitter.
+- OBSERVABILITY.md: for each callback, the goroutine it is called on, what
+  waits for it, and whether it may call `Close`. TESTING.md: the lifecycle
+  contract matrix (L1 to L16) with the tests of each row.
+  INTEROPERABILITY.md: the decisions and the deviation this release adds.
+
+### Tests
+
+- Lifecycle tests for the agent, the server and the scheduler: `Close`
+  twice and from several goroutines, during a request, a wait and a retry,
+  and from handlers and `Metrics` methods.
+- Limits: events and queued transitions at zero, one, the limit and one
+  beyond; resources of a device at and around the cap; paging at 0, the
+  length of the list, 2^31 and 2^32-1; allocation budgets for request,
+  response and notification bodies of up to 2^62 declared bytes.
+- `internal/leakcheck` compares goroutines by their stacks, without a
+  tolerance in numbers, after the tests of each package and around the
+  end-to-end leak tests. Waits for a state use events in place of sleeps
+  in the tests of `schedule`, `discovery` (`TestBrowseCancelWhileDelivering`)
+  and `server` (`TestNotificationRefused`).
+- Benchmarks keep their results and use `b.Loop`; new ones for the
+  scheduler and for a list GET of the server.
+- The tests of every package build and pass as linux/386, run by hand for
+  this release; the test of `internal/clamp` compiled only where `int` has
+  64 bits.
+
+---
+
 ## v0.6.0
 
 **Date:** 2026-11-04

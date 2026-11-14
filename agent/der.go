@@ -36,5 +36,5 @@ func (a *Agent) pollDefault(ctx context.Context) error {
 	if same {
 		return nil
 	}
-	return a.cfg.OnDefaultDERControl(ctx, d)
+	return a.call("Config.OnDefaultDERControl", func() error { return a.cfg.OnDefaultDERControl(ctx, d) })
 }

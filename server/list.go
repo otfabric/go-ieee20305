@@ -78,8 +78,7 @@ func (s *Server) listOf(ctx context.Context, req *Request, source string, keep f
 		limit = s.cfg.MaxLimit
 	}
 	all := len(items)
-	start := min(int(req.Query.Start), all)
-	end := min(start+int(limit), all)
+	start, end := pageBounds(req.Query.Start, limit, all)
 	doc := s.profile.Clone(req.Node.Value)
 	l, ok := doc.(ieee20305.Lister)
 	if !ok {
@@ -95,6 +94,18 @@ func (s *Server) listOf(ctx context.Context, req *Request, source string, keep f
 	l.SetListCounts(clamp.Uint32(all), clamp.Uint32(len(page)))
 	setHref(doc, req.Node.Href)
 	return doc, nil
+}
+
+// pageBounds returns the indexes [lo, hi) of the page of a list of all
+// items that starts at item start and holds at most limit items. start and
+// limit take every value of the wire (s and l are UInt32), which an int
+// does not hold on 32-bit platforms: the arithmetic is done in 64 bits and
+// converted once it is bounded by all.
+func pageBounds(start, limit uint32, all int) (lo, hi int) {
+	n := uint64(max(all, 0))
+	s := min(uint64(start), n)
+	e := s + min(uint64(limit), n-s)
+	return int(s), int(e)
 }
 
 // filterAfter keeps the events that start at or after a time, and the

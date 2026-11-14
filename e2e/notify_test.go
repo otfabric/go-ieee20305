@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"runtime"
 	"strconv"
 	"sync"
 	"testing"
@@ -16,6 +15,7 @@ import (
 	ieee20305 "github.com/otfabric/go-ieee20305"
 	"github.com/otfabric/go-ieee20305/client"
 	examples "github.com/otfabric/go-ieee20305/internal/examples/ieee20305"
+	"github.com/otfabric/go-ieee20305/internal/leakcheck"
 	"github.com/otfabric/go-ieee20305/security"
 	"github.com/otfabric/go-ieee20305/server"
 )
@@ -203,7 +203,7 @@ func TestUndeliverable(t *testing.T) {
 // last state. Nothing leaks after Close.
 func TestNotificationStorm(t *testing.T) {
 	const devices, perDevice, changes = 20, 10, 1000
-	base := runtime.NumGoroutine()
+	leakcheck.Check(t)
 	pki := newPKI(t)
 	notifications := client.NewHTTPClient(pki.device(t, "server notifications"), pki.roots)
 	// All the subscribers are behind one host: keep a connection per
@@ -284,9 +284,6 @@ func TestNotificationStorm(t *testing.T) {
 	for _, c := range env.clients {
 		c.CloseIdleConnections()
 	}
-	eventually(t, "the goroutines to end", func() bool {
-		return runtime.NumGoroutine() <= base+10
-	})
 }
 
 // notificationHandler returns a NotificationHandler of handle.

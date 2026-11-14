@@ -21,16 +21,27 @@ func documents() []any {
 	return docs
 }
 
+// The results of the benchmarks are kept here, so that the work that makes
+// them is not removed as unused.
+var (
+	sinkBytes []byte
+	sinkDoc   any
+)
+
 // BenchmarkMarshal encodes every example document once per iteration.
 func BenchmarkMarshal(b *testing.B) {
 	docs := documents()
+	if len(docs) == 0 {
+		b.Fatal("no documents")
+	}
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		for _, v := range docs {
-			if _, err := ieee20305.Marshal(v); err != nil {
+			out, err := ieee20305.Marshal(v)
+			if err != nil {
 				b.Fatal(err)
 			}
+			sinkBytes = out
 		}
 	}
 }
@@ -45,13 +56,17 @@ func BenchmarkDecode(b *testing.B) {
 		}
 		encoded = append(encoded, out)
 	}
+	if len(encoded) == 0 {
+		b.Fatal("no documents")
+	}
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		for _, data := range encoded {
-			if _, err := ieee20305.Decode(data); err != nil {
+			v, err := ieee20305.Decode(data)
+			if err != nil {
 				b.Fatal(err)
 			}
+			sinkDoc = v
 		}
 	}
 }

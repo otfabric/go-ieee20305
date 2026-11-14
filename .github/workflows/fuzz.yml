@@ -1,8 +1,8 @@
 name: Fuzz
 run-name: "Fuzz (${{ github.event_name }}) on ${{ github.ref_name }}"
 
-# Runs every fuzz target of the Makefile (FUZZ_TARGETS) for longer than CI
-# can: nightly, and on demand. An input that fails is kept as an artifact;
+# Runs every fuzz target `make fuzz` finds (`go test -list`) for longer
+# than CI can: nightly, and on demand. An input that fails is kept as an artifact;
 # add it to the target's testdata/fuzz directory to make it a regression
 # test.
 on:

@@ -8,7 +8,7 @@ import "github.com/otfabric/go-ieee20305/agent"
 
 Package agent is the behaviour of an IEEE 2030.5 device on top of package client: it finds the server's resources from DeviceCapability, keeps its clock in step with the server's, registers its EndDevice and checks the PIN of its Registration, and then polls its FunctionSetAssignments at the server's pollRate, retrying with backoff when the server fails.
 
-Run does all of this until its context ends. The function sets an agent takes part in plug into it as handlers: for DER, DRLC, messaging, pricing and prepayment, the agent schedules the events of the device's programs with randomization and primacy, passes their transitions to the handler of the function set and posts the Responses they ask for.
+Run does all of this until its context ends or the agent is closed. The function sets an agent takes part in plug into it as handlers: for DER, DRLC, messaging, pricing and prepayment, the agent schedules the events of the device's programs with randomization and primacy, passes their transitions to the handler of the function set and posts the Responses they ask for.
 
 A device sets the client of its certificate, its identity and the handlers of its function sets, and runs the agent:
 
@@ -28,7 +28,7 @@ A device sets the client of its certificate, its identity and the handlers of it
 	defer a.Close()
 	return a.Run(ctx)
 
-Run registers the device (retrying until the server has), then polls until ctx ends. Start does only the registration, for a caller that wants to know it succeeded first; Active and Events report the events of a function set while Run polls. With Config.NotificationURI and NotificationHandler, the agent subscribes to its programs and polls less. Config.Backoff, Logger and Metrics are the plug points of the module (see OBSERVABILITY.md).
+Run registers the device (retrying until the server has), then polls until ctx ends or the agent is closed. Start does only the registration, for a caller that wants to know it succeeded first; Active and Events report the events of a function set while Run polls. The agent keeps a bounded number of events of each function set (Config.MaxEvents). With Config.NotificationURI and NotificationHandler, the agent subscribes to its programs and polls less. Config.Backoff, Logger and Metrics are the plug points of the module (see OBSERVABILITY.md).
 
 ## Variables
 
@@ -44,6 +44,8 @@ ErrNotStarted is matched by a call that needs what Start reads from the server (
 
 ```go
 type Agent struct {
+
+	// maxEvents is the bound of Config.MaxEvents: 0 for none.
 
 	// ctx is the context of the agent's own work (handlers, Responses),
 	// which Close cancels.
@@ -86,7 +88,17 @@ ActiveDERControls returns the DERControls of IEEE 2030.5 active now, in order of
 func (a *Agent) Close()
 ```
 
-Close stops the scheduling of events and waits for the handlers. Run closes the agent when it returns.
+Close stops the agent: a Run in progress returns an error that matches ieee20305.ErrClosed, the scheduling of events stops, and Close waits for the handlers of events that are running. Run closes the agent when it returns.
+
+Close may be called more than once, and from several goroutines at once. A handler of events, and a Metrics method the agent calls for an event or a Response, may call it too: that Close does not wait for the handlers, which end as they return, while a Close on another goroutine waits for them.
+
+#### func (Agent) EventStats
+
+```go
+func (a *Agent) EventStats(fs FunctionSet) schedule.Stats
+```
+
+EventStats returns the counters of the events of the function set fs, from New on: Refused counts the events of the polls the agent left out because it kept Config.MaxEvents events (an event the server goes on listing is counted at each poll), and Coalesced and Dropped the transitions the handler did not get because it had fallen behind (see schedule.Stats).
 
 #### func (Agent) Events
 
@@ -166,7 +178,7 @@ RequestFlowReservation posts a FlowReservationRequest of the device and returns 
 func (a *Agent) Run(ctx context.Context) error
 ```
 
-Run starts the agent, retrying until it is registered, and then polls until ctx ends, which it returns (ctx.Err()). It keeps trying after a failure (with Backoff), except after errors that waiting does not fix, which it returns: a PIN mismatch, a certificate that does not verify (ErrCertificate), a configuration error, and Close. Run closes the agent when it returns.
+Run starts the agent, retrying until it is registered, and then polls until ctx ends, which it returns (ctx.Err()). It keeps trying after a failure (with Backoff), except after errors that waiting does not fix, which it returns: a PIN mismatch, a certificate that does not verify (ErrCertificate), a configuration error, and Close (ErrClosed). Close ends a request or a wait in progress, as the end of ctx does. Run closes the agent when it returns.
 
 #### func (Agent) Start
 
@@ -213,7 +225,8 @@ type Config struct {
 	// (see Run).
 	Backoff ieee20305.ExponentialBackoff
 	// OnAssignments is called with the device's FunctionSetAssignments each
-	// time the agent reads them.
+	// time the agent reads them. Its error fails the poll, which Run
+	// tries again after Backoff.
 	OnAssignments func(ctx context.Context, fsas []*ieee20305.FunctionSetAssignments) error
 	// NotificationURI makes the agent subscribe to the lists it polls (its
 	// FunctionSetAssignments, programs and events): the https URL of its
@@ -227,7 +240,8 @@ type Config struct {
 	// the device's DERPrograms: their receipt, start, end, cancellation
 	// and supersession, as a schedule.Scheduler with randomization and
 	// DER conflicts works them out. The agent posts the Responses the
-	// controls ask for.
+	// controls ask for, also when the handler returns an error, which it
+	// logs.
 	OnDERControl func(ctx context.Context, t schedule.Transition) error
 	// OnEndDeviceControl, OnTextMessage, OnTimeTariffInterval and
 	// OnSupplyInterruptionOverride are called with the transitions of the
@@ -263,6 +277,13 @@ type Config struct {
 	Clock schedule.Clock
 	// Seed seeds the randomization of the events: the SFDI when zero.
 	Seed uint64
+	// MaxEvents bounds the events the agent keeps of one function set:
+	// schedule.DefaultMaxEvents (1000) when zero, no bound when negative.
+	// Of the events a server lists beyond it, the agent keeps those it
+	// has and leaves out the new ones, in the order of the lists: it
+	// logs that and counts them (EventStats). The transitions that wait
+	// for a handler are bounded with it: see schedule.Options.QueueSize.
+	MaxEvents int
 	// Metrics receives the agent's polls, events and Responses; none when
 	// nil.
 	Metrics Metrics
@@ -273,6 +294,8 @@ type Config struct {
 ```
 
 Config configures an Agent.
+
+The functions of the application in it are called on these goroutines: OnAssignments, OnFile and OnDefaultDERControl on that of Start or Run, during a poll; the handler of the events of a function set on a goroutine of the agent, one per function set, one transition at a time; Readings on another goroutine of Run. The agent waits for each: the poll for those it calls during a poll, the next transition and the Responses of a function set for its handler. Those of a poll, and Readings, get the context of Start or of Run, which also ends when the agent is closed; a handler of events gets one that ends when the agent is closed. They may call the methods of the Agent, Close included (see Close). One that does not return normally is stopped there: the agent logs that at Error level with the stack, and goes on as if the function had returned an error.
 
 ### type FunctionSet
 
@@ -320,7 +343,7 @@ type Metrics interface {
 
 Metrics receives what an agent does, to count and time it: set it as Config.Metrics. OnPoll is called after each poll of the device's resources, OnEvent with each transition of an event of a function set, and OnResponse after each attempt to post a Response (with the Response's status, and the error of the attempt).
 
-The methods are called synchronously from the agent's goroutines: they must be safe for concurrent use, quick, and must not block. Embed NopMetrics to implement only some.
+The methods are called synchronously from the agent's goroutines: they must be safe for concurrent use, quick, and must not block. OnPoll is called on the goroutine of Run; OnEvent on the goroutine that calls the handler of the function set, before it; OnResponse on that goroutine, or on Run's for a Response sent again. They may call the methods of the Agent, Close included. A method that does not return normally is stopped there: the agent logs that at Error level with the stack and goes on. Embed NopMetrics to implement only some.
 
 ### type NopMetrics
 

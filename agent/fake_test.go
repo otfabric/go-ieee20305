@@ -41,6 +41,11 @@ type fakeServer struct {
 	// bodies.
 	reqs   map[string]int
 	bodies map[string][]string
+	// seen receives the "METHOD path" of each request, once it is
+	// recorded; hold keeps the answer to "METHOD path" back until its
+	// channel is closed or the request ends.
+	seen chan string
+	hold map[string]chan struct{}
 }
 
 // newFake returns a fake server with the documents of a registered device
@@ -51,6 +56,7 @@ func newFake(t *testing.T) *fakeServer {
 	f := &fakeServer{
 		docs: map[string]string{}, fail: map[string]int{}, times: map[string]int{}, loc: map[string]string{},
 		reqs: map[string]int{}, bodies: map[string][]string{},
+		seen: make(chan string, 4096), hold: map[string]chan struct{}{},
 	}
 	f.ts = httptest.NewTLSServer(http.HandlerFunc(f.serve))
 	t.Cleanup(f.ts.Close)
@@ -143,7 +149,7 @@ func (f *fakeServer) serve(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	f.reqs[key]++
 	f.bodies[key] = append(f.bodies[key], string(data))
-	status, doc, loc := f.fail[key], f.docs[r.URL.Path], f.loc[key]
+	status, doc, loc, hold := f.fail[key], f.docs[r.URL.Path], f.loc[key], f.hold[key]
 	if n, ok := f.times[key]; ok && status != 0 {
 		if n <= 1 {
 			delete(f.fail, key)
@@ -153,6 +159,17 @@ func (f *fakeServer) serve(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	f.mu.Unlock()
+	select {
+	case f.seen <- key:
+	default: // a test that reads no requests
+	}
+	if hold != nil {
+		select {
+		case <-hold:
+		case <-r.Context().Done():
+			return
+		}
+	}
 	if status != 0 {
 		w.WriteHeader(status)
 		return
@@ -173,6 +190,44 @@ func (f *fakeServer) serve(w http.ResponseWriter, r *http.Request) {
 	default:
 		w.WriteHeader(http.StatusNoContent)
 	}
+}
+
+// holdBack keeps the answers to "METHOD path" back until the function it
+// returns is called.
+func (f *fakeServer) holdBack(key string) (release func()) {
+	ch := make(chan struct{})
+	f.mu.Lock()
+	f.hold[key] = ch
+	f.mu.Unlock()
+	return sync.OnceFunc(func() { close(ch) })
+}
+
+// await returns once the server has got a request "METHOD path" that no
+// await returned for before.
+func (f *fakeServer) await(t *testing.T, key string) {
+	t.Helper()
+	timeout := time.After(10 * time.Second)
+	for {
+		select {
+		case got := <-f.seen:
+			if got == key {
+				return
+			}
+		case <-timeout:
+			t.Fatalf("no request %s", key)
+		}
+	}
+}
+
+// total returns the number of requests the server got.
+func (f *fakeServer) total() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	n := 0
+	for _, c := range f.reqs {
+		n += c
+	}
+	return n
 }
 
 // newTestAgent returns an agent of the device on f with cfg, closed when

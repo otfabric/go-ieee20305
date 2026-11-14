@@ -5,6 +5,7 @@ package server
 import (
 	"context"
 	"errors"
+	"math"
 	"reflect"
 	"strings"
 
@@ -128,7 +129,8 @@ func (s *Server) count(ctx context.Context, p Principal, n *Node) int {
 			return 0
 		}
 		if l, ok := doc.(ieee20305.Lister); ok {
-			return int(listAll(l))
+			// all is a UInt32, beyond the int of a 32-bit platform.
+			return int(min(uint64(listAll(l)), uint64(math.MaxInt)))
 		}
 		return 0
 	}

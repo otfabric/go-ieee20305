@@ -18,6 +18,8 @@ A resource comes with its parts: a DERProgram with its DERControlList, ActiveDER
 
 A device mirrors its metering by posting a MirrorUsagePoint, which the server mirrors to a UsagePoint, and MirrorMeterReadings, which become its MeterReadings, ReadingTypes, ReadingSets and Readings, one per mRID. A FlowReservationRequest is answered by Config.FlowPolicy with a FlowReservationResponse event of the device.
 
+What clients create is bounded: Config.MaxListItems caps the lists they post to, and Config.MaxDeviceResources all that one device owns.
+
 A document the server sends has its href, its ListLinks the number of items the client reads (the all attribute), and no link to a resource of the server that does not exist yet (such as the DefaultDERControl of a program without one); a link to a resource the client creates with PUT stays.
 
 ## Constants
@@ -312,6 +314,17 @@ type Config struct {
 	// deleted. 1000 when zero; no cap when negative. An operator's posts
 	// are not capped.
 	MaxListItems int
+	// MaxDeviceResources caps the resources one device owns: its EndDevice
+	// with what the server creates in it, and what clients create for it
+	// (the DERs, LogEvents, Responses and subscriptions it posts, its
+	// mirrors with their readings, the answers to its flow reservation
+	// requests). A request of a client that would create a resource
+	// beyond it is refused with 403 and counted (Stats); what the device
+	// owns stays. 100 times MaxListItems when zero (100000 by default); no
+	// cap when negative, or when zero with a negative MaxListItems. An
+	// operator's requests and Admin are not capped. The server counts
+	// with the Store when it is an OwnerCounter.
+	MaxDeviceResources int
 	// EventRetention is how long after its end the server keeps an event in
 	// its scheduler (not in its store): 24 hours when zero.
 	EventRetention time.Duration
@@ -368,7 +381,7 @@ type EventMetrics interface {
 }
 ```
 
-EventMetrics is a Metrics that is also told of the transitions of the events of the server (DERControls, EndDeviceControls, ...) that change their EventStatus: the document element of the event, and its states.
+EventMetrics is a Metrics that is also told of the transitions of the events of the server (DERControls, EndDeviceControls, ...) that change their EventStatus: the document element of the event, and its states. OnEventTransition is called on the one goroutine that writes the states of the events, before the state is written, under the rules of Metrics: while it runs, no other state is written.
 
 ### type FlowPolicy
 
@@ -443,7 +456,7 @@ type Metrics interface {
 
 Metrics receives the requests of a server, to count and time them: set it as Config.Metrics. OnRequest is called when a request comes in, and OnResponse when it is answered, with the WADL resource ID of its target (such as "EndDeviceList"; "" for a path the server does not have), which makes a label of few values.
 
-The methods are called synchronously from the goroutines that serve the requests: they must be safe for concurrent use, quick, and must not block. Embed NopMetrics to implement only some. A Metrics may also be a NotificationMetrics and an EventMetrics.
+The methods are called synchronously from the goroutines that serve the requests: they must be safe for concurrent use, quick, and must not block. They may call the methods of the Server, Close included. A method that does not return normally is stopped there: the server logs that at Error level with the stack, and answers the request as if the method had returned. Embed NopMetrics to implement only some. A Metrics may also be a NotificationMetrics and an EventMetrics.
 
 ### type Node
 
@@ -522,7 +535,18 @@ type NotificationMetrics interface {
 }
 ```
 
-NotificationMetrics is a Metrics that is also told of notifications: each delivery to a subscriber (the WADL resource ID of the subscribed resource, how long it took, and its error, after retries), and each subscription the server cancels, with the status of the cancellation it sent (or would have).
+NotificationMetrics is a Metrics that is also told of notifications: each delivery to a subscriber (the WADL resource ID of the subscribed resource, how long it took, and its error, after retries), and each subscription the server cancels, with the status of the cancellation it sent (or would have). Its methods are called on the goroutine that delivers the notifications of the subscription, under the rules of Metrics.
+
+### type OwnerCounter
+
+```go
+type OwnerCounter interface {
+	// CountOwned returns the number of nodes whose Owner is owner.
+	CountOwned(ctx context.Context, owner string) (int, error)
+}
+```
+
+OwnerCounter is a Store that knows how many nodes an owner has without reading them, as the store of NewMemStore does. A server counts the resources of a device with it (Config.MaxDeviceResources). With a Store that is no OwnerCounter the server counts them from Hrefs and Get: a pass over the store for each resource a client creates.
 
 ### type Principal
 
@@ -662,6 +686,9 @@ type Server struct {
 	// regMu serializes the creation of EndDevices, so that a device that
 	// posts its EndDevice twice at once gets one.
 
+	// maxOwned is the cap of Config.MaxDeviceResources (0: none), and
+	// refused counts the resources refused for it.
+
 }
 ```
 
@@ -689,7 +716,9 @@ Admin returns the administration of the server.
 func (s *Server) Close() error
 ```
 
-Close stops what the server runs in the background, such as the delivery of notifications. The handler answers 503 after Close.
+Close stops what the server runs in the background, such as the delivery of notifications, and waits for it. The handler answers 503 after Close, which returns nil.
+
+Close may be called more than once, and from several goroutines at once. Code of the application that the server calls on a goroutine of its own (a Metrics method for a notification or for the transition of an event, a hook that reads a resource for a notification) may call it too: that Close does not wait for the server's goroutines, which end as their work returns, while a Close on another goroutine waits for them.
 
 #### func (Server) ServeHTTP
 
@@ -699,6 +728,14 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request)
 
 ServeHTTP answers an IEEE 2030.5 request.
 
+#### func (Server) Stats
+
+```go
+func (s *Server) Stats() Stats
+```
+
+Stats returns the counters of s.
+
 #### func (Server) Store
 
 ```go
@@ -706,6 +743,18 @@ func (s *Server) Store() Store
 ```
 
 Store returns the store of the server. Changes made through it notify the subscriptions of the resources.
+
+### type Stats
+
+```go
+type Stats struct {
+	// RefusedResources counts the resources clients were refused because
+	// their device owned Config.MaxDeviceResources already.
+	RefusedResources uint64
+}
+```
+
+Stats are counters of a Server, from New on.
 
 ### type Store
 
@@ -739,4 +788,4 @@ Store holds the resources of a server. Its methods are safe for concurrent use, 
 func NewMemStore(clone func(any) any) Store
 ```
 
-NewMemStore returns a Store that keeps everything in memory. clone makes the deep copies of values: ieee20305.Clone when nil, or the Clone of a profile package, such as csipaus.Clone, for its documents.
+NewMemStore returns a Store that keeps everything in memory. clone makes the deep copies of values: ieee20305.Clone when nil, or the Clone of a profile package, such as csipaus.Clone, for its documents. It is an OwnerCounter.

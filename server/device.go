@@ -185,7 +185,7 @@ func (s *Server) newEndDevice(ctx context.Context, lfdi security.LFDI, tmpl any)
 	if err != nil {
 		return "", err
 	}
-	return s.createItem(ctx, list, doc, lfdi.String())
+	return s.createItem(ctx, list, doc, lfdi.String(), false)
 }
 
 // baseEndDevice returns the EndDevice of IEEE 2030.5 a document is or
@@ -296,7 +296,7 @@ func (s *Server) createDefault(ctx context.Context, r *Request) (string, error) 
 	if owner == "" && r.Principal.Role != RoleOperator {
 		owner = r.Principal.lfdi()
 	}
-	href, err := s.createItem(ctx, r.Node, r.Doc, owner)
+	href, err := s.createItem(ctx, r.Node, r.Doc, owner, counts(r))
 	if err != nil {
 		return "", err
 	}
@@ -304,6 +304,73 @@ func (s *Server) createDefault(ctx context.Context, r *Request) (string, error) 
 		s.trim(ctx, r.Node.Href)
 	}
 	return href, nil
+}
+
+// counts reports whether what the request r creates counts against the
+// resources of its owner (Config.MaxDeviceResources): all but an
+// operator's.
+func counts(r *Request) bool { return r.Principal.Role != RoleOperator }
+
+// defaultMaxListItems is the cap of Config.MaxListItems when it is zero.
+const defaultMaxListItems = 1000
+
+// room returns nil when owner may own n more resources, and else the
+// error of a request that would create them: 403. The caller holds the
+// lock of the owner (lockOwner).
+func (s *Server) room(ctx context.Context, owner string, n int) error {
+	if s.maxOwned == 0 || owner == "" {
+		return nil
+	}
+	have, err := s.owned(ctx, owner)
+	if err != nil {
+		return err
+	}
+	if have > s.maxOwned-n {
+		s.refused.Add(1)
+		return httpError(http.StatusForbidden, "device %s owns %d resources, of at most %d (Config.MaxDeviceResources)", owner, have, s.maxOwned)
+	}
+	return nil
+}
+
+// fits is room for a request that creates n resources of owner in several
+// steps: it is refused before the first step when they do not all fit.
+// Each step checks again as it creates.
+func (s *Server) fits(ctx context.Context, r *Request, owner string, n int) error {
+	if !counts(r) || owner == "" {
+		return nil
+	}
+	defer s.lockOwner(owner)()
+	return s.room(ctx, owner, n)
+}
+
+// lockOwner serializes the creations counted against the resources of
+// owner, so that requests at once do not pass the cap together. It is the
+// innermost of the locks by key: nothing takes another while it holds it,
+// but that of the node it stores.
+func (s *Server) lockOwner(owner string) func() { return s.listLocks.lock("owner:" + owner) }
+
+// owned returns the number of nodes of owner: from the store when it
+// counts them, and else by reading it.
+func (s *Server) owned(ctx context.Context, owner string) (int, error) {
+	if c, ok := s.base().(OwnerCounter); ok {
+		return c.CountOwned(ctx, owner)
+	}
+	hrefs, err := s.store.Hrefs(ctx)
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, h := range hrefs {
+		node, err := s.store.Get(ctx, h)
+		switch {
+		case errors.Is(err, ErrNoNode): // deleted since
+		case err != nil:
+			return 0, err
+		case node.Owner == owner:
+			n++
+		}
+	}
+	return n, nil
 }
 
 // trim deletes the oldest items of a list clients post to (LogEvents,
@@ -315,7 +382,7 @@ func (s *Server) trim(ctx context.Context, list string) {
 		return
 	}
 	if max == 0 {
-		max = 1000
+		max = defaultMaxListItems
 	}
 	members, err := s.store.Members(ctx, list)
 	if err != nil || len(members) <= max {

@@ -76,14 +76,26 @@ type Store interface {
 	Hrefs(ctx context.Context) ([]string, error)
 }
 
+// OwnerCounter is a Store that knows how many nodes an owner has without
+// reading them, as the store of NewMemStore does. A server counts the
+// resources of a device with it (Config.MaxDeviceResources). With a Store
+// that is no OwnerCounter the server counts them from Hrefs and Get: a
+// pass over the store for each resource a client creates.
+type OwnerCounter interface {
+	// CountOwned returns the number of nodes whose Owner is owner.
+	CountOwned(ctx context.Context, owner string) (int, error)
+}
+
 // NewMemStore returns a Store that keeps everything in memory. clone makes
 // the deep copies of values: ieee20305.Clone when nil, or the Clone of a
-// profile package, such as csipaus.Clone, for its documents.
+// profile package, such as csipaus.Clone, for its documents. It is an
+// OwnerCounter.
 func NewMemStore(clone func(any) any) Store {
 	if clone == nil {
 		clone = ieee20305.Clone
 	}
-	return &memStore{nodes: map[string]*Node{}, members: map[string][]string{}, clone: clone}
+	return &memStore{nodes: map[string]*Node{}, members: map[string][]string{}, clone: clone,
+		kids: map[string]map[string]struct{}{}, lists: map[string]map[string]struct{}{}, owned: map[string]int{}}
 }
 
 type memStore struct {
@@ -91,6 +103,15 @@ type memStore struct {
 	nodes   map[string]*Node
 	members map[string][]string
 	clone   func(any) any
+	// kids are the hrefs of the nodes created in a node (those whose
+	// Parent it is), and lists those of the lists a node is an item of,
+	// so that Delete looks only at the nodes it removes and the lists
+	// they are in. owned counts the nodes of each owner.
+	kids  map[string]map[string]struct{}
+	lists map[string]map[string]struct{}
+	owned map[string]int
+	// visited counts the nodes Delete looked at, for the tests.
+	visited uint64
 }
 
 func (s *memStore) Get(_ context.Context, href string) (*Node, error) {
@@ -110,8 +131,50 @@ func (s *memStore) Put(_ context.Context, n *Node) error {
 	c := copyNode(n, s.clone)
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if old, ok := s.nodes[c.Href]; ok {
+		s.unlink(old)
+	}
 	s.nodes[c.Href] = c
+	if c.Parent != "" {
+		add(s.kids, c.Parent, c.Href)
+	}
+	if c.Owner != "" {
+		s.owned[c.Owner]++
+	}
 	return nil
+}
+
+// unlink takes n out of the nodes of its parent and of its owner. The
+// caller holds the lock.
+func (s *memStore) unlink(n *Node) {
+	if n.Parent != "" {
+		remove(s.kids, n.Parent, n.Href)
+	}
+	if n.Owner != "" {
+		if s.owned[n.Owner]--; s.owned[n.Owner] <= 0 {
+			delete(s.owned, n.Owner)
+		}
+	}
+}
+
+// add adds v to the set of key in sets.
+func add(sets map[string]map[string]struct{}, key, v string) {
+	set := sets[key]
+	if set == nil {
+		set = map[string]struct{}{}
+		sets[key] = set
+	}
+	set[v] = struct{}{}
+}
+
+// remove removes v from the set of key in sets, and the set when it is
+// empty.
+func remove(sets map[string]map[string]struct{}, key, v string) {
+	set := sets[key]
+	delete(set, v)
+	if len(set) == 0 {
+		delete(sets, key)
+	}
 }
 
 func (s *memStore) Delete(_ context.Context, href string) error {
@@ -120,28 +183,34 @@ func (s *memStore) Delete(_ context.Context, href string) error {
 	if _, ok := s.nodes[href]; !ok {
 		return ErrNoNode
 	}
-	doomed := map[string]bool{href: true}
-	for changed := true; changed; {
-		changed = false
-		for h, n := range s.nodes {
-			if !doomed[h] && doomed[n.Parent] {
-				doomed[h] = true
-				changed = true
+	// The node and what was created in it, a parent before its children.
+	doomed := []string{href}
+	seen := map[string]struct{}{href: {}}
+	for i := 0; i < len(doomed); i++ {
+		for kid := range s.kids[doomed[i]] {
+			if _, ok := seen[kid]; !ok {
+				seen[kid] = struct{}{}
+				doomed = append(doomed, kid)
 			}
 		}
 	}
-	for h := range doomed {
+	for _, h := range doomed {
+		s.visited++
+		s.unlink(s.nodes[h])
 		delete(s.nodes, h)
+		// Its items are in one list fewer: a list goes before the items
+		// created in it, which then have no membership left to undo.
+		for _, m := range s.members[h] {
+			remove(s.lists, m, h)
+		}
 		delete(s.members, h)
-	}
-	for list, ms := range s.members {
-		kept := ms[:0]
-		for _, m := range ms {
-			if !doomed[m] {
-				kept = append(kept, m)
+		for list := range s.lists[h] {
+			ms := s.members[list]
+			if i := slices.Index(ms, h); i >= 0 {
+				s.members[list] = append(ms[:i:i], ms[i+1:]...)
 			}
 		}
-		s.members[list] = kept
+		delete(s.lists, h)
 	}
 	return nil
 }
@@ -155,10 +224,11 @@ func (s *memStore) AddMember(_ context.Context, list, member string) error {
 	if _, ok := s.nodes[member]; !ok {
 		return ErrNoNode
 	}
-	if slices.Contains(s.members[list], member) {
+	if _, ok := s.lists[member][list]; ok {
 		return nil
 	}
 	s.members[list] = append(s.members[list], member)
+	add(s.lists, member, list)
 	return nil
 }
 
@@ -169,10 +239,18 @@ func (s *memStore) RemoveMember(_ context.Context, list, member string) error {
 	for i, m := range ms {
 		if m == member {
 			s.members[list] = append(ms[:i:i], ms[i+1:]...)
+			remove(s.lists, member, list)
 			return nil
 		}
 	}
 	return ErrNoNode
+}
+
+// CountOwned returns the number of nodes of owner.
+func (s *memStore) CountOwned(_ context.Context, owner string) (int, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.owned[owner], nil
 }
 
 func (s *memStore) Members(_ context.Context, list string) ([]*Node, error) {

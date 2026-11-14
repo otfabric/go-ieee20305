@@ -93,6 +93,16 @@ Where the standard leaves room, the library takes these decisions:
 - **Notification URIs are guarded.** The server does not post to loopback,
   link-local, multicast or unspecified addresses unless
   `NotificationURIAllowed` says so.
+- **The events of a poll are resolved together.** An agent reads the
+  events of a function set, forgets those the server no longer lists, and
+  then decides by primacy and creation time among all it has: the outcome
+  does not depend on the order of the server's lists.
+- **A DERProgram a client posts to an AssociatedDERProgramList** (a POST
+  the WADL makes optional) is kept as a DERProgram of that list, without
+  lists of controls or curves of its own.
+- **A device owns a bounded number of resources.** A request that would
+  create one beyond `server.Config.MaxDeviceResources` is answered 403; the
+  standard names no status for it.
 
 ## Known deviations
 
@@ -103,6 +113,10 @@ Where the standard leaves room, the library takes these decisions:
   does not join.
 - **The server keeps no history beyond its Store**: ended events are pruned
   after `EventRetention`, and capped lists drop their oldest items.
+- **An agent follows a bounded number of events**: 1000 of a function set
+  by default (`agent.Config.MaxEvents`). Of the events a server lists
+  beyond that, it keeps those it has and leaves out new ones in the order
+  of the lists. A negative `MaxEvents` removes the bound.
 
 ## Verification status
 

@@ -4,9 +4,11 @@ package discovery
 
 import (
 	"fmt"
+	"maps"
 	"net"
 	"net/netip"
 	"net/url"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -60,7 +62,8 @@ type Service struct {
 	// Addrs are the IPv4 and IPv6 addresses of Host.
 	Addrs []netip.Addr
 	// TXT holds the key/value pairs of the TXT record; keys are in lower
-	// case and a key without "=" has the empty value.
+	// case and a key without "=" has the empty value. In a Service that
+	// Browse delivers, the map and the slices are the receiver's.
 	TXT map[string]string
 	// Subtypes are the function-set subtypes the service is announced
 	// under, such as "_derp" or "_edev".
@@ -68,6 +71,14 @@ type Service struct {
 	// Removed is set on a Service that Browse delivers when the server
 	// withdrew it with a goodbye or its records expired.
 	Removed bool
+}
+
+// own returns s with a TXT map and slices of its own.
+func (s Service) own() Service {
+	s.TXT = maps.Clone(s.TXT)
+	s.Addrs = slices.Clone(s.Addrs)
+	s.Subtypes = slices.Clone(s.Subtypes)
+	return s
 }
 
 // DcapURL returns the URL of the server's DeviceCapability resource:

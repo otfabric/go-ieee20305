@@ -84,7 +84,11 @@ func (a *Agent) mirror(ctx context.Context) {
 	// maxPendingReadings of them, the oldest dropped first.
 	var pending []ieee20305.MirrorMeterReading
 	for {
-		readings, err := a.cfg.Readings(ctx)
+		var readings []ieee20305.MirrorMeterReading
+		err := a.call("Config.Readings", func() (err error) {
+			readings, err = a.cfg.Readings(ctx)
+			return err
+		})
 		if err != nil {
 			a.log.Warnf("reading the meter: %v", err)
 		}
@@ -159,7 +163,7 @@ func (a *Agent) pollFiles(ctx context.Context, fsas []*ieee20305.FunctionSetAssi
 			if seen {
 				continue
 			}
-			if err := a.cfg.OnFile(ctx, f); err != nil {
+			if err := a.call("Config.OnFile", func() error { return a.cfg.OnFile(ctx, f) }); err != nil {
 				return err
 			}
 			a.mu.Lock()

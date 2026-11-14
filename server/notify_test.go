@@ -161,7 +161,11 @@ func TestNotificationRefused(t *testing.T) {
 		w.WriteHeader(status)
 	}))
 	defer sink.Close()
-	h := newHarness(t, server.Config{NotificationClient: sink.Client(), NotificationURIAllowed: allowAll,
+	// delivered gets the error of each delivery, once it has ended.
+	delivered := make(chan error, 16)
+	m := &hooks{}
+	m.delivery = func(err error) { delivered <- err }
+	h := newHarness(t, server.Config{NotificationClient: sink.Client(), NotificationURIAllowed: allowAll, Metrics: m,
 		NotificationRetry: ieee20305.ExponentialBackoff{Initial: time.Millisecond, Attempts: -1}}, "dev")
 	ctx := context.Background()
 	ed, err := h.srv.Admin().ProvisionDevice(ctx, server.DeviceSpec{LFDI: h.id("dev")})
@@ -183,6 +187,9 @@ func TestNotificationRefused(t *testing.T) {
 	}
 	status, calls = http.StatusBadGateway, 0
 	mu.Unlock()
+	if err := <-delivered; err == nil {
+		t.Error("the delivery a 410 refused ended without an error")
+	}
 	// A 5xx: tried again until it passes.
 	sub = subscribe()
 	if _, err := h.srv.Admin().AssignFSA(ctx, h.id("dev"), examples.FunctionSetAssignments(0)); err != nil {
@@ -192,7 +199,16 @@ func TestNotificationRefused(t *testing.T) {
 	mu.Lock()
 	status = http.StatusCreated
 	mu.Unlock()
-	time.Sleep(50 * time.Millisecond)
+	// The delivery ends when the receiver takes it: without an error, and
+	// with its subscription kept.
+	select {
+	case err := <-delivered:
+		if err != nil {
+			t.Errorf("the delivery ended with %v after the receiver came back", err)
+		}
+	case <-time.After(within):
+		t.Fatal("the delivery did not end after the receiver came back")
+	}
 	if _, err := h.srv.Admin().Get(ctx, sub); err != nil {
 		t.Errorf("a subscription whose receiver came back is gone: %v", err)
 	}

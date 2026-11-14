@@ -16,8 +16,11 @@ import (
 //
 // The methods are called synchronously from the goroutines that serve the
 // requests: they must be safe for concurrent use, quick, and must not
-// block. Embed NopMetrics to implement only some. A Metrics may also be a
-// NotificationMetrics and an EventMetrics.
+// block. They may call the methods of the Server, Close included. A method
+// that does not return normally is stopped there: the server logs that at
+// Error level with the stack, and answers the request as if the method had
+// returned. Embed NopMetrics to implement only some. A Metrics may also be
+// a NotificationMetrics and an EventMetrics.
 type Metrics interface {
 	OnRequest(method string)
 	OnResponse(method, resource string, status int, d time.Duration)
@@ -27,7 +30,9 @@ type Metrics interface {
 // each delivery to a subscriber (the WADL resource ID of the subscribed
 // resource, how long it took, and its error, after retries), and each
 // subscription the server cancels, with the status of the cancellation it
-// sent (or would have).
+// sent (or would have). Its methods are called on the goroutine that
+// delivers the notifications of the subscription, under the rules of
+// Metrics.
 type NotificationMetrics interface {
 	Metrics
 	OnNotification(resource string, d time.Duration, err error)
@@ -37,6 +42,9 @@ type NotificationMetrics interface {
 // EventMetrics is a Metrics that is also told of the transitions of the
 // events of the server (DERControls, EndDeviceControls, ...) that change
 // their EventStatus: the document element of the event, and its states.
+// OnEventTransition is called on the one goroutine that writes the states
+// of the events, before the state is written, under the rules of Metrics:
+// while it runs, no other state is written.
 type EventMetrics interface {
 	Metrics
 	OnEventTransition(element string, from, to schedule.Status)

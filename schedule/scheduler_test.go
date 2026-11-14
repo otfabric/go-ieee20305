@@ -4,12 +4,13 @@ package schedule
 
 import (
 	"fmt"
-	"runtime"
 	"slices"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/otfabric/go-ieee20305/internal/leakcheck"
 )
 
 var t0 = time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -25,55 +26,52 @@ func ev(mrid string, primacy uint8, created, start, dur int) Event {
 	return Event{MRID: mrid, Primacy: primacy, Created: at(created), Start: at(start), Duration: secs(dur)}
 }
 
-// recorder collects the transitions of a subscription.
+// recorder collects the transitions of a subscription. The tests drive the
+// Scheduler from their own goroutine on a fakeClock, so once a call has
+// returned, every transition it made is queued for the subscriber.
 type recorder struct {
-	mu sync.Mutex
-	ts []Transition
+	sub *subscriber
+	ts  []Transition
 }
 
 func record(s *Scheduler) *recorder {
-	r := &recorder{}
-	ch, _ := s.Subscribe()
-	go func() {
-		for t := range ch {
-			r.mu.Lock()
-			r.ts = append(r.ts, t)
-			r.mu.Unlock()
-		}
-	}()
-	return r
+	sub, _ := s.subscribe()
+	return &recorder{sub: sub}
 }
 
-// wait returns the transitions once there are n of them, and fails if more
-// arrive shortly after.
+// wait reads transitions until there are n of them, and fails if more are
+// queued or being delivered then.
 func (r *recorder) wait(t *testing.T, n int) []Transition {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		r.mu.Lock()
-		got := len(r.ts)
-		r.mu.Unlock()
-		if got >= n {
-			break
+	timeout := time.After(5 * time.Second)
+	for len(r.ts) < n {
+		select {
+		case tr, ok := <-r.sub.ch:
+			if !ok {
+				t.Fatalf("subscription ended at %d transitions, want %d: %s", len(r.ts), n, r.string())
+			}
+			r.ts = append(r.ts, tr)
+		case <-timeout:
+			t.Fatalf("got %d transitions, want %d: %s", len(r.ts), n, r.string())
 		}
-		if time.Now().After(deadline) {
-			t.Fatalf("got %d transitions, want %d: %s", got, n, r.String())
-		}
-		time.Sleep(time.Millisecond)
 	}
-	time.Sleep(5 * time.Millisecond)
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if len(r.ts) != n {
-		t.Fatalf("got %d transitions, want %d: %s", len(r.ts), n, r.string())
+	if more := r.sub.pending(n); more > 0 {
+		t.Fatalf("got %d transitions, want %d: %s and %d more", n+more, n, r.string(), more)
 	}
 	return slices.Clone(r.ts)
 }
 
-func (r *recorder) String() string {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return r.string()
+// pending returns the transitions sub has not delivered to a reader that
+// received n: those queued, and one it has taken from the queue unless that
+// is the nth, which it delivered and has not counted yet.
+func (sub *subscriber) pending(n int) int {
+	sub.mu.Lock()
+	defer sub.mu.Unlock()
+	more := len(sub.queue)
+	if sub.sending && sub.sent >= n {
+		more++
+	}
+	return more
 }
 
 func (r *recorder) string() string { return describe(r.ts) }
@@ -700,7 +698,7 @@ func TestSystemClockScheduler(t *testing.T) {
 }
 
 func TestConcurrency(t *testing.T) {
-	before := runtime.NumGoroutine()
+	leakcheck.Check(t)
 	for _, fake := range []bool{true, false} {
 		clock := SystemClock
 		var fc *fakeClock
@@ -770,13 +768,5 @@ func TestConcurrency(t *testing.T) {
 		close(stop)
 		s.Close()
 		wg.Wait()
-	}
-	deadline := time.Now().Add(5 * time.Second)
-	for runtime.NumGoroutine() > before {
-		if time.Now().After(deadline) {
-			buf := make([]byte, 1<<16)
-			t.Fatalf("%d goroutines before, %d after:\n%s", before, runtime.NumGoroutine(), buf[:runtime.Stack(buf, true)])
-		}
-		time.Sleep(time.Millisecond)
 	}
 }
