@@ -8,10 +8,10 @@ implementations are in [INTEROPERABILITY.md](INTEROPERABILITY.md).
 
 | Tier | Command | Needs | In CI |
 |---|---|---|---|
-| Unit | `make test` | Go | every push and pull request |
+| Unit | `make test` | Go | every pull request |
 | End-to-end | `make e2e` | Go | through `make test`, as `e2e` is one of the library test packages |
-| Shuffled, twice | `make stress` | Go | every push and pull request (job Race and shuffle) |
-| Coverage | `make coverage-gate` | Go | every push and pull request (job Coverage gate) |
+| Shuffled, twice | `make stress` | Go | every pull request (job Race and shuffle) |
+| Coverage | `make coverage-gate` | Go | every pull request (job Coverage gate) |
 | Fuzz | `make fuzz` | Go | 10 s per target in CI; 5 min per target nightly (Fuzz workflow) |
 | Benchmarks | `make bench` | Go | not run |
 | Cross-compilation | `make cross` | Go | not run by this repository's workflows |
@@ -19,7 +19,7 @@ implementations are in [INTEROPERABILITY.md](INTEROPERABILITY.md).
 | Generated code | `make generate-verify`, `make generate-check` | network for `generate-check` | job Generated code |
 | Feature matrix | `make features` | Go | job Generated code |
 | tlsccm | `make test-tlsccm` | Go 1.26.8, staticcheck, golangci-lint, govulncheck | job tlsccm |
-| Interop | `make interop` | Docker, staticcheck, golangci-lint | every push and pull request (Interop workflow) |
+| Interop | `make interop` | Docker, staticcheck, golangci-lint | every pull request (Interop workflow) |
 
 `make check` is the local gate: format, `nodeps`, `features`,
 `generate-verify`, lint, vet, govulncheck, tests, the coverage gate and tlsccm.
@@ -104,3 +104,15 @@ A failing input lands in the target's `testdata/fuzz/<target>/` directory. The
 Fuzz workflow keeps such inputs as the artifact `fuzz-failures`. To make one a
 regression test, fix the bug and commit the input in that directory: `go test`
 then runs it on every pass.
+
+## When CI runs
+
+| Event | Workflow | What runs |
+|---|---|---|
+| Pull request | `pr.yml` | `docs.yml` (docsync, otfabric-policy) always; `ci.yml`, `interop.yml` unless every changed file is documentation; then `OT Fabric Required Checks` |
+| Push to a branch | none | nothing; dispatch `ci.yml`, `interop.yml` to test a branch without a pull request |
+| Push to `main` | `docs.yml` | the light checks; the merged commit was tested as the pull request's merge commit |
+| Schedule | `fuzz.yml`, `schema-updates.yml` | the scheduled runs, on `main` |
+| Release | `release.yml` | the release workflow tests the release commit again |
+
+Documentation means an added or modified `*.md` file outside `.github/`, `testdata/` and `vendor/`, other than `AGENTS.md` and `CLAUDE.md`. A deleted or renamed document, or any other file, runs everything. `OT Fabric Required Checks` fails unless every job that applies succeeded; its summary lists them.
