@@ -65,7 +65,7 @@ func (a *Admin) Create(ctx context.Context, list string, v any, owner string) (s
 			return "", fmt.Errorf("%w: %s: %v", ieee20305.ErrInvalid, list, err)
 		}
 	}
-	return a.s.createItem(ctx, n, v, owner)
+	return a.s.createItem(ctx, n, v, owner, false)
 }
 
 // AddMember makes the resource at member an item of the list at list too.

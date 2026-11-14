@@ -35,8 +35,10 @@ present a certificate, and each verifies the other's chain.
 
 - `security.ClientTLSConfig`, `ServerTLSConfig` and `NotificationTLSConfig`
   verify chains with `security.Verify` against the pool you give them, and
-  never against the system's roots: a nil pool is an error
-  (`ErrConfiguration`), not a fallback. Give a device the CA of its
+  never against the system's roots. A nil pool is not a fallback: the
+  configurations take it, and every handshake then fails with an error
+  that matches `ErrCertificate`. Only `tlsccm.NewListener` refuses a nil
+  pool at once, with `ErrConfiguration`. Give a device the CA of its
   utility's servers, and a server the CA of its devices, nothing wider.
 - Verification cannot be turned off through this library. The configurations
   set `InsecureSkipVerify` only to replace the verification of crypto/tls,
@@ -77,9 +79,11 @@ control the device.
   `InBandRegistration` off unless unknown devices must register themselves;
   an in-band device is not registered until `Admin.Register` is called.
 - **Request limits.** `Config.MaxRequestBytes` bounds a request body,
-  `MaxLimit` a page of a list, and `MaxListItems` the lists devices post to
-  (LogEvents, Responses, readings), so that a device cannot grow the server
-  without bound. Ended events are pruned after `EventRetention`.
+  `MaxLimit` a page of a list, `MaxListItems` the lists devices post to
+  (LogEvents, Responses, readings), and `MaxDeviceResources` all that one
+  device owns, so that a device cannot grow the server without bound.
+  Ended events are pruned after `EventRetention`. The limits and their
+  defaults are in the table under [Limits](#limits).
 - **Notifications are outbound requests** to a URI the device chooses. The
   default `NotificationURIAllowed` refuses loopback, link-local, multicast
   and unspecified addresses (also with an IPv6 zone), and hosts whose last
@@ -104,13 +108,55 @@ control the device.
   default port) are refused.
 - `Config.MaxResponseBytes` bounds a response, and `MaxListItems` what
   `Iterate` reads from a list.
+- `agent.Config.MaxEvents` bounds the events an agent keeps of a function
+  set, and with them the transitions that wait for a handler.
+- The client decodes what a server sends and does not check it against
+  the schema (see Input handling): validate the documents you act on.
 - A `client.NotificationHandler` should check the sender: set
   `NotificationConfig.Authorize` to accept only the server's certificate.
 
 ### Input handling
 
-Every document from the network is decoded into the generated types and
-checked against the schema's facets and cardinalities (`Validate`). The
-codecs, the server's handler, HardwareModuleNames, the scheduler, DNS
-messages and hrefs have fuzz targets (`make fuzz`), run nightly in CI.
-Documents in another XML namespace are refused.
+Every document from the network is decoded into the generated types.
+Documents in another XML namespace are refused. The server also checks
+the document of every PUT and POST against the schema's facets and
+cardinalities (`Validate`) and answers 400 to one that fails. The client
+does not: `Get`, `Fetch`, `Iterate`, `Walk` and a `NotificationHandler`
+hand over what decodes, also a document whose `Validate` returns an
+error. An application that needs the schema's bounds on what a server
+sends calls `Validate` on it. The codecs, the server's handler,
+HardwareModuleNames, the scheduler, DNS messages and hrefs have fuzz
+targets (`make fuzz`), run nightly in CI.
+
+### Limits
+
+What bounds the input of a peer, and the work and memory it can cause. A
+limit of zero in a configuration means the default.
+
+| Limit | Default | What happens beyond it |
+|---|---|---|
+| `server.Config.MaxRequestBytes`: the body of a request | 1 MiB | 413 |
+| `server.Config.MaxLimit`: the items of a list page (`l`) | 255 | the page has `MaxLimit` items |
+| `s`, `l` of a list request | 0 to 2^32-1 | 400 outside; a start beyond the list gives an empty page |
+| `server.Config.MaxListItems`: a list clients post to | 1000 | the oldest items are deleted; none when negative |
+| `server.Config.MaxDeviceResources`: the resources one device owns | 100 × `MaxListItems` (100000) | 403, counted in `Server.Stats`; none when negative |
+| `server.Config.NotificationWorkers`: notifications sent at once | 16 | the others wait |
+| `server.Config.NotificationCancelAfter`: a subscription whose notifications fail | 24 h | the subscription is cancelled |
+| The answer of a notification's receiver | 64 KiB read | the rest is not read |
+| `server.Config.EventRetention`: an ended event in the server's scheduler | 24 h | forgotten (it stays in the store) |
+| `client.Config.MaxResponseBytes`: the body of a response | 1 MiB | `ErrProtocol` |
+| `client.Config.MaxListItems`: the items `Iterate`, `Walk` and `FindEndDevice` read of a list | 100000 | `ErrProtocol` |
+| `client.WalkOptions.MaxResources`, `MaxDepth`: a `Walk` | 4096 resources, 8 levels | `ErrProtocol` beyond the resources; deeper links are not followed |
+| Redirects of a request, within the server | 10 | `ErrProtocol` |
+| `client.NotificationConfig.MaxBytes`: a notification | 1 MiB | 413 |
+| `client.NotificationConfig.MaxSubscriptions`: subscriptions whose last notification the handler remembers | 1000 | the least recently notified is forgotten |
+| `agent.Config.MaxEvents`: the events of a function set | 1000 (`schedule.DefaultMaxEvents`) | new events are left out, logged and counted in `Agent.EventStats`; none when negative |
+| `schedule.Options.QueueSize`: transitions that wait for a subscriber (an agent's handler) | 4 × `MaxEvents` | the queue keeps the latest transition of each event, then drops the oldest; counted in `Stats` |
+| Responses and readings an agent keeps to send again | 1000 each | the Response is dropped; the oldest readings are dropped |
+| Instances, and hosts, in the cache of `discovery.Browse` | 1024 each | records of new ones are dropped until records expire |
+| Addresses of one host in that cache | 16 | further addresses are dropped |
+| A DNS name, a label, a message | 255 octets, 63 octets, 9000 octets | the message is dropped |
+
+Tests hold these bounds: the hostile-peer tests of each package, and
+allocation budgets for the bodies and for lists that claim 2^32-1 items
+([TESTING.md](TESTING.md)).

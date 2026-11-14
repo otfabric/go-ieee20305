@@ -13,6 +13,7 @@ import (
 	"time"
 
 	ieee20305 "github.com/otfabric/go-ieee20305"
+	"github.com/otfabric/go-ieee20305/internal/callback"
 	"github.com/otfabric/go-ieee20305/internal/dnsmsg"
 )
 
@@ -72,6 +73,10 @@ type BrowseOptions struct {
 // Browse delivers it again with Removed set. Instances whose TXT record
 // has no dcap key are ignored, as the standard requires.
 //
+// Each Service delivered is the receiver's: its TXT map and its slices are
+// shared neither with the browser nor with another Service it delivers, so
+// the receiver may keep and change them.
+//
 // Browsing goes on until ctx is done; then the channel is closed.
 func Browse(ctx context.Context, o BrowseOptions) (<-chan Service, error) {
 	t := o.Transport
@@ -84,7 +89,7 @@ func Browse(ctx context.Context, o BrowseOptions) (<-chan Service, error) {
 	b := &browser{
 		t:        t,
 		ifi:      o.Interface,
-		log:      ieee20305.ComponentLogger(o.Logger, "discovery"),
+		log:      callback.Guard(ieee20305.ComponentLogger(o.Logger, "discovery")),
 		queries:  map[string]string{},
 		ptr:      map[string]map[string]time.Time{},
 		srv:      map[string]srvEntry{},
@@ -210,14 +215,24 @@ func (b *browser) run(ctx context.Context, out chan<- Service) {
 			b.expire(now)
 			pending = b.reconcile(now)
 		}
-		for _, s := range pending {
-			select {
-			case out <- s:
-			case <-ctx.Done():
-				return
-			}
+		if !b.deliver(ctx, out, pending) {
+			return
 		}
 	}
+}
+
+// deliver sends the services to the receiver, each with a TXT map and
+// slices of its own, and reports whether ctx is still live: the browser
+// goes on comparing what it holds with what it delivered.
+func (b *browser) deliver(ctx context.Context, out chan<- Service, pending []Service) bool {
+	for _, s := range pending {
+		select {
+		case out <- s.own():
+		case <-ctx.Done():
+			return false
+		}
+	}
+	return true
 }
 
 // handle caches the records of a response and returns the services to

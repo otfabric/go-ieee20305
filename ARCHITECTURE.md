@@ -117,6 +117,11 @@ Superseded), under the event's node lock so that an operator's PUT and a
 status change do not lose each other. Ended events are pruned after
 `EventRetention`.
 
+**Resources of a device** (`device.go`, `store.go`): what clients create
+counts against `MaxDeviceResources` of the device that owns it. The memory
+store counts the nodes of each owner, and indexes the nodes by parent and
+by list, so that a deletion looks only at what it removes.
+
 **Responses and metering** (`metering.go`): a Response is stored once per
 device, event and status (`OnResponse` is told once). A MirrorUsagePoint
 becomes a UsagePoint; MirrorMeterReadings become MeterReadings, ReadingTypes,
@@ -144,16 +149,22 @@ An `agent.Agent` runs on a `client.Client`:
    the server's pollRate (slower when subscribed), with `Backoff` on
    failures. Errors that waiting does not fix (4xx, certificates,
    configuration) end `Run`.
-3. Per function set, an event set (`events.go`) upserts the events it reads
-   into its own `schedule.Scheduler`, with randomization and the function
-   set's conflict rule, and passes each transition to the handler
-   (`OnDERControl`, …).
+3. Per function set, an event set (`events.go`) reads the events of a poll
+   and gives them together to its own `schedule.Scheduler` (at most
+   `MaxEvents` of them), with randomization and the function set's
+   conflict rule. A goroutine per function set passes each transition to
+   the handler (`OnDERControl`, …), from a queue of bounded length.
 4. The Responses the events ask for go through a queue that retries
    failures and drops what the server refuses with a 4xx.
 5. Metering (`metering.go`) creates the mirror once and posts readings at
    `PostRate`, buffering a bounded number while the server fails.
 6. With `NotificationURI` (`subscribe.go`), the agent subscribes to its
    FSAs, programs and controls, and a notification wakes the poll loop.
+7. `Close` ends `Run`, the scheduling and the handlers, and waits for
+   them, unless a handler called it: it knows its goroutines by their
+   identifiers (`internal/goid`). Handlers and `Metrics` are called
+   through `internal/callback`, which stops and logs one that does not
+   return normally.
 
 ## Testing
 

@@ -4,7 +4,7 @@
 
 .DEFAULT_GOAL := help
 
-.PHONY: tlsccm-upstream help all build fmt fmt-check lint lint-ci vet vuln test stress coverage coverage-pkg-check cover fuzz check clean interop test-interop test-tlsccm e2e features nodeps bench cross download schemas generate generate-verify generate-check check-updates docs-check
+.PHONY: tlsccm-upstream help all build fmt fmt-check lint lint-ci vet vuln test stress coverage coverage-pkg-check cover fuzz fuzz-targets check clean interop test-interop test-tlsccm e2e features nodeps bench cross download schemas generate generate-verify generate-check check-updates docs-check
 help: ## This help
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z0-9_-]+:.*?## / {printf "\033[36m%-30s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
@@ -134,14 +134,25 @@ cross: ## Cross-compile the module without cgo for the supported platforms (the 
 
 # Duration each fuzz target runs. Override with FUZZTIME=... (e.g. FUZZTIME=5m).
 FUZZTIME ?= 30s
-# The fuzz targets, as <package>:<target>.
-FUZZ_TARGETS := ./server:FuzzHandler ./security:FuzzHardwareModuleName ./schedule:FuzzResolve ./internal/dnsmsg:FuzzParse \
-	.:FuzzDecode ./csipaus:FuzzDecode ./client:FuzzResolve \
-	./client:FuzzWalk ./client:FuzzNotificationHandler ./discovery:FuzzBrowse
+# The fuzz targets to run, as <package>:<target>: when empty, every Fuzz
+# function of the library packages, as `make fuzz-targets` finds them with
+# `go test -list`. Set it to run only some.
+FUZZ_TARGETS ?=
+
+fuzz-targets: ## List every fuzz target of the library packages, as <package>:<target>
+	@for pkg in $(TEST_PKGS); do \
+		names="$$(go test -list '^Fuzz' "$$pkg")" || { echo "$$pkg: cannot list the fuzz targets" >&2; exit 1; }; \
+		for name in $$names; do \
+			case "$$name" in Fuzz*) echo "$$pkg:$$name";; esac; \
+		done; \
+	done
 
 fuzz: ## Run the fuzz targets for FUZZTIME each (default 30s)
 	@echo "Fuzzing (FUZZTIME=$(FUZZTIME))"
-	@for t in $(FUZZ_TARGETS); do \
+	@targets="$(FUZZ_TARGETS)"; \
+	if [ -z "$$targets" ]; then targets="$$($(MAKE) -s --no-print-directory fuzz-targets)" || exit 1; fi; \
+	[ -n "$$targets" ] || { echo "No fuzz target found"; exit 1; }; \
+	for t in $$targets; do \
 		pkg=$${t%%:*}; name=$${t##*:}; \
 		echo "$$pkg $$name"; \
 		go test -run '^$$' -fuzz "^$$name$$" -fuzztime $(FUZZTIME) "$$pkg" || exit 1; \

@@ -248,12 +248,12 @@ posts. `go run ./examples/quickstart` runs both sides in one process.
 
 | Feature | How | Notes |
 |---------|-----|-------|
-| Cancellation | `context.Context` on every call of the client, agent and Admin | `Agent.Close` cancels what the agent has in flight |
-| Retries | `ieee20305.RetryPolicy`: `client.Config.RetryPolicy`, `agent.Config.Backoff`, `server.Config.NotificationRetry` | `ExponentialBackoff` with full jitter honours `Retry-After`; the client does not repeat a POST unless `RetryPOST` is set; 4xx are never retried |
+| Cancellation | `context.Context` on every call of the client, agent and Admin | `Agent.Close` cancels what the agent has in flight and ends `Run` with `ErrClosed` |
+| Retries | `ieee20305.RetryPolicy`: `client.Config.RetryPolicy`, `agent.Config.Backoff`, `server.Config.NotificationRetry` | `ExponentialBackoff` with jitter (a delay between half the backoff and the whole) honours `Retry-After`; the client does not repeat a POST unless `RetryPOST` is set; 4xx are never retried |
 | Structured logging | `ieee20305.NewSlogLogger`, `NewStdLogger`, or any `ieee20305.Logger` | A `component` field per package; silent by default |
-| Metrics hooks | `client.Metrics`, `server.Metrics`, `agent.Metrics`, and the optional `AttemptMetrics`, `NotificationMetrics`, `EventMetrics` | Synchronous, no dependencies; a Prometheus adapter is a few lines ([OBSERVABILITY.md](OBSERVABILITY.md)) |
+| Metrics hooks | `client.Metrics`, `server.Metrics`, `agent.Metrics`, and the optional `AttemptMetrics`, `NotificationMetrics`, `EventMetrics` | Synchronous, no dependencies; a Prometheus adapter is a few lines. A hook or handler that does not return normally is logged, and the library goes on ([OBSERVABILITY.md](OBSERVABILITY.md)) |
 | Subscriptions | `client.Subscribe`, `client.NewNotificationHandler`; `agent.Config.NotificationURI`; `server.Config.NotificationClient` | Notifications are coalesced, retried with backoff and cancelled after `NotificationCancelAfter`; `NotificationURIAllowed` guards the URIs devices choose |
-| Bounded resources | `server.Config.MaxListItems`, `EventRetention`; `client.Config.MaxListItems`; capped agent queues | Lists that devices post to keep their newest items; ended events are pruned |
+| Bounded resources | `server.Config.MaxListItems`, `MaxDeviceResources`, `EventRetention`; `client.Config.MaxListItems`; `agent.Config.MaxEvents` | Lists that devices post to keep their newest items, and a device owns a bounded number of resources; ended events are pruned; an agent keeps a bounded number of events and of transitions that wait for a handler. The limits are in one table in [SECURITY.md](SECURITY.md#limits) |
 | Persistence | `server.Config.Store` | In memory by default; a `Store` keeps the resources elsewhere |
 | CCM_8 | module `tlsccm`: `NewHTTPClient`, `NewListener` | Interoperates with GridAPPS-D and EPRI, which offer nothing else |
 

@@ -21,6 +21,7 @@ import (
 	"time"
 
 	ieee20305 "github.com/otfabric/go-ieee20305"
+	"github.com/otfabric/go-ieee20305/internal/callback"
 	"github.com/otfabric/go-ieee20305/security"
 )
 
@@ -117,7 +118,7 @@ func New(cfg Config) (*Client, error) {
 	if c.maxBytes <= 0 {
 		c.maxBytes = defaultMaxResponseBytes
 	}
-	c.log = ieee20305.ComponentLogger(cfg.Logger, "client")
+	c.log = callback.Guard(ieee20305.ComponentLogger(cfg.Logger, "client"))
 	c.retry, c.retryPOST, c.metrics = cfg.RetryPolicy, cfg.RetryPOST, cfg.Metrics
 	if c.metrics == nil {
 		c.metrics = NopMetrics{}
@@ -352,14 +353,37 @@ func (c *Client) do(ctx context.Context, method, href string, q url.Values, body
 		}
 	}
 	start := time.Now()
-	c.metrics.OnRequest(method, u.Path)
+	c.onRequest(method, u.Path)
 	resp, out, err := c.attempts(ctx, method, u, data)
 	if err != nil {
-		c.metrics.OnError(method, u.Path, time.Since(start), err)
+		c.onError(method, u.Path, time.Since(start), err)
 	} else {
-		c.metrics.OnResponse(method, u.Path, resp.StatusCode, time.Since(start))
+		c.onResponse(method, u.Path, resp.StatusCode, time.Since(start))
 	}
 	return resp, out, err
+}
+
+// onRequest, onResponse, onError and onRetry call the Metrics of the
+// application: a method that does not return normally is stopped here and
+// logged, and the call of the client goes on as if it had returned.
+func (c *Client) onRequest(method, path string) {
+	defer callback.Rescue(c.log, "Metrics.OnRequest")
+	c.metrics.OnRequest(method, path)
+}
+
+func (c *Client) onResponse(method, path string, status int, d time.Duration) {
+	defer callback.Rescue(c.log, "Metrics.OnResponse")
+	c.metrics.OnResponse(method, path, status, d)
+}
+
+func (c *Client) onError(method, path string, d time.Duration, err error) {
+	defer callback.Rescue(c.log, "Metrics.OnError")
+	c.metrics.OnError(method, path, d, err)
+}
+
+func (c *Client) onRetry(am AttemptMetrics, method, path string, attempt int, err error, wait time.Duration) {
+	defer callback.Rescue(c.log, "AttemptMetrics.OnRetry")
+	am.OnRetry(method, path, attempt, err, wait)
 }
 
 // attempts sends a request, again as the RetryPolicy says.
@@ -377,7 +401,7 @@ func (c *Client) attempts(ctx context.Context, method string, u *url.URL, data [
 			return nil, nil, err
 		}
 		if am, ok := c.metrics.(AttemptMetrics); ok {
-			am.OnRetry(method, u.Path, attempt, err, wait)
+			c.onRetry(am, method, u.Path, attempt, err, wait)
 		}
 		c.log.Debugf("%s %s: attempt %d failed, again in %v: %v", method, u.Path, attempt+1, wait, err)
 		t := time.NewTimer(wait)

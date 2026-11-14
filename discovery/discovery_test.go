@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/otfabric/go-ieee20305/internal/dnsmsg"
+	"github.com/otfabric/go-ieee20305/internal/leakcheck"
 )
 
 func init() {
@@ -158,8 +159,11 @@ func TestBrowseCancelWhileDelivering(t *testing.T) {
 	b := newBus()
 	advertise(t, b, meter("m", 1))
 	ch, _, cancel := browse(t, b, BrowseOptions{})
-	// Nobody reads ch; cancelling must still end the browser.
-	time.Sleep(100 * time.Millisecond)
+	// Nobody reads ch; cancelling must still end the browser, once it
+	// waits for a receiver.
+	if !leakcheck.WaitBlocked("discovery.(*browser).deliver(", 10*time.Second) {
+		t.Fatal("the browser did not come to deliver the service")
+	}
 	cancel()
 	deadline := time.After(5 * time.Second)
 	for {

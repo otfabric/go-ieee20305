@@ -37,10 +37,12 @@ What is logged:
 |---|---|---|---|
 | Debug | every request: method, path, device LFDI, status, duration; refused requests with their reason | every request: method, path, status or error, duration; retries | — |
 | Info | devices provisioned and registered; subscriptions created | — | started; waiting for registration |
-| Warn | each failed notification attempt; lists trimmed | — | failures it retries; Responses or readings dropped |
-| Error | 5xx answers; event statuses it cannot write | — | the error that stops `Run` |
+| Warn | each failed notification attempt; lists trimmed | — | failures it retries; Responses or readings dropped; events left out beyond `MaxEvents` |
+| Error | 5xx answers; event statuses it cannot write; a `Metrics` method that did not return normally | a `Metrics` method that did not return normally | the error that stops `Run`; a handler or `Metrics` method that did not return normally |
 
-A Logger is called from many goroutines and must not block.
+A Logger is called from many goroutines and must not block. A Logger
+method that does not return normally loses its entry, and the library goes
+on (see [Callbacks](#callbacks)).
 
 ## Metrics
 
@@ -90,6 +92,16 @@ OnEvent(fs agent.FunctionSet, t schedule.Transition)
 OnResponse(fs agent.FunctionSet, status uint8, err error)
 ```
 
+### Counters
+
+What a limit leaves out is counted where it happens, and read on demand:
+
+| Call | Counts |
+|---|---|
+| `Agent.EventStats(fs)` | `Refused`: the events of the polls the agent left out beyond `Config.MaxEvents`. `Coalesced`, `Dropped`: the transitions a handler did not get because it had fallen behind |
+| `Scheduler.Stats()` | the same, for one `schedule.Scheduler` |
+| `Server.Stats()` | `RefusedResources`: the resources clients were refused beyond `Config.MaxDeviceResources` |
+
 ### A Prometheus adapter, in your code
 
 ```go
@@ -104,6 +116,37 @@ func (m promServer) OnResponse(method, resource string, status int, d time.Durat
 
 srv, err := server.New(server.Config{Metrics: promServer{requests: ...}})
 ```
+
+## Callbacks
+
+The library calls code of the application on goroutines of its own. What
+each may do:
+
+| Callback | Called on | While it runs | May call `Close` |
+|---|---|---|---|
+| `agent.Config.OnAssignments`, `OnFile`, `OnDefaultDERControl` | the goroutine of `Start` or `Run`, during a poll | the poll waits | yes: `Run` then returns `ErrClosed` |
+| `agent.Config.OnDERControl` and the other handlers of events | a goroutine of the agent per function set, one transition at a time | the transitions and Responses of that function set wait, within `MaxEvents`; the other function sets and the polls go on | yes: that `Close` does not wait for the handlers |
+| `agent.Config.Readings` | the metering goroutine of `Run` | the next post of readings waits | yes |
+| `agent.Metrics` | `OnPoll`: the goroutine of `Run`. `OnEvent`, `OnResponse`: the goroutine of the handler | as for the handler | yes, as for the handler |
+| `server.Metrics.OnRequest`, `OnResponse` | the goroutine `net/http` serves the request on | the request waits | yes |
+| `server.NotificationMetrics` | the goroutine that delivers the notifications of the subscription | that subscription waits | yes: that `Close` does not wait for the deliveries |
+| `server.EventMetrics` | the one goroutine that writes the states of the events | no other state is written | yes: that `Close` does not wait for it |
+| `client.Metrics`, `client.AttemptMetrics` | the goroutine of the call of the client | the call waits | n/a |
+| `ieee20305.Logger` | any of them | what logs waits | no |
+
+A handler, a `Metrics` method or `Readings` that does not return normally
+is stopped where the library calls it. The library logs that at Error
+level, as `<callback> did not return normally: <value>` followed by the
+stack of the goroutine, once it holds none of its locks, and goes on: a
+handler or a function of a poll as if it had returned an error (the poll
+fails and is tried again; the Response of the event is still posted), a
+`Metrics` method as if it had returned. A `Logger` method that does not
+return normally loses its entry. Other code the application gives the
+library (a `Store`, `Hooks`, a `FlowPolicy`, a `RetryPolicy`, a `Clock`, a
+`PacketTransport`) is not stopped: it must return.
+
+A `Close` on a goroutine that runs none of these callbacks waits for
+those in progress, as before.
 
 ## Retries
 

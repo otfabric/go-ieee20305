@@ -12,6 +12,7 @@ import (
 
 	ieee20305 "github.com/otfabric/go-ieee20305"
 	"github.com/otfabric/go-ieee20305/client"
+	"github.com/otfabric/go-ieee20305/internal/callback"
 	"github.com/otfabric/go-ieee20305/schedule"
 )
 
@@ -20,6 +21,19 @@ import (
 var ErrNotStarted = errors.New("agent: not started")
 
 // Config configures an Agent.
+//
+// The functions of the application in it are called on these goroutines:
+// OnAssignments, OnFile and OnDefaultDERControl on that of Start or Run,
+// during a poll; the handler of the events of a function set on a goroutine
+// of the agent, one per function set, one transition at a time; Readings on
+// another goroutine of Run. The agent waits for each: the poll for those it
+// calls during a poll, the next transition and the Responses of a function
+// set for its handler. Those of a poll, and Readings, get the context of
+// Start or of Run, which also ends when the agent is closed; a handler of
+// events gets one that ends when the agent is closed. They may call the
+// methods of the Agent, Close included (see Close). One that does not
+// return normally is stopped there: the agent logs that at Error level
+// with the stack, and goes on as if the function had returned an error.
 type Config struct {
 	// Client talks to the server, with the certificate of the device.
 	// Required.
@@ -44,7 +58,8 @@ type Config struct {
 	// (see Run).
 	Backoff ieee20305.ExponentialBackoff
 	// OnAssignments is called with the device's FunctionSetAssignments each
-	// time the agent reads them.
+	// time the agent reads them. Its error fails the poll, which Run
+	// tries again after Backoff.
 	OnAssignments func(ctx context.Context, fsas []*ieee20305.FunctionSetAssignments) error
 	// NotificationURI makes the agent subscribe to the lists it polls (its
 	// FunctionSetAssignments, programs and events): the https URL of its
@@ -58,7 +73,8 @@ type Config struct {
 	// the device's DERPrograms: their receipt, start, end, cancellation
 	// and supersession, as a schedule.Scheduler with randomization and
 	// DER conflicts works them out. The agent posts the Responses the
-	// controls ask for.
+	// controls ask for, also when the handler returns an error, which it
+	// logs.
 	OnDERControl func(ctx context.Context, t schedule.Transition) error
 	// OnEndDeviceControl, OnTextMessage, OnTimeTariffInterval and
 	// OnSupplyInterruptionOverride are called with the transitions of the
@@ -94,6 +110,13 @@ type Config struct {
 	Clock schedule.Clock
 	// Seed seeds the randomization of the events: the SFDI when zero.
 	Seed uint64
+	// MaxEvents bounds the events the agent keeps of one function set:
+	// schedule.DefaultMaxEvents (1000) when zero, no bound when negative.
+	// Of the events a server lists beyond it, the agent keeps those it
+	// has and leaves out the new ones, in the order of the lists: it
+	// logs that and counts them (EventStats). The transitions that wait
+	// for a handler are bounded with it: see schedule.Options.QueueSize.
+	MaxEvents int
 	// Metrics receives the agent's polls, events and Responses; none when
 	// nil.
 	Metrics Metrics
@@ -111,6 +134,8 @@ type Agent struct {
 
 	clock schedule.Clock
 	loops [functionSets]*eventLoop
+	// maxEvents is the bound of Config.MaxEvents: 0 for none.
+	maxEvents int
 	// ctx is the context of the agent's own work (handlers, Responses),
 	// which Close cancels.
 	ctx    context.Context
@@ -165,11 +190,18 @@ func New(cfg Config) (*Agent, error) {
 	if cfg.Backoff.Max <= 0 {
 		cfg.Backoff.Max = 5 * time.Minute
 	}
-	a := &Agent{cfg: cfg, c: cfg.Client, log: cfg.Logger, files: map[string]bool{},
+	a := &Agent{cfg: cfg, c: cfg.Client, files: map[string]bool{},
 		subs: map[string]string{}, wake: make(chan struct{}, 1)}
-	a.log = ieee20305.ComponentLogger(cfg.Logger, "agent")
+	a.log = callback.Guard(ieee20305.ComponentLogger(cfg.Logger, "agent"))
 	if a.cfg.Metrics == nil {
 		a.cfg.Metrics = NopMetrics{}
+	}
+	a.cfg.Metrics = guardedMetrics{m: a.cfg.Metrics, log: a.log}
+	switch {
+	case cfg.MaxEvents == 0:
+		a.maxEvents = schedule.DefaultMaxEvents
+	case cfg.MaxEvents > 0:
+		a.maxEvents = cfg.MaxEvents
 	}
 	a.clock = cfg.Clock
 	if a.clock == nil {
@@ -184,11 +216,33 @@ func New(cfg Config) (*Agent, error) {
 	return a, nil
 }
 
-// Close stops the scheduling of events and waits for the handlers. Run
-// closes the agent when it returns.
+// Close stops the agent: a Run in progress returns an error that matches
+// ieee20305.ErrClosed, the scheduling of events stops, and Close waits for
+// the handlers of events that are running. Run closes the agent when it
+// returns.
+//
+// Close may be called more than once, and from several goroutines at once.
+// A handler of events, and a Metrics method the agent calls for an event or
+// a Response, may call it too: that Close does not wait for the handlers,
+// which end as they return, while a Close on another goroutine waits for
+// them.
 func (a *Agent) Close() {
 	a.cancel()
 	a.closeLoops()
+}
+
+// errClosed is the error of the use of a closed agent.
+var errClosed = fmt.Errorf("%w: agent", ieee20305.ErrClosed)
+
+// call calls f, a function of the application that name names (such as
+// "Config.OnFile"), and returns its error. One that does not return
+// normally is stopped here and logged, and call returns the error of
+// that: the agent holds none of its locks when it calls the application.
+func (a *Agent) call(name string, f func() error) (err error) {
+	if failed := callback.Do(a.log, name, func() { err = f() }); failed != nil {
+		return failed
+	}
+	return err
 }
 
 // State returns what the agent knows of the server.
@@ -218,7 +272,7 @@ func (a *Agent) State() State {
 // when the PIN is not the device's.
 func (a *Agent) Start(ctx context.Context) error {
 	if a.ctx.Err() != nil {
-		return fmt.Errorf("%w: agent", ieee20305.ErrClosed)
+		return errClosed
 	}
 	ed, err := a.endDevice(ctx)
 	if err != nil {
@@ -310,7 +364,7 @@ func (a *Agent) poll(ctx context.Context) error {
 	a.state.Polls++
 	a.mu.Unlock()
 	if a.cfg.OnAssignments != nil {
-		if err := a.cfg.OnAssignments(ctx, fsas); err != nil {
+		if err := a.call("Config.OnAssignments", func() error { return a.cfg.OnAssignments(ctx, fsas) }); err != nil {
 			return err
 		}
 	}
@@ -349,10 +403,24 @@ func (a *Agent) pollRate() time.Duration {
 // until ctx ends, which it returns (ctx.Err()). It keeps trying after a
 // failure (with Backoff), except after errors that waiting does not fix,
 // which it returns: a PIN mismatch, a certificate that does not verify
-// (ErrCertificate), a configuration error, and Close. Run closes the agent
-// when it returns.
+// (ErrCertificate), a configuration error, and Close (ErrClosed). Close
+// ends a request or a wait in progress, as the end of ctx does. Run closes
+// the agent when it returns.
 func (a *Agent) Run(ctx context.Context) error {
 	defer a.Close()
+	// The work of Run ends with ctx, and with the agent.
+	work, cancel := context.WithCancel(ctx)
+	defer cancel()
+	defer context.AfterFunc(a.ctx, cancel)()
+	err := a.run(work)
+	if ctx.Err() == nil && a.ctx.Err() != nil {
+		return errClosed
+	}
+	return err
+}
+
+// run is Run with a context that ends when the agent is closed.
+func (a *Agent) run(ctx context.Context) error {
 	for attempt := 0; ; attempt++ {
 		err := a.Start(ctx)
 		if err == nil {

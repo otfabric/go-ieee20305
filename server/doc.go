@@ -36,6 +36,9 @@
 // FlowReservationRequest is answered by Config.FlowPolicy with a
 // FlowReservationResponse event of the device.
 //
+// What clients create is bounded: Config.MaxListItems caps the lists they
+// post to, and Config.MaxDeviceResources all that one device owns.
+//
 // A document the server sends has its href, its ListLinks the number of
 // items the client reads (the all attribute), and no link to a resource of
 // the server that does not exist yet (such as the DefaultDERControl of a

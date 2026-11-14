@@ -14,6 +14,7 @@ import (
 	"time"
 
 	ieee20305 "github.com/otfabric/go-ieee20305"
+	"github.com/otfabric/go-ieee20305/internal/callback"
 )
 
 // MediaType is the media type of IEEE 2030.5 XML documents.
@@ -76,12 +77,12 @@ func parseQuery(r *http.Request, allowed []string) (Query, error) {
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	start := time.Now()
-	s.metrics.OnRequest(r.Method)
+	s.onRequest(r.Method)
 	rec := &statusWriter{ResponseWriter: w, status: http.StatusOK}
 	p := Principal{Edition: s.cfg.DefaultEdition}
 	defer func() {
 		d := time.Since(start)
-		s.metrics.OnResponse(r.Method, rec.resource, rec.status, d)
+		s.onResponse(r.Method, rec.resource, rec.status, d)
 		s.log.Debugf("%s %s from %s: %d in %v", r.Method, r.URL.Path, p.LFDI, rec.status, d)
 	}()
 	if s.isClosed() {
@@ -96,6 +97,19 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err := s.serve(ctx, rec, r, p); err != nil {
 		s.fail(rec, p, err)
 	}
+}
+
+// onRequest and onResponse call the Metrics of the application: a method
+// that does not return normally is stopped here and logged, and the
+// request is answered as if it had returned.
+func (s *Server) onRequest(method string) {
+	defer callback.Rescue(s.log, "Metrics.OnRequest")
+	s.metrics.OnRequest(method)
+}
+
+func (s *Server) onResponse(method, resource string, status int, d time.Duration) {
+	defer callback.Rescue(s.log, "Metrics.OnResponse")
+	s.metrics.OnResponse(method, resource, status, d)
 }
 
 // statusWriter records the status of a response, and the WADL resource of
@@ -433,5 +447,11 @@ func isList(v any) bool {
 }
 
 // itemResource returns the WADL resource of the items of a list resource:
-// EndDevice for EndDeviceList.
-func itemResource(list string) string { return strings.TrimSuffix(list, "List") }
+// EndDevice for EndDeviceList, and DERProgram for
+// AssociatedDERProgramList, whose items are DERPrograms.
+func itemResource(list string) string {
+	if list == "AssociatedDERProgramList" {
+		return "DERProgram"
+	}
+	return strings.TrimSuffix(list, "List")
+}
