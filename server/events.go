@@ -32,6 +32,12 @@ type events struct {
 
 	mu        sync.Mutex
 	lastPrune time.Time
+
+	// idx holds the hrefs of the events of sched, so that a deletion finds
+	// the events it deletes without going through all of them. idxMu
+	// serializes its changes with those of sched.
+	idxMu sync.Mutex
+	idx   hrefIndex
 }
 
 // clockFunc is the schedule.Clock of a server: its Clock for the time, and
@@ -49,8 +55,8 @@ func newEvents(s *Server) *events {
 	if clock == nil {
 		clock = clockFunc(func() time.Time { return s.clock() })
 	}
-	e := &events{s: s, done: make(chan struct{})}
-	e.sched = schedule.New(schedule.Options{Clock: clock, Conflicts: func(a, b schedule.Event) bool { return false }})
+	e := &events{s: s, done: make(chan struct{}), idx: newHrefIndex()}
+	e.sched = schedule.New(schedule.Options{Clock: clock, Independent: true})
 	ch, _ := e.sched.Subscribe()
 	go e.run(ch)
 	return e
@@ -78,7 +84,9 @@ func (e *events) run(ch <-chan schedule.Transition) {
 	}
 }
 
-// setStatus sets the currentStatus of the event at href, if it differs.
+// setStatus sets the currentStatus of the event at href, if it differs. A
+// cancelled event stays cancelled: a transition the scheduler queued before
+// it learnt of the cancellation does not undo it.
 func (e *events) setStatus(ctx context.Context, href string, to schedule.Status, at time.Time) error {
 	defer e.s.listLocks.lock("node:" + href)()
 	n, err := e.s.store.Get(ctx, href)
@@ -87,6 +95,9 @@ func (e *events) setStatus(ctx context.Context, href string, to schedule.Status,
 	}
 	st := eventStatus(n.Value)
 	if st == nil || st.CurrentStatus == ieee20305.UInt8(to) {
+		return nil
+	}
+	if cancelled(st.CurrentStatus) && !cancelled(ieee20305.UInt8(to)) {
 		return nil
 	}
 	st.CurrentStatus, st.DateTime = ieee20305.UInt8(to), ieee20305.TimeType(at.Unix())
@@ -100,7 +111,7 @@ func (e *events) setStatus(ctx context.Context, href string, to schedule.Status,
 func (s *Server) putNode(ctx context.Context, n *Node) error {
 	defer s.listLocks.lock("node:" + n.Href)()
 	if st := eventStatus(n.Value); st != nil {
-		cancel := st.CurrentStatus == ieee20305.UInt8(schedule.Cancelled) || st.CurrentStatus == ieee20305.UInt8(schedule.CancelledRandom)
+		cancel := cancelled(st.CurrentStatus)
 		if old, err := s.store.Get(ctx, n.Href); err == nil && !cancel {
 			if ost := eventStatus(old.Value); ost != nil {
 				*st = *ost
@@ -108,6 +119,11 @@ func (s *Server) putNode(ctx context.Context, n *Node) error {
 		}
 	}
 	return s.store.Put(ctx, n)
+}
+
+// cancelled reports whether the currentStatus of an event cancels it.
+func cancelled(status ieee20305.UInt8) bool {
+	return status == ieee20305.UInt8(schedule.Cancelled) || status == ieee20305.UInt8(schedule.CancelledRandom)
 }
 
 // eventStatus returns the EventStatus of an event, or nil.
@@ -126,10 +142,11 @@ func eventStatus(v any) *ieee20305.EventStatus {
 // changed is told of a change of the node at href, or of its deletion.
 func (e *events) changed(href string, node *Node, deleted bool) {
 	if deleted {
-		for _, ev := range e.sched.Events() {
-			if within(ev.MRID, href) {
-				e.sched.Remove(ev.MRID)
-			}
+		e.idxMu.Lock()
+		defer e.idxMu.Unlock()
+		for _, h := range e.idx.within(href) {
+			e.idx.remove(h)
+			e.sched.Remove(h)
 		}
 		return
 	}
@@ -141,7 +158,10 @@ func (e *events) changed(href string, node *Node, deleted bool) {
 		return
 	}
 	ev.MRID = href // unique on the server, unlike mRIDs
+	e.idxMu.Lock()
+	e.idx.add(href)
 	e.sched.Upsert(ev)
+	e.idxMu.Unlock()
 	e.prune()
 }
 
@@ -163,13 +183,19 @@ func (e *events) prune() {
 	}
 	for _, ev := range e.sched.Events() {
 		if ev.End().Add(retention).Before(now) {
+			e.idxMu.Lock()
+			e.idx.remove(ev.MRID)
 			e.sched.Remove(ev.MRID)
+			e.idxMu.Unlock()
 		}
 	}
 }
 
 // changed is told of every change of the store.
 func (s *Server) changed(ctx context.Context, href string, node *Node, deleted bool) {
+	if deleted {
+		s.forgetCounters(href)
+	}
 	s.events.changed(href, node, deleted)
 	s.notifier.changed(ctx, href, node, deleted)
 }
@@ -307,7 +333,7 @@ func (s *Server) storeResponse(ctx context.Context, r *Request, resp *ieee20305.
 	}
 	href, err := s.createItem(ctx, r.Node, r.Doc, owner)
 	if err == nil {
-		s.trim(ctx, r.Node.Href)
+		s.trim(ctx, r.Node, owner)
 	}
 	return href, err == nil, err
 }

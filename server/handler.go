@@ -242,8 +242,9 @@ func acceptsXML(accept string) bool {
 	return false
 }
 
-// alsoAccepted are the documents a resource takes besides the one of the
-// WADL: a MirrorUsagePoint takes one MirrorMeterReading as well as a list.
+// alsoAccepted are the documents a resource takes in a POST besides the
+// one of the WADL: a MirrorUsagePoint takes one MirrorMeterReading as well
+// as a list. A PUT takes the document of the WADL alone.
 var alsoAccepted = map[string]map[string]bool{
 	"MirrorUsagePoint": {"MirrorMeterReading": true},
 }
@@ -269,7 +270,8 @@ func (s *Server) decodeBody(w http.ResponseWriter, req *Request) error {
 	}
 	n, _ := s.profile.ElementName(v)
 	name := n.Local
-	if req.Method.Request != "" && !s.profile.Derives(name, req.Method.Request) && !alsoAccepted[req.Spec.ID][name] {
+	if req.Method.Request != "" && !s.profile.Derives(name, req.Method.Request) &&
+		(req.Method.Method != http.MethodPost || !alsoAccepted[req.Spec.ID][name]) {
 		return &HTTPError{Status: http.StatusBadRequest, Reason: ReasonInvalidRequest,
 			Err: errors.New(name + " where the resource takes " + req.Method.Request)}
 	}

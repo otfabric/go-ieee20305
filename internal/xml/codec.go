@@ -92,16 +92,18 @@ const xsiNamespace = "http://www.w3.org/2001/XMLSchema-instance"
 // compact rewrites an encoding/xml document without default namespace
 // declarations that repeat the one already in scope, and with the
 // conventional prefix xsi for the XML Schema instance namespace.
+//
+// A prefix bound to the XML Schema instance namespace is written as xsi only
+// where that cannot change the meaning of another name: not on an element
+// that declares xsi itself or has xsi: attributes, and not below an element
+// that binds xsi to another namespace. Where a renamed scope meets such an
+// element, the original prefix is declared again on it.
 func compact(in []byte) ([]byte, error) {
 	d := xml.NewDecoder(bytes.NewReader(in))
 	var out bytes.Buffer
 	out.Grow(len(in))
-	type scope struct {
-		ns     string
-		rename string // prefix renamed to xsi in this scope
-	}
-	var stack []scope
-	cur := scope{}
+	var stack []compactScope
+	cur := compactScope{}
 	for {
 		tok, err := d.RawToken()
 		if errors.Is(err, io.EOF) {
@@ -113,13 +115,9 @@ func compact(in []byte) ([]byte, error) {
 		switch t := tok.(type) {
 		case xml.StartElement:
 			stack = append(stack, cur)
-			for _, a := range t.Attr {
-				if a.Name.Space == "xmlns" && a.Value == xsiNamespace && a.Name.Local != "xsi" {
-					cur.rename = a.Name.Local
-				}
-			}
+			keep := cur.enter(t.Attr)
 			out.WriteByte('<')
-			out.WriteString(rawName(t.Name))
+			out.WriteString(rawName(cur.renamed(t.Name)))
 			for _, a := range t.Attr {
 				if a.Name.Space == "" && a.Name.Local == "xmlns" {
 					if a.Value == cur.ns {
@@ -127,20 +125,15 @@ func compact(in []byte) ([]byte, error) {
 					}
 					cur.ns = a.Value
 				}
-				if cur.rename != "" {
-					if a.Name.Space == "xmlns" && a.Name.Local == cur.rename {
-						a.Name.Local = "xsi"
-					} else if a.Name.Space == cur.rename {
-						a.Name.Space = "xsi"
-					}
+				if a.Name.Space == "xmlns" && cur.rename != "" && a.Name.Local == cur.rename {
+					a.Name.Local = "xsi"
+				} else {
+					a.Name = cur.renamed(a.Name)
 				}
-				out.WriteByte(' ')
-				out.WriteString(rawName(a.Name))
-				out.WriteString(`="`)
-				if err := xml.EscapeText(&out, []byte(a.Value)); err != nil {
-					return nil, err
-				}
-				out.WriteByte('"')
+				writeAttr(&out, a)
+			}
+			if keep != "" {
+				writeAttr(&out, xml.Attr{Name: xml.Name{Space: "xmlns", Local: keep}, Value: xsiNamespace})
 			}
 			out.WriteByte('>')
 		case xml.EndElement:
@@ -148,7 +141,7 @@ func compact(in []byte) ([]byte, error) {
 				return nil, errors.New("unbalanced document")
 			}
 			out.WriteString("</")
-			out.WriteString(rawName(t.Name))
+			out.WriteString(rawName(cur.renamed(t.Name)))
 			out.WriteByte('>')
 			cur = stack[len(stack)-1]
 			stack = stack[:len(stack)-1]
@@ -175,6 +168,67 @@ func compact(in []byte) ([]byte, error) {
 		}
 	}
 	return out.Bytes(), nil
+}
+
+// compactScope is the namespace state of compact inside one element.
+type compactScope struct {
+	ns     string // default namespace
+	rename string // prefix of the XML Schema instance namespace written as xsi
+	xsi    string // namespace the input binds xsi to, "" if unbound
+}
+
+// enter updates s for an element with the given raw attributes. It returns
+// a prefix that must be declared again for the XML Schema instance
+// namespace on the element because a rename ends there.
+func (s *compactScope) enter(attrs []xml.Attr) (keep string) {
+	declXSI, usesXSI := false, false
+	xsiValue := ""
+	redeclared, redeclValue := false, ""
+	for _, a := range attrs {
+		switch {
+		case a.Name.Space == "xmlns" && a.Name.Local == "xsi":
+			declXSI, xsiValue = true, a.Value
+		case a.Name.Space == "xmlns" && s.rename != "" && a.Name.Local == s.rename:
+			redeclared, redeclValue = true, a.Value
+		case a.Name.Space == "xsi":
+			usesXSI = true
+		}
+	}
+	if s.rename != "" && ((redeclared && redeclValue != xsiNamespace) || declXSI || usesXSI) {
+		if !redeclared {
+			keep = s.rename
+		}
+		s.rename = ""
+	}
+	if declXSI {
+		s.xsi = xsiValue
+	}
+	if s.rename != "" || keep != "" || declXSI || usesXSI || (s.xsi != "" && s.xsi != xsiNamespace) {
+		return keep
+	}
+	for _, a := range attrs {
+		if a.Name.Space == "xmlns" && a.Value == xsiNamespace && a.Name.Local != "xsi" {
+			s.rename = a.Name.Local
+			break
+		}
+	}
+	return keep
+}
+
+// renamed returns n with the renamed prefix replaced by xsi.
+func (s *compactScope) renamed(n xml.Name) xml.Name {
+	if s.rename != "" && n.Space == s.rename {
+		n.Space = "xsi"
+	}
+	return n
+}
+
+func writeAttr(out *bytes.Buffer, a xml.Attr) {
+	out.WriteByte(' ')
+	out.WriteString(rawName(a.Name))
+	out.WriteString(`="`)
+	_ = xml.EscapeText(out, []byte(a.Value)) // a bytes.Buffer does not fail
+	out.WriteByte('"')
 }
 
 func rawName(n xml.Name) string {

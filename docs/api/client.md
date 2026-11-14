@@ -158,7 +158,7 @@ FindEndDevice returns the EndDevice of the device id in the EndDeviceList at lis
 func (c *Client) Get(ctx context.Context, href string, v any) error
 ```
 
-Get retrieves the resource at href into v, a pointer to a document type such as \*ieee20305.EndDevice.
+Get retrieves the resource at href into v, a pointer to a document type such as \*ieee20305.EndDevice. A document that violates the facets or cardinalities of the schema fails with ErrProtocol, as with every call that reads a document of the server.
 
 #### func (Client) GetList
 

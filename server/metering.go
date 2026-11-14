@@ -41,6 +41,8 @@ func (s *Server) createMirror(ctx context.Context, r *Request) (string, error) {
 	defer s.listLocks.lock("mirror:" + lfdi)()
 	readings := mup.MirrorMeterReading
 	mup.MirrorMeterReading = nil
+	b := s.newMirrorBatch(r.Principal, lfdi)
+	defer s.finish(ctx, b)
 	members, err := s.store.Members(ctx, r.Node.Href)
 	if err != nil {
 		return "", err
@@ -62,6 +64,7 @@ func (s *Server) createMirror(ctx context.Context, r *Request) (string, error) {
 		if err != nil {
 			return "", err
 		}
+		b.touch(r.Node)
 		up, err := s.mirroredUsagePoint(ctx, mup, lfdi)
 		if err != nil {
 			return "", err
@@ -74,11 +77,83 @@ func (s *Server) createMirror(ctx context.Context, r *Request) (string, error) {
 		}
 	}
 	for i := range readings {
-		if _, err := s.mirrorReading(ctx, node, &readings[i]); err != nil {
+		if _, err := s.mirrorReading(ctx, b, node, &readings[i]); err != nil {
 			return "", err
 		}
 	}
 	return node.Href, nil
+}
+
+// updateMirror is the PUT of a MirrorUsagePoint: its deviceLFDI stays that
+// of the mirror, as the sFDI and lFDI of an EndDevice do, unless an
+// operator puts it; a mirror without one gets the deviceLFDI of a device
+// the client acts for, as with POST.
+func (s *Server) updateMirror(ctx context.Context, r *Request) error {
+	mup, ok := r.Doc.(*ieee20305.MirrorUsagePoint)
+	if !ok {
+		return &HTTPError{Status: http.StatusBadRequest, Reason: ReasonInvalidRequest, Err: errors.New("a MirrorUsagePoint takes a MirrorUsagePoint")}
+	}
+	if r.Principal.Role != RoleOperator {
+		if old, ok := r.Node.Value.(*ieee20305.MirrorUsagePoint); ok {
+			mup.DeviceLFDI = bytes.Clone(old.DeviceLFDI)
+		} else if _, err := s.deviceOf(r.Principal, mup.DeviceLFDI); err != nil {
+			return err
+		}
+	}
+	return s.replace(ctx, r)
+}
+
+// deleteMirror is the DELETE of a MirrorUsagePoint the client may change.
+func (s *Server) deleteMirror(ctx context.Context, r *Request) error {
+	if !s.canChange(r.Principal, r.Node) {
+		return httpError(http.StatusForbidden, "%s is not the client's", r.Node.Href)
+	}
+	return s.removeMirror(ctx, r.Node)
+}
+
+// removeMirror deletes the MirrorUsagePoint n with the UsagePoint it
+// mirrors to, when that is of the same device: the UsagePoint the server
+// created for it.
+func (s *Server) removeMirror(ctx context.Context, n *Node) error {
+	if m, ok := n.Value.(*ieee20305.MirrorUsagePoint); ok && m.UsagePointLink != nil {
+		up, err := s.store.Get(ctx, m.UsagePointLink.Href)
+		if err == nil && up.Resource == "UsagePoint" && up.Owner == n.Owner {
+			if err := s.store.Delete(ctx, up.Href); err != nil && !errors.Is(err, ErrNoNode) {
+				return err
+			}
+		}
+	}
+	return s.store.Delete(ctx, n.Href)
+}
+
+// mirrorBatch is the work of one request on the mirrors of a device: the
+// items it found or created by mRID, and the lists it added to, which are
+// trimmed once the request is done.
+type mirrorBatch struct {
+	owner  string
+	capped bool // a client's request: its lists are trimmed
+	mrids  map[string]map[string]string
+	lists  map[string]bool
+	trims  []*Node
+}
+
+func (s *Server) newMirrorBatch(p Principal, owner string) *mirrorBatch {
+	return &mirrorBatch{owner: owner, capped: p.Role != RoleOperator, mrids: map[string]map[string]string{}, lists: map[string]bool{}}
+}
+
+// touch notes that the request added an item to the list.
+func (b *mirrorBatch) touch(list *Node) {
+	if b.capped && !b.lists[list.Href] {
+		b.lists[list.Href] = true
+		b.trims = append(b.trims, list)
+	}
+}
+
+// finish trims the lists the request added to.
+func (s *Server) finish(ctx context.Context, b *mirrorBatch) {
+	for _, l := range b.trims {
+		s.trim(ctx, l, b.owner)
+	}
 }
 
 // deviceOf returns the LFDI of the device of a document, which p must act
@@ -97,6 +172,7 @@ func (s *Server) deviceOf(p Principal, raw []byte) (string, error) {
 
 // mirroredUsagePoint creates the UsagePoint a MirrorUsagePoint mirrors to,
 // in the UsagePointList (created if there is none), and returns its href.
+// Deleting the mirror deletes it (removeMirror).
 func (s *Server) mirroredUsagePoint(ctx context.Context, mup *ieee20305.MirrorUsagePoint, lfdi string) (string, error) {
 	list, err := s.store.Get(ctx, UsagePointListHref)
 	if errors.Is(err, ErrNoNode) {
@@ -122,12 +198,14 @@ func (s *Server) postMirrorReadings(ctx context.Context, r *Request) (string, er
 		return "", httpError(http.StatusForbidden, "%s is not the client's", r.Node.Href)
 	}
 	defer s.listLocks.lock("mirror:" + r.Node.Owner)()
+	b := s.newMirrorBatch(r.Principal, r.Node.Owner)
+	defer s.finish(ctx, b)
 	switch doc := r.Doc.(type) {
 	case *ieee20305.MirrorMeterReading:
-		return s.mirrorReading(ctx, r.Node, doc)
+		return s.mirrorReading(ctx, b, r.Node, doc)
 	case *ieee20305.MirrorMeterReadingList:
 		for i := range doc.MirrorMeterReading {
-			if _, err := s.mirrorReading(ctx, r.Node, &doc.MirrorMeterReading[i]); err != nil {
+			if _, err := s.mirrorReading(ctx, b, r.Node, &doc.MirrorMeterReading[i]); err != nil {
 				return "", err
 			}
 		}
@@ -140,8 +218,9 @@ func (s *Server) postMirrorReadings(ctx context.Context, r *Request) (string, er
 // its UsagePoint: the MeterReading of its mRID (created if new) with its
 // ReadingType, its latest Reading, and its MirrorReadingSets as
 // ReadingSets with their Readings. It returns the href of the
-// MeterReading. The caller holds the mirror lock of the device.
-func (s *Server) mirrorReading(ctx context.Context, mup *Node, mmr *ieee20305.MirrorMeterReading) (string, error) {
+// MeterReading. The caller holds the mirror lock of the device, and
+// finishes the batch b.
+func (s *Server) mirrorReading(ctx context.Context, b *mirrorBatch, mup *Node, mmr *ieee20305.MirrorMeterReading) (string, error) {
 	m, ok := mup.Value.(*ieee20305.MirrorUsagePoint)
 	if !ok {
 		return "", fmt.Errorf("%w: %s is no MirrorUsagePoint", ieee20305.ErrInvalid, mup.Href)
@@ -167,7 +246,7 @@ func (s *Server) mirrorReading(ctx context.Context, mup *Node, mmr *ieee20305.Mi
 	} else if err != nil {
 		return "", err
 	}
-	mr, err := s.findOrCreate(ctx, mrList, mmr.MRID, func() any {
+	mr, err := s.findOrCreate(ctx, b, mrList, mmr.MRID, func() any {
 		return &ieee20305.MeterReading{MeterReadingBase: mmr.MeterReadingBase}
 	}, mup.Owner)
 	if err != nil {
@@ -194,7 +273,7 @@ func (s *Server) mirrorReading(ctx context.Context, mup *Node, mmr *ieee20305.Mi
 		if err != nil {
 			return "", err
 		}
-		rs, err := s.findOrCreate(ctx, rsList, set.MRID, func() any {
+		rs, err := s.findOrCreate(ctx, b, rsList, set.MRID, func() any {
 			return &ieee20305.ReadingSet{ReadingSetBase: set.ReadingSetBase}
 		}, mup.Owner)
 		if err != nil {
@@ -211,26 +290,45 @@ func (s *Server) mirrorReading(ctx context.Context, mup *Node, mmr *ieee20305.Mi
 				return "", err
 			}
 		}
-		s.trim(ctx, rList.Href)
+		if len(set.Reading) > 0 {
+			b.touch(rList)
+		}
 	}
 	return mr, nil
 }
 
 // findOrCreate returns the href of the item of list with the mRID mrid,
-// or creates one from create.
-func (s *Server) findOrCreate(ctx context.Context, list *Node, mrid ieee20305.MRIDType, create func() any, owner string) (string, error) {
-	members, err := s.store.Members(ctx, list.Href)
-	if err != nil {
-		return "", err
-	}
-	for _, m := range members {
-		if id, ok := mridOf(m.Value); ok && bytes.Equal(id, mrid) {
-			return m.Href, nil
+// or creates one from create. The items of the list are read once per
+// batch, which then keeps the mRIDs of the items it creates.
+func (s *Server) findOrCreate(ctx context.Context, b *mirrorBatch, list *Node, mrid ieee20305.MRIDType, create func() any, owner string) (string, error) {
+	idx, ok := b.mrids[list.Href]
+	if !ok {
+		members, err := s.store.Members(ctx, list.Href)
+		if err != nil {
+			return "", err
 		}
+		idx = make(map[string]string, len(members))
+		for _, m := range members {
+			if id, ok := mridOf(m.Value); ok {
+				if _, dup := idx[string(id)]; !dup {
+					idx[string(id)] = m.Href
+				}
+			}
+		}
+		b.mrids[list.Href] = idx
+	}
+	if href, ok := idx[string(mrid)]; ok {
+		return href, nil
 	}
 	v := create()
 	setHref(v, "")
-	return s.createItem(ctx, list, v, owner)
+	href, err := s.createItem(ctx, list, v, owner)
+	if err != nil {
+		return "", err
+	}
+	idx[string(mrid)] = href
+	b.touch(list)
+	return href, nil
 }
 
 // mridOf returns the mRID of a document.
@@ -301,6 +399,11 @@ func (s *Server) createFlowReservation(ctx context.Context, r *Request) (string,
 	resp.EventStatus = ieee20305.EventStatus{DateTime: resp.CreationTime}
 	if _, err := s.createItem(ctx, responses, resp, responses.Owner); err != nil {
 		return "", err
+	}
+	// Each response is an event of the server's scheduler: a device keeps
+	// as many as it may keep requests.
+	if r.Principal.Role != RoleOperator {
+		s.trim(ctx, responses, responses.Owner)
 	}
 	return href, nil
 }

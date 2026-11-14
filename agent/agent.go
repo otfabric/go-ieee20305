@@ -54,6 +54,11 @@ type Config struct {
 	// zero). A server that takes no subscriptions is polled as usual.
 	NotificationURI    string
 	SubscribedPollRate time.Duration
+	// NotificationAuthorize, when set, decides whether the
+	// NotificationHandler takes a request (see
+	// client.NotificationConfig.Authorize): accept only the server's
+	// certificate, say. An error answers 403.
+	NotificationAuthorize func(r *http.Request) error
 	// OnDERControl is called with every transition of the DERControls of
 	// the device's DERPrograms: their receipt, start, end, cancellation
 	// and supersession, as a schedule.Scheduler with randomization and
@@ -128,6 +133,9 @@ type Agent struct {
 	subs        map[string]string
 	noSubscribe bool
 	wake        chan struct{}
+
+	notifyOnce    sync.Once
+	notifyHandler http.Handler
 }
 
 // State is what an agent knows of the server.
@@ -333,14 +341,17 @@ func isNotFound(err error) bool {
 	return errors.As(err, &se) && se.StatusCode == http.StatusNotFound
 }
 
+// maxPollRate bounds the pollRate the agent takes from the server.
+const maxPollRate = 24 * time.Hour
+
 // pollRate is the interval between polls: the configured one, else the
-// pollRate of DeviceCapability (900 s by default).
+// pollRate of DeviceCapability (900 s by default, at most maxPollRate).
 func (a *Agent) pollRate() time.Duration {
 	if a.cfg.PollRate > 0 {
 		return a.cfg.PollRate
 	}
 	if dc := a.State().DeviceCapability; dc != nil && dc.PollRate != nil && *dc.PollRate > 0 {
-		return time.Duration(*dc.PollRate) * time.Second
+		return min(time.Duration(*dc.PollRate)*time.Second, maxPollRate)
 	}
 	return 900 * time.Second
 }
@@ -376,19 +387,35 @@ func (a *Agent) Run(ctx context.Context) error {
 		}
 	}
 	a.log.Infof("started as EndDevice %s", a.State().EndDevice.GetHref())
+	// The metering stops when Run returns, whatever the reason.
+	mctx, stopMirror := context.WithCancel(ctx)
 	var wg sync.WaitGroup
 	defer wg.Wait()
+	defer stopMirror()
 	wg.Go(func() {
-		a.mirror(ctx)
+		a.mirror(mctx)
 	})
 	defer a.unsubscribe()
 	wait, failures := a.pollRate(), 0
 	for {
-		if err := a.sleepOrWake(ctx, wait); err != nil {
+		// A notification ends the wait for the next poll, not the
+		// backoff after a failure.
+		var err error
+		if failures > 0 {
+			err = sleep(ctx, wait)
+		} else {
+			err = a.sleepOrWake(ctx, wait)
+		}
+		if err != nil {
 			return err
 		}
+		// What was notified until now, this poll reads.
+		select {
+		case <-a.wake:
+		default:
+		}
 		start := time.Now()
-		err := a.poll(ctx)
+		err = a.poll(ctx)
 		a.cfg.Metrics.OnPoll(time.Since(start), err)
 		if err != nil {
 			if ctx.Err() != nil {

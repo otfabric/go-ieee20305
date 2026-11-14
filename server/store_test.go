@@ -80,3 +80,72 @@ func TestMemStore(t *testing.T) {
 		t.Errorf("Hrefs = %v", hrefs)
 	}
 }
+
+// A node put again with another Parent goes with its new parent, not its
+// old; a deleted list leaves its members, which may join lists again.
+func TestMemStoreParentsAndLists(t *testing.T) {
+	ctx := context.Background()
+	s := server.NewMemStore(nil)
+	put := func(href, parent string) {
+		t.Helper()
+		if err := s.Put(ctx, &server.Node{Href: href, Resource: "EndDevice", Value: examples.EndDevice(0), Parent: parent}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	put("/a", "")
+	put("/b", "")
+	put("/x", "/a")
+	put("/x/1", "/x")
+	put("/x", "/b")
+	if err := s.Delete(ctx, "/a"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Get(ctx, "/x/1"); err != nil {
+		t.Errorf("a node re-parented went with its old parent: %v", err)
+	}
+	if err := s.AddMember(ctx, "/b", "/x/1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Delete(ctx, "/b"); err != nil {
+		t.Fatal(err)
+	}
+	for _, h := range []string{"/x", "/x/1"} {
+		if _, err := s.Get(ctx, h); !errors.Is(err, server.ErrNoNode) {
+			t.Errorf("%s outlived its parent: %v", h, err)
+		}
+	}
+	put("/l", "")
+	put("/m", "")
+	put("/i", "")
+	for _, l := range []string{"/l", "/m"} {
+		if err := s.AddMember(ctx, l, "/i"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.Delete(ctx, "/l"); err != nil {
+		t.Fatal(err)
+	}
+	// /i is in no deleted list now: adding it to a new /l works, and
+	// deleting /i empties /m and /l.
+	put("/l", "")
+	if err := s.AddMember(ctx, "/l", "/i"); err != nil {
+		t.Fatal(err)
+	}
+	if ms, _ := s.Members(ctx, "/l"); len(ms) != 1 {
+		t.Errorf("%d members of a new list", len(ms))
+	}
+	if err := s.RemoveMember(ctx, "/m", "/i"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AddMember(ctx, "/m", "/i"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Delete(ctx, "/i"); err != nil {
+		t.Fatal(err)
+	}
+	for _, l := range []string{"/l", "/m"} {
+		if ms, _ := s.Members(ctx, l); len(ms) != 0 {
+			t.Errorf("%s keeps a deleted member", l)
+		}
+	}
+}

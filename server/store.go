@@ -5,7 +5,6 @@ package server
 import (
 	"context"
 	"fmt"
-	"slices"
 	"sort"
 	"sync"
 	"time"
@@ -83,14 +82,41 @@ func NewMemStore(clone func(any) any) Store {
 	if clone == nil {
 		clone = ieee20305.Clone
 	}
-	return &memStore{nodes: map[string]*Node{}, members: map[string][]string{}, clone: clone}
+	return &memStore{nodes: map[string]*Node{}, members: map[string][]string{},
+		children: map[string]map[string]struct{}{}, listsOf: map[string]map[string]struct{}{}, clone: clone}
 }
 
+// memStore keeps, besides the nodes and the members of the lists, the
+// nodes created in each node (children, by Parent) and the lists of each
+// member (listsOf), so that a Delete costs what it deletes, not the size
+// of the store.
 type memStore struct {
-	mu      sync.RWMutex
-	nodes   map[string]*Node
-	members map[string][]string
-	clone   func(any) any
+	mu       sync.RWMutex
+	nodes    map[string]*Node
+	members  map[string][]string
+	children map[string]map[string]struct{}
+	listsOf  map[string]map[string]struct{}
+	clone    func(any) any
+}
+
+// link adds b to the set of a in idx.
+func link(idx map[string]map[string]struct{}, a, b string) {
+	set, ok := idx[a]
+	if !ok {
+		set = map[string]struct{}{}
+		idx[a] = set
+	}
+	set[b] = struct{}{}
+}
+
+// unlink removes b from the set of a in idx.
+func unlink(idx map[string]map[string]struct{}, a, b string) {
+	if set, ok := idx[a]; ok {
+		delete(set, b)
+		if len(set) == 0 {
+			delete(idx, a)
+		}
+	}
 }
 
 func (s *memStore) Get(_ context.Context, href string) (*Node, error) {
@@ -110,37 +136,64 @@ func (s *memStore) Put(_ context.Context, n *Node) error {
 	c := copyNode(n, s.clone)
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if old, ok := s.nodes[c.Href]; ok && old.Parent != c.Parent {
+		unlink(s.children, old.Parent, c.Href)
+	}
 	s.nodes[c.Href] = c
+	if c.Parent != "" {
+		link(s.children, c.Parent, c.Href)
+	}
 	return nil
 }
 
 func (s *memStore) Delete(_ context.Context, href string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, ok := s.nodes[href]; !ok {
+	root, ok := s.nodes[href]
+	if !ok {
 		return ErrNoNode
 	}
+	// The node and the nodes created in it, recursively.
 	doomed := map[string]bool{href: true}
-	for changed := true; changed; {
-		changed = false
-		for h, n := range s.nodes {
-			if !doomed[h] && doomed[n.Parent] {
-				doomed[h] = true
-				changed = true
+	queue := []string{href}
+	for len(queue) > 0 {
+		h := queue[0]
+		queue = queue[1:]
+		for c := range s.children[h] {
+			if _, ok := s.nodes[c]; ok && !doomed[c] {
+				doomed[c] = true
+				queue = append(queue, c)
+			}
+		}
+	}
+	unlink(s.children, root.Parent, href)
+	// The lists that lose members, each filtered once.
+	affected := map[string]bool{}
+	for h := range doomed {
+		for list := range s.listsOf[h] {
+			if !doomed[list] {
+				affected[list] = true
 			}
 		}
 	}
 	for h := range doomed {
+		for _, m := range s.members[h] {
+			unlink(s.listsOf, m, h)
+		}
 		delete(s.nodes, h)
 		delete(s.members, h)
+		delete(s.children, h)
+		delete(s.listsOf, h)
 	}
-	for list, ms := range s.members {
+	for list := range affected {
+		ms := s.members[list]
 		kept := ms[:0]
 		for _, m := range ms {
 			if !doomed[m] {
 				kept = append(kept, m)
 			}
 		}
+		clear(ms[len(kept):])
 		s.members[list] = kept
 	}
 	return nil
@@ -155,10 +208,11 @@ func (s *memStore) AddMember(_ context.Context, list, member string) error {
 	if _, ok := s.nodes[member]; !ok {
 		return ErrNoNode
 	}
-	if slices.Contains(s.members[list], member) {
+	if _, ok := s.listsOf[member][list]; ok {
 		return nil
 	}
 	s.members[list] = append(s.members[list], member)
+	link(s.listsOf, member, list)
 	return nil
 }
 
@@ -169,6 +223,7 @@ func (s *memStore) RemoveMember(_ context.Context, list, member string) error {
 	for i, m := range ms {
 		if m == member {
 			s.members[list] = append(ms[:i:i], ms[i+1:]...)
+			unlink(s.listsOf, member, list)
 			return nil
 		}
 	}

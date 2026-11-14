@@ -66,7 +66,7 @@ finds a `*net.OpError`, an `x509.UnknownAuthorityError`, a
 | Package | Returns |
 |---|---|
 | root | `*ValidationError` (`ErrInvalid`) from `Validate` and the codecs; `ErrProtocol` for documents that do not decode |
-| `client` | `*StatusError`, and the transport sentinels above. `ErrNotRegistered`: an EndDevice without a RegistrationLink. `ErrPINMismatch`: a Registration whose PIN is not the device's |
+| `client` | `*StatusError`, and the transport sentinels above. `ErrProtocol` wrapping the `*ValidationError` (so `ErrInvalid` too) for a document of the server that fails `Validate`. `ErrNotRegistered`: an EndDevice without a RegistrationLink. `ErrPINMismatch`: a Registration whose PIN is not the device's |
 | `agent` | What the client returns. `ErrNotStarted`: a call that needs what `Start` reads. `ErrClosed` after `Close`. `Run` stops on `ErrPINMismatch` and `ErrClosed`, and retries the rest |
 | `server` | `ErrNoNode` (matches `ErrNotFound`) from a `Store`. `ErrConfiguration` from `New`. `ErrClosed` for changes after `Close`. `ErrInvalid` from `Admin` for unknown resources |
 | `security` | `ErrCertificate` from `Verify` and `VerifyPeerCertificate`; `ErrInvalid` from `ParseLFDI` |

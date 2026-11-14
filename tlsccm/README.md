@@ -26,6 +26,10 @@ offers TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256 for peers without CCM_8, such as
 clients on `crypto/tls`. Certificates are verified by the library's `security`
 package, which accepts the HardwareModuleName names of IEEE 2030.5
 certificates.
+Handshake signatures use SHA-256 or stronger (ECDSA P-256 with SHA-256 for
+IEEE 2030.5 certificates): as in Go 1.25 and RFC 9155, SHA-1 signatures are
+not used and a peer must send `signature_algorithms`. The client refuses a
+server that picks a curve other than P-256.
 
 Handshakes are bounded by `Options.HandshakeTimeout` (10 s), and their
 failures go to `Options.Logger` at Warn.

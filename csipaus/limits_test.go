@@ -37,7 +37,9 @@ func TestLimits(t *testing.T) {
 		}
 	}
 	var none *csipaus.DERControlBase
-	for _, v := range []any{none, &ieee20305.DERControl{}, "nothing", nil} {
+	var noControl *csipaus.DERControl
+	var noDefault *csipaus.DefaultDERControl
+	for _, v := range []any{none, noControl, noDefault, &ieee20305.DERControl{}, "nothing", nil} {
 		if _, ok := csipaus.LimitsOf(v); ok {
 			t.Errorf("LimitsOf(%T) found limits", v)
 		}

@@ -120,20 +120,42 @@ func preferredAddr(addrs []netip.Addr) (netip.Addr, bool) {
 	return netip.Addr{}, false
 }
 
+// Bounds of the TXT data Browse keeps of one instance. The keys the
+// standard defines are always kept; of the other keys, which clients
+// ignore, the first maxTXTOtherKeys are kept while the kept strings stay
+// within maxTXTBytes, the size RFC 6763, section 6.2, recommends a TXT
+// record not exceed.
+const (
+	maxTXTOtherKeys = 16
+	maxTXTBytes     = 1300
+)
+
 // parseTXT returns the key/value pairs of TXT strings (RFC 6763, section
 // 6): keys are case insensitive, the first occurrence of a key wins, and
-// strings without a key are ignored.
+// strings without a key are ignored. Keys other than the standard's are
+// kept within maxTXTOtherKeys and maxTXTBytes.
 func parseTXT(strs []string) map[string]string {
-	m := make(map[string]string, len(strs))
+	m := make(map[string]string, min(len(strs), maxTXTOtherKeys+5))
+	others, size := 0, 0
 	for _, s := range strs {
 		k, v, _ := strings.Cut(s, "=")
 		if k == "" {
 			continue
 		}
 		k = strings.ToLower(k)
-		if _, ok := m[k]; !ok {
-			m[k] = v
+		if _, ok := m[k]; ok {
+			continue
 		}
+		switch k {
+		case KeyTXTVersion, KeyDcap, KeyPath, KeyHTTPS, KeyLevel:
+		default:
+			if others >= maxTXTOtherKeys || size+len(s) > maxTXTBytes {
+				continue
+			}
+			others++
+		}
+		size += len(s)
+		m[k] = v
 	}
 	return m
 }

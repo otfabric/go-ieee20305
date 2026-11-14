@@ -97,18 +97,25 @@ func (w *watchStore) RemoveMember(ctx context.Context, list, member string) erro
 // burst of changes yields one notification with the latest state, never an
 // older state after a newer one.
 type notifier struct {
-	s      *Server
-	client *http.Client
-	sem    chan struct{}
-	ctx    context.Context
-	stop   context.CancelFunc
-	wg     sync.WaitGroup
+	s       *Server
+	client  *http.Client
+	sem     chan struct{}
+	timeout time.Duration // of one attempt
+	ctx     context.Context
+	stop    context.CancelFunc
+	wg      sync.WaitGroup
 
 	mu   sync.Mutex
 	subs map[string]*subscription // by href
 }
 
-// subscription is a subscription of the notifier.
+// notificationAttemptTimeout bounds one attempt to deliver a notification,
+// whatever the timeout of the NotificationClient.
+var notificationAttemptTimeout = time.Minute
+
+// subscription is a subscription of the notifier. Its resource, kind,
+// list, uri, limit and owner change under n.mu when the subscription is put
+// again: its worker reads a copy (current).
 type subscription struct {
 	href     string
 	resource string // the subscribed href
@@ -117,6 +124,11 @@ type subscription struct {
 	uri      string
 	limit    uint32
 	owner    string
+
+	// ctx ends when the subscription is dropped, or the notifier closed:
+	// it stops the worker, and the delivery it waits for.
+	ctx  context.Context
+	stop context.CancelFunc
 
 	dirty, running bool
 	status         ieee20305.UInt8 // a cancellation to send
@@ -137,6 +149,7 @@ func newNotifier(s *Server) *notifier {
 		workers = 16
 	}
 	n.sem = make(chan struct{}, workers)
+	n.timeout = notificationAttemptTimeout
 	n.ctx, n.stop = context.WithCancel(context.Background())
 	return n
 }
@@ -167,7 +180,7 @@ func (n *notifier) changed(ctx context.Context, href string, node *Node, deleted
 		for h, sub := range n.subs {
 			switch {
 			case within(h, href):
-				delete(n.subs, h)
+				n.drop(sub)
 			case within(sub.resource, href):
 				sub.status = NotificationResourceDeleted
 				n.schedule(sub)
@@ -246,9 +259,27 @@ func (n *notifier) index(ctx context.Context, node *Node) {
 	sub := n.subs[node.Href]
 	if sub == nil {
 		sub = &subscription{href: node.Href}
+		sub.ctx, sub.stop = context.WithCancel(n.ctx)
 		n.subs[node.Href] = sub
 	}
 	sub.resource, sub.kind, sub.list, sub.uri, sub.limit, sub.owner = doc.SubscribedResource, kind, list, doc.NotificationURI, uint32(doc.Limit), node.Owner
+}
+
+// drop removes sub, and stops its worker. The caller holds n.mu.
+func (n *notifier) drop(sub *subscription) {
+	if n.subs[sub.href] == sub {
+		delete(n.subs, sub.href)
+	}
+	sub.stop()
+}
+
+// current returns a copy of what sub notifies, and where, and whether sub
+// is still a subscription of the notifier.
+func (n *notifier) current(sub *subscription) (*subscription, bool) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return &subscription{href: sub.href, resource: sub.resource, kind: sub.kind, list: sub.list,
+		uri: sub.uri, limit: sub.limit, owner: sub.owner}, n.subs[sub.href] == sub
 }
 
 // schedule starts the worker of sub if it has none. The caller holds n.mu.
@@ -268,8 +299,8 @@ func (n *notifier) work(sub *subscription) {
 	defer n.wg.Done()
 	for {
 		n.mu.Lock()
-		status := sub.status
-		if (!sub.dirty && status == NotificationDefault) || n.ctx.Err() != nil {
+		status, kind := sub.status, sub.kind
+		if (!sub.dirty && status == NotificationDefault) || n.ctx.Err() != nil || n.subs[sub.href] != sub {
 			sub.running = false
 			n.mu.Unlock()
 			return
@@ -278,18 +309,25 @@ func (n *notifier) work(sub *subscription) {
 		n.mu.Unlock()
 		start := time.Now()
 		err := n.deliver(sub, status)
+		if err != nil && sub.ctx.Err() != nil && n.ctx.Err() == nil {
+			// The subscription was deleted: it is notified no more.
+			n.mu.Lock()
+			sub.running = false
+			n.mu.Unlock()
+			return
+		}
 		if nm, ok := n.s.metrics.(NotificationMetrics); ok && !errors.Is(err, context.Canceled) {
 			delivered := err
 			if errors.Is(err, errCancelled) {
 				delivered = nil
 			}
-			nm.OnNotification(sub.kind, time.Since(start), delivered)
+			nm.OnNotification(kind, time.Since(start), delivered)
 			if status != NotificationDefault || err != nil {
 				cancelled := status
 				if cancelled == NotificationDefault {
 					cancelled = NotificationCancelled
 				}
-				nm.OnSubscriptionCancelled(sub.kind, uint8(cancelled))
+				nm.OnSubscriptionCancelled(kind, uint8(cancelled))
 			}
 		}
 		if status != NotificationDefault || err != nil {
@@ -302,21 +340,22 @@ func (n *notifier) work(sub *subscription) {
 	}
 }
 
-// cancel drops sub, and deletes its resource.
+// cancel drops sub, and deletes its resource unless sub was dropped
+// already: the href may then be another subscription's.
 func (n *notifier) cancel(sub *subscription) {
 	n.mu.Lock()
 	sub.running = false
-	if n.subs[sub.href] == sub {
-		delete(n.subs, sub.href)
-	}
+	mine := n.subs[sub.href] == sub
+	n.drop(sub)
 	n.mu.Unlock()
-	if n.ctx.Err() == nil {
+	if mine && n.ctx.Err() == nil {
 		_ = n.s.store.Delete(n.ctx, sub.href)
 	}
 }
 
 // deliver sends the notification of sub, retrying with backoff; the
-// resource is read again for each attempt.
+// subscription and its resource are read again for each attempt. It stops
+// when sub is dropped.
 func (n *notifier) deliver(sub *subscription, status ieee20305.UInt8) error {
 	policy := n.s.cfg.NotificationRetry
 	if policy == nil {
@@ -328,12 +367,16 @@ func (n *notifier) deliver(sub *subscription, status ieee20305.UInt8) error {
 	}
 	var first time.Time
 	for attempt := 0; ; attempt++ {
-		body, st, err := n.build(sub, status)
+		t, ok := n.current(sub)
+		if !ok {
+			return sub.ctx.Err()
+		}
+		body, st, err := n.build(sub.ctx, t, status)
 		if err != nil {
 			return err
 		}
 		status = st
-		err = n.post(sub.uri, body)
+		err = n.post(sub.ctx, t.uri, body)
 		if err == nil {
 			if status != NotificationDefault {
 				return errCancelled
@@ -347,13 +390,13 @@ func (n *notifier) deliver(sub *subscription, status ieee20305.UInt8) error {
 		if !retry || time.Since(first)+wait > cancelAfter {
 			return err
 		}
-		n.s.log.Warnf("notification %d of subscription %s to %s failed, again in %v: %v", attempt+1, sub.href, sub.uri, wait, err)
-		t := time.NewTimer(wait)
+		n.s.log.Warnf("notification %d of subscription %s to %s failed, again in %v: %v", attempt+1, sub.href, t.uri, wait, err)
+		timer := time.NewTimer(wait)
 		select {
-		case <-n.ctx.Done():
-			t.Stop()
-			return n.ctx.Err()
-		case <-t.C:
+		case <-sub.ctx.Done():
+			timer.Stop()
+			return sub.ctx.Err()
+		case <-timer.C:
 		}
 	}
 }
@@ -361,17 +404,17 @@ func (n *notifier) deliver(sub *subscription, status ieee20305.UInt8) error {
 // errCancelled ends a subscription whose cancellation was sent.
 var errCancelled = errors.New("server: subscription cancelled")
 
-// build returns the notification of sub: the resource as the owner of the
-// subscription reads it now, or the cancellation status, which build sets
-// when the owner may no longer read the resource.
-func (n *notifier) build(sub *subscription, status ieee20305.UInt8) ([]byte, ieee20305.UInt8, error) {
-	ctx := n.ctx
+// build returns the notification of t, a copy of a subscription: the
+// resource as the owner of the subscription reads it now, or the
+// cancellation status, which build sets when the owner may no longer read
+// the resource.
+func (n *notifier) build(ctx context.Context, t *subscription, status ieee20305.UInt8) ([]byte, ieee20305.UInt8, error) {
 	now := ieee20305.TimeType(n.s.clock().Unix())
-	note := &ieee20305.Notification{SubscriptionURI: sub.href, CreatedDateTime: &now}
-	note.SubscribedResource = sub.resource
-	p := n.principal(sub.owner)
+	note := &ieee20305.Notification{SubscriptionURI: t.href, CreatedDateTime: &now}
+	note.SubscribedResource = t.resource
+	p := n.principal(t.owner)
 	if status == NotificationDefault {
-		doc, err := n.read(ctx, p, sub)
+		doc, err := n.read(ctx, p, t)
 		switch {
 		case errors.Is(err, ErrNoNode):
 			status = NotificationResourceDeleted
@@ -379,7 +422,7 @@ func (n *notifier) build(sub *subscription, status ieee20305.UInt8) ([]byte, iee
 			status = NotificationCancelled
 		default:
 			if h, ok := doc.(ieee20305.Hrefer); !ok || h.GetHref() == "" {
-				setHref(doc, sub.resource)
+				setHref(doc, t.resource)
 			}
 			n.s.dressLinks(ctx, p, doc)
 			note.Resource = &ieee20305.AnyResource{Value: doc}
@@ -390,9 +433,9 @@ func (n *notifier) build(sub *subscription, status ieee20305.UInt8) ([]byte, iee
 	return out, status, err
 }
 
-// read returns the resource of sub as p reads it.
-func (n *notifier) read(ctx context.Context, p Principal, sub *subscription) (any, error) {
-	node, err := n.s.store.Get(ctx, sub.resource)
+// read returns the resource of t, a copy of a subscription, as p reads it.
+func (n *notifier) read(ctx context.Context, p Principal, t *subscription) (any, error) {
+	node, err := n.s.store.Get(ctx, t.resource)
 	if err != nil {
 		return nil, err
 	}
@@ -400,11 +443,11 @@ func (n *notifier) read(ctx context.Context, p Principal, sub *subscription) (an
 		return nil, ErrNoNode
 	}
 	if !n.s.canRead(p, node) {
-		return nil, httpError(http.StatusForbidden, "%s", sub.resource)
+		return nil, httpError(http.StatusForbidden, "%s", t.resource)
 	}
-	r, _ := http.NewRequestWithContext(ctx, http.MethodGet, sub.resource, nil)
+	r, _ := http.NewRequestWithContext(ctx, http.MethodGet, t.resource, nil)
 	req := &Request{Request: r, Principal: p, Node: node, Spec: n.s.resources[node.Resource],
-		Query: Query{Limit: sub.limit, HasLimit: true}}
+		Query: Query{Limit: t.limit, HasLimit: true}}
 	if h := n.s.hooks[node.Resource].Get; h != nil {
 		return h(ctx, req)
 	}
@@ -426,18 +469,24 @@ func (n *notifier) principal(lfdi string) Principal {
 	return p
 }
 
-// post sends a notification to uri.
+// post sends a notification to uri, within the timeout of one attempt.
 // The URI is checked again here, not only when the subscription was
 // posted: a persistent store may hold subscriptions an earlier
 // configuration accepted.
-func (n *notifier) post(uri string, body []byte) error {
+func (n *notifier) post(ctx context.Context, uri string, body []byte) error {
 	u, err := n.s.notificationURL(uri)
 	if err != nil {
 		return err
 	}
-	n.sem <- struct{}{}
+	select {
+	case n.sem <- struct{}{}:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 	defer func() { <-n.sem }()
-	req, err := http.NewRequestWithContext(n.ctx, http.MethodPost, u.String(), bytes.NewReader(body))
+	actx, cancel := context.WithTimeout(ctx, n.timeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(actx, http.MethodPost, u.String(), bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
@@ -557,26 +606,74 @@ func (s *Server) updateSubscription(ctx context.Context, r *Request) error {
 
 // DefaultNotificationURIAllowed is the NotificationURIAllowed of a server
 // without one: it refuses the hosts a device must not make the server
-// connect to with its certificate: localhost, and literal loopback,
-// unspecified, link-local and multicast addresses (cloud metadata services
-// are link-local), with or without an IPv6 zone. It also refuses hosts
+// connect to with its certificate: localhost and the other names of
+// loopback in common hosts files (ip6-localhost, ip6-loopback,
+// localhost.localdomain, localhost6), and literal loopback, unspecified,
+// link-local and multicast addresses (cloud metadata services are
+// link-local), with or without an IPv6 zone. It applies the same checks to
+// the IPv4 address an IPv6 literal embeds: IPv4-mapped (::ffff:0:0/96),
+// IPv4-compatible (::/96), IPv4-translated (::ffff:0:0:0/96, RFC 2765),
+// NAT64 (64:ff9b::/96, RFC 6052) and 6to4 (2002::/16, RFC 3056). It also
+// refuses names with an empty label, after any trailing dots, and hosts
 // whose last label is a number, such as 127.1, 2130706433 or 0x7f000001:
 // they are no DNS names (RFC 1123, section 2.1), and the system resolver
 // of some platforms reads them as IPv4 addresses (inet_aton). A host name
 // is not resolved: what the names of a network reach is for the operator's
 // own NotificationURIAllowed, or its network, to decide.
 func DefaultNotificationURIAllowed(u *url.URL) bool {
-	host := strings.ToLower(strings.TrimSuffix(u.Hostname(), "."))
-	if host == "" || host == "localhost" || strings.HasSuffix(host, ".localhost") {
+	host := strings.ToLower(strings.TrimRight(u.Hostname(), "."))
+	if host == "" || loopbackNames[host] || strings.HasSuffix(host, ".localhost") {
 		return false
 	}
 	addr, err := netip.ParseAddr(host)
 	if err != nil {
+		if strings.HasPrefix(host, ".") || strings.Contains(host, "..") {
+			return false
+		}
 		return !numericLabel(host[strings.LastIndexByte(host, '.')+1:])
 	}
-	ip := net.IP(addr.Unmap().AsSlice())
+	addr = addr.Unmap()
+	if v4, ok := embeddedIPv4(addr); ok && !allowedIP(v4) {
+		return false
+	}
+	return allowedIP(addr)
+}
+
+// loopbackNames are the names of loopback addresses in the hosts files of
+// common systems.
+var loopbackNames = map[string]bool{
+	"localhost": true, "localhost.localdomain": true,
+	"localhost6": true, "localhost6.localdomain6": true,
+	"ip6-localhost": true, "ip6-loopback": true,
+}
+
+// allowedIP reports whether a is no loopback, unspecified, link-local or
+// multicast address.
+func allowedIP(a netip.Addr) bool {
+	ip := net.IP(a.AsSlice())
 	return !ip.IsLoopback() && !ip.IsUnspecified() && !ip.IsLinkLocalUnicast() &&
 		!ip.IsLinkLocalMulticast() && !ip.IsMulticast() && !ip.IsInterfaceLocalMulticast()
+}
+
+// embeddedIPv4 returns the IPv4 address an IPv6 address embeds by its
+// prefix: IPv4-compatible (::/96), IPv4-translated (::ffff:0:0:0/96),
+// NAT64 well-known (64:ff9b::/96) or 6to4 (2002::/16). IPv4-mapped
+// addresses are unmapped before.
+func embeddedIPv4(a netip.Addr) (netip.Addr, bool) {
+	if !a.Is6() {
+		return netip.Addr{}, false
+	}
+	b := a.As16()
+	var zero [12]byte
+	translated := [12]byte{8: 0xff, 9: 0xff}
+	nat64 := [12]byte{0: 0x00, 1: 0x64, 2: 0xff, 3: 0x9b}
+	switch {
+	case [12]byte(b[:12]) == zero, [12]byte(b[:12]) == translated, [12]byte(b[:12]) == nat64:
+		return netip.AddrFrom4([4]byte(b[12:])), true
+	case b[0] == 0x20 && b[1] == 0x02:
+		return netip.AddrFrom4([4]byte(b[2:6])), true
+	}
+	return netip.Addr{}, false
 }
 
 // numericLabel reports whether a label is a decimal, octal or hexadecimal
@@ -594,8 +691,9 @@ func numericLabel(l string) bool {
 
 // NewNotificationClient returns an http.Client for Config.NotificationClient:
 // it presents the server's certificate, and verifies the listeners of the
-// devices against deviceCAs (security.NotificationTLSConfig). It sets no
-// timeout of its own: the notifier bounds each delivery with its context.
+// devices against deviceCAs (security.NotificationTLSConfig). It sets a
+// Timeout of one minute; the notifier bounds each attempt to deliver a
+// notification to one minute as well, whatever its NotificationClient.
 func NewNotificationClient(server tls.Certificate, deviceCAs *x509.CertPool) *http.Client {
 	return &http.Client{Transport: &http.Transport{
 		TLSClientConfig:     security.NotificationTLSConfig(server, deviceCAs),

@@ -52,6 +52,9 @@ type packet struct {
 // multicastTransport is the PacketTransport over UDP sockets joined to the
 // IPv4 and IPv6 mDNS groups on port 5353.
 type multicastTransport struct {
+	// link drops packets from sources that are not on the link; nil
+	// accepts every source.
+	link    *onLink
 	conns   []*net.UDPConn
 	groups  []netip.AddrPort
 	packets chan packet
@@ -66,8 +69,18 @@ type multicastTransport struct {
 // IPv6 group, and fails only when it can join neither. Multicast loopback
 // is enabled where the platform allows, so that services on this host
 // find each other.
+//
+// The sockets also receive unicast packets to port 5353. As RFC 6762,
+// sections 5.5 and 11, requires, the transport drops packets whose source
+// address is not on the local link: an address of a prefix of ifi (of an
+// interface that is up when ifi is nil), or an IPv4 or IPv6 link-local
+// address.
 func NewMulticastTransport(ifi *net.Interface) (PacketTransport, error) {
-	t := &multicastTransport{packets: make(chan packet, 16), done: make(chan struct{})}
+	t := &multicastTransport{
+		link:    &onLink{ifi: ifi, prefixes: interfacePrefixes},
+		packets: make(chan packet, 16),
+		done:    make(chan struct{}),
+	}
 	var errs []error
 	for _, g := range []struct {
 		network string
@@ -113,6 +126,9 @@ func (t *multicastTransport) read(c *net.UDPConn) {
 			continue
 		}
 		backoff = 0
+		if t.link != nil && !t.link.accept(src.Addr()) {
+			continue
+		}
 		select {
 		case t.packets <- packet{b[:n], src}:
 		case <-t.done:
@@ -168,4 +184,86 @@ func (t *multicastTransport) Close() error {
 		t.wg.Wait()
 	})
 	return errors.Join(errs...)
+}
+
+// linkRefresh is the shortest interval between two reads of the
+// interface prefixes for a source not found in them, a variable so that
+// tests can change it.
+var linkRefresh = 5 * time.Second
+
+// onLink tells whether a source address is on the local link (RFC 6762,
+// section 11).
+type onLink struct {
+	ifi      *net.Interface
+	prefixes func(*net.Interface) ([]netip.Prefix, error)
+
+	mu        sync.Mutex
+	known     []netip.Prefix
+	refreshed time.Time
+}
+
+// accept reports whether a is a link-local address or an address of a
+// prefix of the interfaces. The prefixes are read again, at most once per
+// linkRefresh, when a is not in them, so that new addresses are found.
+func (l *onLink) accept(a netip.Addr) bool {
+	a = a.Unmap().WithZone("")
+	if a.IsLinkLocalUnicast() {
+		return true
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if containsAddr(l.known, a) {
+		return true
+	}
+	if !l.refreshed.IsZero() && time.Since(l.refreshed) < linkRefresh {
+		return false
+	}
+	l.refreshed = time.Now()
+	if ps, err := l.prefixes(l.ifi); err == nil {
+		l.known = ps
+	}
+	return containsAddr(l.known, a)
+}
+
+func containsAddr(ps []netip.Prefix, a netip.Addr) bool {
+	for _, p := range ps {
+		if p.Contains(a) {
+			return true
+		}
+	}
+	return false
+}
+
+// interfacePrefixes returns the prefixes of the addresses of ifi, or of
+// every interface that is up when ifi is nil.
+func interfacePrefixes(ifi *net.Interface) ([]netip.Prefix, error) {
+	var addrs []net.Addr
+	var err error
+	if ifi != nil {
+		addrs, err = ifi.Addrs()
+	} else {
+		var ifis []net.Interface
+		if ifis, err = net.Interfaces(); err == nil {
+			for _, i := range ifis {
+				if i.Flags&net.FlagUp == 0 {
+					continue
+				}
+				as, err := i.Addrs()
+				if err != nil {
+					continue
+				}
+				addrs = append(addrs, as...)
+			}
+		}
+	}
+	if err != nil {
+		return nil, err
+	}
+	var out []netip.Prefix
+	for _, a := range addrs {
+		if p, err := netip.ParsePrefix(a.String()); err == nil {
+			out = append(out, netip.PrefixFrom(p.Addr().Unmap().WithZone(""), p.Bits()).Masked())
+		}
+	}
+	return out, nil
 }

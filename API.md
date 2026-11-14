@@ -52,7 +52,10 @@ scalar types named types (`UInt32`, `String32`, `HexBinary160`, `MRIDType`,
 | `MediaType` | `application/sep+xml` |
 
 Elements a schema admits without declaring (`xs:any`) are kept as
-`ExtensionElements`.
+`ExtensionElements`. An `ExtensionElement`'s content is re-encoded with
+every namespace its element and attribute names use declared, so it means
+the same wherever it is written; an element with a duplicate attribute is
+refused.
 
 ### Errors
 
@@ -222,6 +225,7 @@ func (a *Agent) Close()
 | `OnFile` | Files offered for download |
 | `MirrorUsagePoint`, `Readings`, `PostRate` | Metering: the mirror, and the readings posted at `PostRate` |
 | `Clock`, `Seed` | The clock of scheduling, and the seed of randomization |
+| `NotificationAuthorize` | Decides whether the `NotificationHandler` takes a request (`client.NotificationConfig.Authorize`): accept only the server's certificate, say |
 | `Metrics`, `Logger` | Plug points |
 
 The agent posts the Responses events ask for (received, started,
@@ -237,7 +241,7 @@ completed, superseded, cancelled), and retries those that fail.
 | `PutDeviceStatus`, `PutPowerStatus`, `PutFileStatus` | Report the device |
 | `Mirror(ctx, mup)`, `PostReadings(ctx, mup, readings...)` | Metering outside `Readings` |
 | `RequestFlowReservation(ctx, req)` | Ask for a flow reservation |
-| `NotificationHandler()` | The `http.Handler` to serve at `NotificationURI` |
+| `NotificationHandler()` | The `http.Handler` to serve at `NotificationURI` (the same on every call); it ignores notifications of subscriptions that are not the agent's |
 
 `ErrNotStarted` is returned by calls that need what `Start` reads.
 
@@ -263,13 +267,14 @@ func (s *Server) Close() error
 | `Profile`, `DefaultEdition` | The documents served (`StandardProfile`, `csipserver.Profile`) and the default edition of devices |
 | `PeerCertificates` | How a request's client certificates are found (`tlsccm.PeerCertificates` behind the CCM_8 listener) |
 | `InBandRegistration` | Unknown devices may post their EndDevice |
+| `AssignedDevicesOnly` | Aggregators register only the devices assigned to them (`DeviceSpec.ManagedBy`), not devices the server was not given |
 | `PollRate`, `DefaultLimit`, `MaxLimit`, `MaxRequestBytes` | What the server tells and takes |
 | `EnableDiscouraged`, `Disable`, `ClientLists` | Methods beyond, or short of, the WADL's conformance |
 | `NotificationClient`, `NotificationURIAllowed`, `NotificationWorkers`, `NotificationRetry`, `NotificationCancelAfter` | Subscriptions: the client of the notifier (`NewNotificationClient`), the guard of the URIs devices choose (`DefaultNotificationURIAllowed`), and delivery |
 | `EventClock`, `EventRetention` | The clock of the event lifecycle, and how long ended events stay |
 | `OnResponse` | Each Response, once |
 | `FlowPolicy` | Answers FlowReservationRequests (`GrantAll`) |
-| `MaxListItems` | The cap of the lists devices post to |
+| `MaxListItems` | The cap of the lists devices post to, per device in lists of every client |
 | `Hooks` | Per WADL resource: `Get`, `Create`, `Update`, `Delete` of your own |
 | `Clock`, `Metrics`, `Logger` | Plug points |
 
@@ -332,7 +337,8 @@ func (s *Scheduler) Close()
 ```
 
 `Options` sets the clock, the seed, randomization and the conflict rule (`DERConflicts`,
-`DRLCConflicts`, `AllConflict`). `Status` is `Scheduled`,
+`DRLCConflicts`, `AllConflict`); `Independent` declares that no two events
+conflict, so that the scheduler never compares them. `Status` is `Scheduled`,
 `Active`, `Completed`, `Cancelled`, `Superseded`, …; `ResponseRequired(flags,
 t)` says whether, and with which status, a transition is answered.
 

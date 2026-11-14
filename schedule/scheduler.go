@@ -155,6 +155,12 @@ type Options struct {
 	// so that one can supersede the other. When nil, all events
 	// conflict. See DERConflicts and DRLCConflicts.
 	Conflicts func(a, b Event) bool
+	// Independent declares that no two events conflict, as on a server
+	// that leaves supersession to its clients: Conflicts is not called,
+	// and the Scheduler does not compare events with each other, so that
+	// its work per change grows with the number of events rather than
+	// with its square.
+	Independent bool
 }
 
 // Scheduler tracks the events of one function set and resolves them into
@@ -171,10 +177,11 @@ type Options struct {
 // The Scheduler moves events through their states on its Clock and reports
 // each change to its subscribers. It is safe for concurrent use.
 type Scheduler struct {
-	clock     Clock
-	seed      uint64
-	randomize bool
-	conflicts func(a, b Event) bool
+	clock       Clock
+	seed        uint64
+	randomize   bool
+	conflicts   func(a, b Event) bool
+	independent bool
 
 	mu      sync.Mutex
 	events  map[string]*entry
@@ -202,12 +209,13 @@ type entry struct {
 // New returns a Scheduler with options o.
 func New(o Options) *Scheduler {
 	s := &Scheduler{
-		clock:     o.Clock,
-		seed:      o.Seed,
-		randomize: o.Randomize,
-		conflicts: o.Conflicts,
-		events:    make(map[string]*entry),
-		subs:      make(map[*subscriber]struct{}),
+		clock:       o.Clock,
+		seed:        o.Seed,
+		randomize:   o.Randomize,
+		conflicts:   o.Conflicts,
+		independent: o.Independent,
+		events:      make(map[string]*entry),
+		subs:        make(map[*subscriber]struct{}),
 	}
 	if s.clock == nil {
 		s.clock = SystemClock
@@ -419,7 +427,7 @@ func (s *Scheduler) evaluate(now time.Time, out *[]Transition) {
 		running := !now.Before(start) && now.Before(end)
 		lost := false
 		var cutoff time.Time
-		for _, w := range accepted {
+		for _, w := range accepted { // empty when independent
 			if !overlap(start, end, w.ws, w.we) || !s.conflicts(w.ev, en.ev) {
 				continue
 			}
@@ -449,7 +457,9 @@ func (s *Scheduler) evaluate(now time.Time, out *[]Transition) {
 				s.set(en, Scheduled, now, out) // its start moved later
 			}
 			en.ws, en.we = start, end
-			accepted = append(accepted, en)
+			if !s.independent {
+				accepted = append(accepted, en)
+			}
 		}
 	}
 	s.arm(now, live)

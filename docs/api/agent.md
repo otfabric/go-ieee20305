@@ -118,7 +118,7 @@ Mirror creates the MirrorUsagePoint mup of the device in the server's MirrorUsag
 func (a *Agent) NotificationHandler() http.Handler
 ```
 
-NotificationHandler returns the http.Handler of the notifications of the agent's subscriptions, to serve at Config.NotificationURI (over TLS that verifies the server's certificate). A notification makes the agent poll at once; a cancellation, subscribe again at its next poll.
+NotificationHandler returns the http.Handler of the notifications of the agent's subscriptions, to serve at Config.NotificationURI (over TLS that verifies the server's certificate; Config.NotificationAuthorize checks the sender). A notification of one of the agent's subscriptions makes the agent poll at once, unless it is waiting after a failure; a cancellation, subscribe again at its next poll. A notification of another subscription is answered and ignored. Every call returns the same handler.
 
 #### func (Agent) PostReadings
 
@@ -223,6 +223,11 @@ type Config struct {
 	// zero). A server that takes no subscriptions is polled as usual.
 	NotificationURI    string
 	SubscribedPollRate time.Duration
+	// NotificationAuthorize, when set, decides whether the
+	// NotificationHandler takes a request (see
+	// client.NotificationConfig.Authorize): accept only the server's
+	// certificate, say. An error answers 403.
+	NotificationAuthorize func(r *http.Request) error
 	// OnDERControl is called with every transition of the DERControls of
 	// the device's DERPrograms: their receipt, start, end, cancellation
 	// and supersession, as a schedule.Scheduler with randomization and

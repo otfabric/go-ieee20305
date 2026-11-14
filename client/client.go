@@ -158,8 +158,14 @@ func NewHTTPClient(device tls.Certificate, roots *x509.CertPool) *http.Client {
 		Proxy:               http.ProxyFromEnvironment,
 		TLSClientConfig:     security.ClientTLSConfig(device, roots),
 		TLSHandshakeTimeout: 10 * time.Second,
+		// The headers of an IEEE 2030.5 answer are small: bounded well
+		// below net/http's 10 MiB default.
+		MaxResponseHeaderBytes: maxResponseHeaderBytes,
 	}}
 }
+
+// maxResponseHeaderBytes bounds the headers of an answer of the server.
+const maxResponseHeaderBytes = 64 << 10
 
 // sameOrigin reports whether u is on the client's server. A URL with
 // userinfo is not, even on the server's host: net/http would send it as
@@ -171,12 +177,30 @@ func (c *Client) sameOrigin(u *url.URL) bool {
 // sameHost reports whether two URL hosts, with their ports, are the same.
 // Case is insignificant in ASCII only (RFC 3986 section 6.2.2.1):
 // strings.EqualFold would also match the non-ASCII U+017F with s and U+212A
-// with k. An IPv6 zone, after the %, is not part of that rule and must match
-// exactly.
+// with k. An IPv6 zone, after the % of a bracketed IP literal (RFC 6874),
+// is not part of that rule and must match exactly; a % elsewhere is part of
+// the host.
 func sameHost(a, b string) bool {
-	aHost, aZone, _ := strings.Cut(a, "%")
-	bHost, bZone, _ := strings.Cut(b, "%")
-	return aZone == bZone && equalFoldASCII(aHost, bHost)
+	aHost, aZone, aOK := cutZone(a)
+	bHost, bZone, bOK := cutZone(b)
+	return aOK == bOK && aZone == bZone && equalFoldASCII(aHost, bHost)
+}
+
+// cutZone returns a URL host without the zone of its bracketed IPv6
+// literal, the zone, and whether it has one.
+func cutZone(h string) (host, zone string, ok bool) {
+	if !strings.HasPrefix(h, "[") {
+		return h, "", false
+	}
+	i := strings.IndexByte(h, '%')
+	if i < 0 {
+		return h, "", false
+	}
+	j := strings.IndexByte(h[i:], ']')
+	if j < 0 {
+		return h, "", false
+	}
+	return h[:i] + h[i+j:], h[i+1 : i+j], true
 }
 
 func equalFoldASCII(a, b string) bool {
@@ -215,7 +239,9 @@ func (c *Client) Resolve(href string) (*url.URL, error) {
 }
 
 // Get retrieves the resource at href into v, a pointer to a document type
-// such as *ieee20305.EndDevice.
+// such as *ieee20305.EndDevice. A document that violates the facets or
+// cardinalities of the schema fails with ErrProtocol, as with every call
+// that reads a document of the server.
 func (c *Client) Get(ctx context.Context, href string, v any) error {
 	return c.get(ctx, href, nil, v)
 }
@@ -253,7 +279,26 @@ func (c *Client) Fetch(ctx context.Context, href string) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	return c.codec.Decode(data)
+	v, err := c.codec.Decode(data)
+	if err != nil {
+		return nil, err
+	}
+	if err := validate(href, v); err != nil {
+		return nil, err
+	}
+	return v, nil
+}
+
+// validate checks a document of the server against the facets and
+// cardinalities of the schema: a document that violates them fails with
+// ErrProtocol (and the *ieee20305.ValidationError).
+func validate(href string, v any) error {
+	if vv, ok := v.(interface{ Validate() error }); ok {
+		if err := vv.Validate(); err != nil {
+			return fmt.Errorf("%w: %s: %w", ieee20305.ErrProtocol, href, err)
+		}
+	}
+	return nil
 }
 
 // DeviceCapability retrieves the server's DeviceCapability resource, the
@@ -302,7 +347,10 @@ func (c *Client) get(ctx context.Context, href string, q url.Values, v any) erro
 	if err != nil {
 		return err
 	}
-	return c.codec.Unmarshal(data, v)
+	if err := c.codec.Unmarshal(data, v); err != nil {
+		return err
+	}
+	return validate(href, v)
 }
 
 func (c *Client) body(ctx context.Context, href string, q url.Values) ([]byte, error) {
@@ -499,16 +547,27 @@ func remoteCertAlert(err error) bool {
 	return strings.Contains(msg, "certificate") || strings.Contains(msg, "unknown ca")
 }
 
-// retryAfter parses a Retry-After header: seconds, or an HTTP date.
+// maxRetryAfter bounds the wait a Retry-After header asks for.
+const maxRetryAfter = 24 * time.Hour
+
+// retryAfter parses a Retry-After header: seconds, or an HTTP date; at
+// most maxRetryAfter.
 func retryAfter(v string, now time.Time) time.Duration {
 	if v == "" {
 		return 0
 	}
-	if secs, err := strconv.Atoi(strings.TrimSpace(v)); err == nil && secs > 0 {
+	secs, err := strconv.ParseUint(strings.TrimSpace(v), 10, 64)
+	if errors.Is(err, strconv.ErrRange) {
+		return maxRetryAfter
+	}
+	if err == nil {
+		if secs > uint64(maxRetryAfter/time.Second) {
+			return maxRetryAfter
+		}
 		return time.Duration(secs) * time.Second
 	}
 	if t, err := http.ParseTime(v); err == nil && t.After(now) {
-		return t.Sub(now)
+		return min(t.Sub(now), maxRetryAfter)
 	}
 	return 0
 }

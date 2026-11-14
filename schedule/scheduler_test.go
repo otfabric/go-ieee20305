@@ -780,3 +780,29 @@ func TestConcurrency(t *testing.T) {
 		time.Sleep(time.Millisecond)
 	}
 }
+
+// Independent events are never compared: overlapping events are all active,
+// and Conflicts is not called.
+func TestIndependent(t *testing.T) {
+	c := newFakeClock(t0)
+	called := false
+	s := New(Options{Clock: c, Independent: true, Conflicts: func(a, b Event) bool { called = true; return true }})
+	defer s.Close()
+	s.Upsert(ev("A", 1, 0, 0, 100))
+	s.Upsert(ev("B", 0, 1, 0, 100))
+	s.Upsert(ev("C", 2, 2, 50, 100))
+	if got := statuses(s); got != "A=Active B=Active C=Scheduled" {
+		t.Errorf("statuses: %s", got)
+	}
+	c.Advance(secs(60))
+	if got := statuses(s); got != "A=Active B=Active C=Active" {
+		t.Errorf("statuses at 60: %s", got)
+	}
+	c.Advance(secs(60))
+	if got := statuses(s); got != "A=Completed B=Completed C=Active" {
+		t.Errorf("statuses at 120: %s", got)
+	}
+	if called {
+		t.Error("Conflicts called")
+	}
+}

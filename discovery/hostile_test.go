@@ -26,7 +26,7 @@ func testBrowser() *browser {
 		addrs:    map[string]map[netip.Addr]time.Time{},
 		names:    map[string]string{},
 		emitted:  map[string]Service{},
-		resolved: map[dnsmsg.Question]time.Time{},
+		resolved: map[dnsmsg.Question]resolveState{},
 	}
 	return b
 }

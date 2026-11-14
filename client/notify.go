@@ -129,6 +129,10 @@ func (h *NotificationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "not a Notification", http.StatusBadRequest)
 		return
 	}
+	if err := n.Validate(); err != nil {
+		http.Error(w, "the Notification violates the schema", http.StatusBadRequest)
+		return
+	}
 	sum := sha256.Sum256(contentOf(n, data))
 	sub := h.acquire(n.SubscriptionURI)
 	defer h.release(sub)

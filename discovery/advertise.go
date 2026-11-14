@@ -197,11 +197,25 @@ func (a *Advertisement) respond(data []byte, src netip.AddrPort) (*dnsmsg.Messag
 	}
 	legacy := src.Port() != Port
 	unicast := legacy
+	// The known answers are checked once per record, and a question
+	// asked again is answered once, so that the work is linear in the
+	// size of the query.
+	suppressed := make([]bool, len(a.records))
+	for i, r := range a.records {
+		suppressed[i] = knownAnswer(q.Answers, r)
+	}
+	seen := make(map[dnsmsg.Question]bool, min(len(q.Questions), len(a.records)))
 	var answers []dnsmsg.Resource
 	for _, qu := range q.Questions {
+		key := qu
+		key.Name = strings.ToLower(qu.Name)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
 		matched := false
-		for _, r := range a.records {
-			if matches(qu, r) && !knownAnswer(q.Answers, r) && !contains(answers, r) {
+		for i, r := range a.records {
+			if matches(qu, r) && !suppressed[i] && !contains(answers, r) {
 				answers = append(answers, r)
 				matched = true
 			}
@@ -302,7 +316,7 @@ func sameRecord(a, b dnsmsg.Resource) bool {
 			dnsmsg.EqualNames(x.Target, y.Target)
 	case *dnsmsg.TXT:
 		y, ok := b.Data.(*dnsmsg.TXT)
-		return ok && strings.Join(x.Strings, "\x00") == strings.Join(y.Strings, "\x00")
+		return ok && slices.Equal(x.Strings, y.Strings)
 	case *dnsmsg.A:
 		y, ok := b.Data.(*dnsmsg.A)
 		return ok && x.Addr == y.Addr

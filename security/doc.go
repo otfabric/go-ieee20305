@@ -16,7 +16,8 @@
 // critical subjectAltName (HardwareModuleName, RFC 4108), which crypto/x509
 // refuses to verify. Verify verifies such chains, and ClientTLSConfig,
 // ServerTLSConfig and NotificationTLSConfig use it: they never fall back on
-// the system's roots, and a nil pool of roots is ErrConfiguration.
+// the system's roots: with a nil pool of roots, every handshake fails with
+// an error that matches ieee20305.ErrConfiguration.
 //
 //	tlsConfig := security.ServerTLSConfig(serverCert, deviceCAs)
 //	lfdi := security.CertificateLFDI(r.TLS.PeerCertificates[0])

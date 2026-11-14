@@ -76,6 +76,10 @@ const (
 	maxLabel = 63
 	maxName  = 255
 	maxPtr   = 0x3fff
+	// maxHops bounds the compression pointers followed in one name, as
+	// other DNS decoders do: a name of 255 bytes has at most 127 labels,
+	// so no encoder needs more pointers than that.
+	maxHops = 126
 )
 
 // ErrFormat is matched by every error that Parse returns for a malformed
@@ -239,10 +243,16 @@ func trimDot(name string) string {
 	return name[:len(name)-1]
 }
 
+// labelEscaper escapes the dots and backslashes of a label; a Replacer is
+// safe for concurrent use.
+var labelEscaper = strings.NewReplacer(`\`, `\\`, `.`, `\.`)
+
 // JoinLabel returns the name made of the label l, which may contain dots
 // and backslashes, followed by the name domain.
 func JoinLabel(l, domain string) string {
-	l = strings.NewReplacer(`\`, `\\`, `.`, `\.`).Replace(l)
+	if strings.ContainsAny(l, `\.`) {
+		l = labelEscaper.Replace(l)
+	}
 	if domain == "" {
 		return l
 	}

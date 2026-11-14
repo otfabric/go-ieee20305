@@ -224,3 +224,78 @@ func TestNewCCMErrors(t *testing.T) {
 		})
 	}
 }
+
+// NIST SP 800-38C, Appendix C, Example 4: 65536 octets of associated data,
+// which RFC 3610 section 2.2 encodes with the 0xff 0xfe prefix.
+func TestSP80038CExample4(t *testing.T) {
+	blk, err := aes.NewCipher(hexDecode(t, "404142434445464748494a4b4c4d4e4f"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := NewCCM(blk, 14, 13)
+	if err != nil {
+		t.Fatal(err)
+	}
+	adata := make([]byte, 65536)
+	for i := range adata {
+		adata[i] = byte(i)
+	}
+	nonce := hexDecode(t, "101112131415161718191a1b1c")
+	plaintext := hexDecode(t, "202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f")
+	want := hexDecode(t, "69915dad1e84c6376a68c2967e4dab615ae0fd1faec44cc484828529463ccf72b4ac6bec93e8598e7f0dadbcea5b")
+	got := c.Seal(nil, nonce, plaintext, adata)
+	if !bytes.Equal(got, want) {
+		t.Errorf("Seal = %x\nwant  %x", got, want)
+	}
+	opened, err := c.Open(nil, nonce, want, adata)
+	if err != nil || !bytes.Equal(opened, plaintext) {
+		t.Errorf("Open = %x, %v", opened, err)
+	}
+}
+
+func TestPutAdataLength(t *testing.T) {
+	for _, tt := range []struct {
+		n    uint64
+		want string
+	}{
+		{1, "0001"},
+		{0xfeff, "feff"},
+		{0xff00, "fffe0000ff00"},
+		{1<<32 - 1, "fffeffffffff"},
+		{1 << 32, "ffff0000000100000000"},
+		{1<<64 - 1, "ffffffffffffffffffff"},
+	} {
+		var block [ccmBlockSize]byte
+		n := putAdataLength(block[:], tt.n)
+		if got := hex.EncodeToString(block[:n]); got != tt.want {
+			t.Errorf("putAdataLength(%#x) = %s, want %s", tt.n, got, tt.want)
+		}
+	}
+}
+
+// A nonce of the wrong length is refused before it is used: Open returns an
+// error and Seal panics, as cipher.AEAD specifies.
+func TestCCMNonceLength(t *testing.T) {
+	blk, err := aes.NewCipher(make([]byte, 16))
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := NewCCM(blk, 8, 12)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sealed := c.Seal(nil, make([]byte, 12), []byte("data"), nil)
+	for _, n := range []int{0, 11, 13} {
+		if _, err := c.Open(nil, make([]byte, n), sealed, nil); !errors.Is(err, errInvalidNonceSize) {
+			t.Errorf("Open with a %d-byte nonce: %v", n, err)
+		}
+		func() {
+			defer func() {
+				if r := recover(); r != errInvalidNonceSize {
+					t.Errorf("Seal with a %d-byte nonce: recovered %v", n, r)
+				}
+			}()
+			c.Seal(nil, make([]byte, n), []byte("data"), nil)
+		}()
+	}
+}

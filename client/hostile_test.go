@@ -317,3 +317,40 @@ func TestHostileDocuments(t *testing.T) {
 		t.Error("an unterminated nest of 50000 documents decoded")
 	}
 }
+
+// A document of the server that violates a facet of the schema fails with
+// ErrProtocol, whichever call reads it.
+func TestDocumentsAreValidated(t *testing.T) {
+	long := strings.Repeat("A", 33) // a String32 description
+	prog := `<DERProgram href="/derp/1"><mRID>01</mRID><description>` + long + `</description><primacy>1</primacy></DERProgram>`
+	p := newPKI(t)
+	srv := server(t, p, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", client.MediaType)
+		switch r.URL.Path {
+		case "/derp/1":
+			_, _ = w.Write([]byte(strings.Replace(prog, "<DERProgram ", `<DERProgram xmlns="urn:ieee:std:2030.5:ns" `, 1)))
+		case "/derp":
+			_, _ = w.Write([]byte(`<DERProgramList xmlns="urn:ieee:std:2030.5:ns" href="/derp" all="1" results="1">` + prog + `</DERProgramList>`))
+		default:
+			http.NotFound(w, r)
+		}
+	})
+	c := newClient(t, p, srv, client.Config{})
+	ctx := context.Background()
+	check := func(what string, err error) {
+		t.Helper()
+		var ve *ieee20305.ValidationError
+		if !errors.Is(err, ieee20305.ErrProtocol) || !errors.As(err, &ve) {
+			t.Errorf("%s: %v", what, err)
+		}
+	}
+	var dp ieee20305.DERProgram
+	check("Get", c.Get(ctx, "/derp/1", &dp))
+	_, err := c.Fetch(ctx, "/derp/1")
+	check("Fetch", err)
+	var l ieee20305.DERProgramList
+	check("GetList", c.GetList(ctx, "/derp", client.ListOptions{}, &l))
+	_, err = c.FetchList(ctx, "/derp", client.ListOptions{})
+	check("FetchList", err)
+	check("Iterate", c.Iterate(ctx, "/derp", 0, func(any) error { return nil }))
+}

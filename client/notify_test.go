@@ -90,10 +90,16 @@ func TestNotificationHandler(t *testing.T) {
 		{"text", notification(t, "/s", 1, 1), []string{"Content-Type", "text/plain"}, http.StatusUnsupportedMediaType},
 		{"garbage", []byte("<x"), nil, http.StatusBadRequest},
 		{"not a notification", []byte(`<Time xmlns="urn:ieee:std:2030.5:ns"/>`), nil, http.StatusBadRequest},
+		// A Resource whose description is longer than its String32.
+		{"violates the schema", []byte(`<Notification xmlns="urn:ieee:std:2030.5:ns"><subscribedResource>/derp/1</subscribedResource>` +
+			`<Resource xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:type="DERProgram" href="/derp/1"><mRID>01</mRID>` +
+			`<description>` + strings.Repeat("A", 33) + `</description><primacy>1</primacy></Resource>` +
+			`<status>0</status><subscriptionURI>/s/9</subscriptionURI></Notification>`), nil, http.StatusBadRequest},
 		{"too large", []byte(strings.Repeat(" ", 5000)), nil, http.StatusRequestEntityTooLarge},
 	} {
-		if code := post(c.body, c.header...); code != c.want {
-			t.Errorf("%s: %d, want %d", c.name, code, c.want)
+		before := len(got)
+		if code := post(c.body, c.header...); code != c.want || len(got) != before {
+			t.Errorf("%s: %d, want %d, handled %d", c.name, code, c.want, len(got)-before)
 		}
 	}
 	w := httptest.NewRecorder()

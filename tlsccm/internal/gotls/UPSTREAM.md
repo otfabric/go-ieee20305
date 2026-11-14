@@ -25,7 +25,12 @@ below are undone.
 | Stand-ins for the internal packages a copy cannot import: `crypto/internal/boring`, `crypto/internal/boring/fipstls`, `internal/cpu` (no AES hardware detection: the AES-GCM preference order of a CPU without AES-NI; AES itself still uses the hardware), `internal/godebug` (no GODEBUG settings) | `stubs/*`, and their imports in `boring.go`, `cipher_suites.go`, `common.go`, `conn.go`, `handshake_client.go` |
 | CCM_8: registered by an `init` that ranks it before GCM | `cipher_suites_ccm.go` (Battelle Memorial Institute) |
 | GO-2025-4008: the ALPN error quotes the client's protocols | `handshake_server.go` (this repository; see SECURITY.md) |
+| Go 1.25: the client refuses a ServerKeyExchange on a curve it did not offer (`tls: server selected unoffered curve`), so a connection is on P-256 whatever the server picks | `key_agreement.go` (this repository; test `ports_test.go`) |
+| Go 1.25, RFC 9155: no SHA-1 signatures in TLS 1.2. The SHA-1 schemes are not offered (ClientHello, CertificateRequest) and so not accepted, a peer's SHA-1 preference is never used to sign, and a TLS 1.2 peer without `signature_algorithms` is refused. IEEE 2030.5 uses ECDSA P-256 with SHA-256 | `common.go`, `auth.go` (this repository; test `ports_test.go`) |
 | Not carried: `generate_cert.go` (a command), `fipsonly/` (boringcrypto only), the tests of crypto/tls | |
+
+Each change of a shared file is recorded as a patch in
+`../upstream/main.go` (`patches`), which `-diff` undoes before comparing.
 
 The copy is otherwise byte for byte the upstream files, and is kept so:
 it is not reformatted or linted (see `.golangci.yml`), so that it can be

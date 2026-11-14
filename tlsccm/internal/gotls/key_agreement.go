@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 )
 
 // a keyAgreement implements the client and server side of a TLS key agreement
@@ -293,6 +294,9 @@ func (ka *ecdheKeyAgreement) processServerKeyExchange(config *Config, clientHell
 		return errServerKeyExchange
 	}
 
+	if !slices.Contains(clientHello.supportedCurves, curveID) {
+		return errors.New("tls: server selected unoffered curve")
+	}
 	if _, ok := curveForCurveID(curveID); !ok {
 		return errors.New("tls: server selected unsupported curve")
 	}

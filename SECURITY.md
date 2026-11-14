@@ -35,9 +35,11 @@ present a certificate, and each verifies the other's chain.
 
 - `security.ClientTLSConfig`, `ServerTLSConfig` and `NotificationTLSConfig`
   verify chains with `security.Verify` against the pool you give them, and
-  never against the system's roots: a nil pool is an error
-  (`ErrConfiguration`), not a fallback. Give a device the CA of its
-  utility's servers, and a server the CA of its devices, nothing wider.
+  never against the system's roots. A nil pool is no fallback: the
+  constructors return no error, but every handshake then fails with an
+  error that matches `ErrConfiguration` (and `ErrCertificate`). Give a
+  device the CA of its utility's servers, and a server the CA of its
+  devices, nothing wider.
 - Verification cannot be turned off through this library. The configurations
   set `InsecureSkipVerify` only to replace the verification of crypto/tls,
   which rejects the critical HardwareModuleName subjectAltName of IEEE
@@ -51,7 +53,9 @@ present a certificate, and each verifies the other's chain.
   with TLS 1.2, P-256 and no session resumption; every `crypto/tls`
   vulnerability Go publishes since is reviewed, and its fix ported when it
   reaches tlsccm ([tlsccm/internal/gotls/SECURITY.md](tlsccm/internal/gotls/SECURITY.md)).
-  Keep tlsccm updated.
+  As in Go 1.25, tlsccm neither offers nor accepts SHA-1 handshake
+  signatures (RFC 9155), and its client refuses a server that picks a
+  curve it did not offer. Keep tlsccm updated.
 
 ### Device identity
 
@@ -61,7 +65,11 @@ SFDI its leftmost 36 bits with a check digit. There are no passwords or
 bearer tokens. The server authorizes every request by the LFDI of the
 client certificate: a device reads what is shared with it and its own
 resources, and changes only its own; an aggregator acts only for the devices
-it was given (`DeviceSpec.ManagedBy`).
+it was given (`DeviceSpec.ManagedBy`) and those it registers itself. By
+default an aggregator may register a device the server was not given (as
+CSIP-AUS aggregators do for their sites), never one the operator gave the
+server without assigning it to that aggregator; `Config.AssignedDevicesOnly`
+lets aggregators register only the devices assigned to them.
 
 ### Registration and the PIN
 
@@ -76,22 +84,39 @@ control the device.
 - **Provision devices** (`Admin.ProvisionDevice`) and leave
   `InBandRegistration` off unless unknown devices must register themselves;
   an in-band device is not registered until `Admin.Register` is called.
+- **Assign devices to aggregators** (`DeviceSpec.ManagedBy`) and set
+  `Config.AssignedDevicesOnly` unless aggregators must register devices
+  the operator did not give the server.
 - **Request limits.** `Config.MaxRequestBytes` bounds a request body,
   `MaxLimit` a page of a list, and `MaxListItems` the lists devices post to
-  (LogEvents, Responses, readings), so that a device cannot grow the server
-  without bound. Ended events are pruned after `EventRetention`.
+  (LogEvents, Responses, MirrorUsagePoints, MeterReadings, ReadingSets,
+  Readings, FlowReservationResponses), so that a device cannot grow the
+  server without bound. In a list of every client the cap counts each
+  device's own items, so the posts of one device take nothing of
+  another's. Deleting a MirrorUsagePoint deletes its UsagePoint. Ended
+  events are pruned from the scheduler after `EventRetention`; their nodes
+  stay in the store.
 - **Notifications are outbound requests** to a URI the device chooses. The
   default `NotificationURIAllowed` refuses loopback, link-local, multicast
-  and unspecified addresses (also with an IPv6 zone), and hosts whose last
-  label is a number (`127.1`, `0x7f000001`), which some system resolvers
-  read as IPv4 addresses; tighten it to the networks of your devices.
+  and unspecified addresses (also with an IPv6 zone, and the IPv4 address
+  an IPv6 literal embeds: IPv4-mapped, IPv4-compatible, IPv4-translated,
+  NAT64 and 6to4), the hosts-file names of loopback (`localhost`,
+  `ip6-localhost`, `ip6-loopback`, `localhost.localdomain`, `localhost6`),
+  names with an empty label, and hosts whose last label is a number
+  (`127.1`, `0x7f000001`), which some system resolvers read as IPv4
+  addresses; tighten it to the networks of your devices.
   It is checked when a subscription is posted or put and again before each
   notification, so subscriptions a persistent store kept from an earlier
   configuration are held to the current one. Host names are not resolved:
   a name that resolves to an internal address passes the default. The
   notifier follows no redirect (a 3xx fails the notification), presents
   the server's certificate and verifies the listener's
-  (`server.NewNotificationClient`).
+  (`server.NewNotificationClient`, whose `Timeout` is one minute). A
+  listener dialed by IP address is identified by its chain alone: its
+  name is checked only when the notificationURI names it by a DNS name.
+  The notifier bounds each attempt to one minute, whatever the
+  `NotificationClient`, and stops the notifications of a subscription
+  that is deleted.
 - **Set `http.Server` timeouts** (`ReadHeaderTimeout` at least), as with any
   Go HTTP server.
 
@@ -101,16 +126,25 @@ control the device.
   document cannot send a device to another host, or make it send credentials
   in a URL. A link's host matches the configured one but for ASCII case;
   userinfo, Unicode case variants and other spellings (a trailing dot, the
-  default port) are refused.
+  default port) are refused. A `%` is read as an IPv6 zone only inside a
+  bracketed IPv6 literal.
 - `Config.MaxResponseBytes` bounds a response, and `MaxListItems` what
-  `Iterate` reads from a list.
+  `Iterate` reads from a list. `client.NewHTTPClient` bounds response
+  headers to 64 KiB. A `Retry-After` is honoured up to 24 hours, and the
+  agent takes a server's pollRate up to 24 hours.
 - A `client.NotificationHandler` should check the sender: set
-  `NotificationConfig.Authorize` to accept only the server's certificate.
+  `NotificationConfig.Authorize` (for the agent,
+  `agent.Config.NotificationAuthorize`) to accept only the server's
+  certificate. The agent's handler ignores notifications of subscriptions
+  that are not the agent's.
 
 ### Input handling
 
 Every document from the network is decoded into the generated types and
-checked against the schema's facets and cardinalities (`Validate`). The
+checked against the schema's facets and cardinalities (`Validate`): the
+server answers such a request 400, the client fails with `ErrProtocol`
+(wrapping the `*ValidationError`), and a `NotificationHandler` answers a
+Notification that violates them 400. The
 codecs, the server's handler, HardwareModuleNames, the scheduler, DNS
 messages and hrefs have fuzz targets (`make fuzz`), run nightly in CI.
 Documents in another XML namespace are refused.

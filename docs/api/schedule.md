@@ -197,6 +197,12 @@ type Options struct {
 	// so that one can supersede the other. When nil, all events
 	// conflict. See DERConflicts and DRLCConflicts.
 	Conflicts func(a, b Event) bool
+	// Independent declares that no two events conflict, as on a server
+	// that leaves supersession to its clients: Conflicts is not called,
+	// and the Scheduler does not compare events with each other, so that
+	// its work per change grows with the number of events rather than
+	// with its square.
+	Independent bool
 }
 ```
 

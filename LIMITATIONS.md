@@ -8,8 +8,8 @@ and verification in [INTEROPERABILITY.md](INTEROPERABILITY.md).
 
 - The server keeps its resources in memory unless a `Store` is given; there is
   no database adapter in this module. It keeps no history beyond its `Store`:
-  ended events are pruned after `EventRetention`, and capped lists drop their
-  oldest items.
+  ended events are pruned from its scheduler (not from the store) after
+  `EventRetention`, and capped lists drop each device's oldest items.
 
 ## Verification
 
@@ -34,3 +34,8 @@ and verification in [INTEROPERABILITY.md](INTEROPERABILITY.md).
   only).
 - DNS-SD uses the link-local mDNS groups (224.0.0.251, ff02::fb, port 5353).
   IEEE 2030.5 specifies xmDNS, whose site-local scope `discovery` does not join.
+- DNS-SD takes packets from on-link sources only (a link-local address or an
+  address of an interface's prefix, RFC 6762 section 11): on a host whose
+  addresses are /32 or point-to-point, only link-local peers are heard.
+  `Browse` caps cached TTLs at 75 minutes, and keeps the TXT keys the
+  standard defines and at most 16 others, within 1300 bytes.

@@ -122,3 +122,56 @@ func TestCompactErrors(t *testing.T) {
 		}
 	}
 }
+
+// The XML Schema instance prefix is renamed to xsi only where no other
+// binding of xsi is affected, so the result never has two xmlns:xsi
+// attributes and keeps the namespace of every name.
+func TestCompactRenamesXSIOnlyWhereFree(t *testing.T) {
+	const x = xsiNamespace
+	for name, c := range map[string]struct{ in, want string }{
+		"xsi declared on the element": {
+			`<y xmlns:xsi="urn:other" xmlns:q="` + x + `" xsi:a="1" q:b="2"/>`,
+			`<y xmlns:xsi="urn:other" xmlns:q="` + x + `" xsi:a="1" q:b="2"></y>`,
+		},
+		"xsi attribute on the element": {
+			`<y xmlns:q="` + x + `" xsi:a="1" q:b="2"/>`,
+			`<y xmlns:q="` + x + `" xsi:a="1" q:b="2"></y>`,
+		},
+		"xsi bound above": {
+			`<r xmlns:xsi="urn:other"><y xmlns:q="` + x + `" q:b="2"><z xsi:a="1"/></y></r>`,
+			`<r xmlns:xsi="urn:other"><y xmlns:q="` + x + `" q:b="2"><z xsi:a="1"></z></y></r>`,
+		},
+		"xsi bound below": {
+			`<y xmlns:q="` + x + `" q:b="2"><z xmlns:xsi="urn:other" q:c="3" xsi:a="1"><q:w/></z><v q:d="4"/></y>`,
+			`<y xmlns:xsi="` + x + `" xsi:b="2"><z xmlns:xsi="urn:other" q:c="3" xsi:a="1" xmlns:q="` + x + `"><q:w></q:w></z><v xsi:d="4"></v></y>`,
+		},
+		"xsi used below": {
+			`<y xmlns:q="` + x + `"><z q:c="3" xsi:a="1"/></y>`,
+			`<y xmlns:xsi="` + x + `"><z q:c="3" xsi:a="1" xmlns:q="` + x + `"></z></y>`,
+		},
+		"prefix bound again below": {
+			`<y xmlns:q="` + x + `"><z xmlns:q="urn:q" q:c="3"/><v xmlns:q="` + x + `" q:d="4"/></y>`,
+			`<y xmlns:xsi="` + x + `"><z xmlns:q="urn:q" q:c="3"></z><v xmlns:xsi="` + x + `" xsi:d="4"></v></y>`,
+		},
+		"prefix bound again with xsi": {
+			`<y xmlns:q="` + x + `"><z xmlns:q="` + x + `" xmlns:xsi="` + x + `" q:c="3"/></y>`,
+			`<y xmlns:xsi="` + x + `"><z xmlns:q="` + x + `" xmlns:xsi="` + x + `" q:c="3"></z></y>`,
+		},
+		"element names": {
+			`<q:y xmlns:q="` + x + `"><q:z/></q:y>`,
+			`<xsi:y xmlns:xsi="` + x + `"><xsi:z></xsi:z></xsi:y>`,
+		},
+		"xsi bound to the same namespace above": {
+			`<r xmlns:xsi="` + x + `"><y xmlns:q="` + x + `" q:b="2"/></r>`,
+			`<r xmlns:xsi="` + x + `"><y xmlns:xsi="` + x + `" xsi:b="2"></y></r>`,
+		},
+	} {
+		out, err := compact([]byte(c.in))
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if string(out) != c.want {
+			t.Errorf("%s: compact =\n%s\nwant\n%s", name, out, c.want)
+		}
+	}
+}

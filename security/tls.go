@@ -5,7 +5,20 @@ package security
 import (
 	"crypto/tls"
 	"crypto/x509"
+	"fmt"
+
+	ieee20305 "github.com/otfabric/go-ieee20305"
 )
+
+// verifyPeer verifies the chain of a connection with Verify. A nil pool of
+// roots is a configuration error: every handshake fails with an error that
+// matches ieee20305.ErrConfiguration and ieee20305.ErrCertificate.
+func verifyPeer(cs tls.ConnectionState, o VerifyOptions) error {
+	if o.Roots == nil {
+		return fmt.Errorf("%w: %w: no pool of trusted CAs", ieee20305.ErrConfiguration, ieee20305.ErrCertificate)
+	}
+	return Verify(cs.PeerCertificates, o)
+}
 
 // ClientTLSConfig returns the TLS configuration of an IEEE 2030.5 client:
 // TLS 1.2 or later, the device certificate for mutual TLS, and the CAs that
@@ -20,6 +33,9 @@ import (
 // addresses. crypto/tls does not report the server name of a server dialed
 // by IP address, so such a server is identified by its chain alone.
 //
+// A nil roots fails every handshake with an error that matches
+// ieee20305.ErrConfiguration: the system's roots are never used.
+//
 // IEEE 2030.5 requires the cipher suite TLS_ECDHE_ECDSA_WITH_AES_128_CCM_8,
 // which crypto/tls does not implement. Connections use the ECDHE-ECDSA
 // suites crypto/tls offers, which servers commonly accept as well.
@@ -31,7 +47,7 @@ func ClientTLSConfig(device tls.Certificate, roots *x509.CertPool) *tls.Config {
 		// The chain is verified by VerifyConnection below.
 		InsecureSkipVerify: true,
 		VerifyConnection: func(cs tls.ConnectionState) error {
-			return Verify(cs.PeerCertificates, VerifyOptions{
+			return verifyPeer(cs, VerifyOptions{
 				Roots:      roots,
 				ServerName: cs.ServerName,
 				Usage:      x509.ExtKeyUsageServerAuth,
@@ -48,8 +64,9 @@ func ClientTLSConfig(device tls.Certificate, roots *x509.CertPool) *tls.Config {
 // certificates; ConnectionState.VerifiedChains is therefore empty. The
 // chain is verified in VerifyConnection, which crypto/tls also calls on a
 // resumed session: a client certificate that expired since the session was
-// issued is refused then too. See ClientTLSConfig about the cipher suite of
-// IEEE 2030.5.
+// issued is refused then too. A nil clientCAs fails every handshake with an
+// error that matches ieee20305.ErrConfiguration. See ClientTLSConfig about
+// the cipher suite of IEEE 2030.5.
 func ServerTLSConfig(server tls.Certificate, clientCAs *x509.CertPool) *tls.Config {
 	return &tls.Config{
 		MinVersion:   tls.VersionTLS12,
@@ -57,7 +74,7 @@ func ServerTLSConfig(server tls.Certificate, clientCAs *x509.CertPool) *tls.Conf
 		ClientAuth:   tls.RequireAnyClientCert,
 		ClientCAs:    clientCAs,
 		VerifyConnection: func(cs tls.ConnectionState) error {
-			return Verify(cs.PeerCertificates, VerifyOptions{
+			return verifyPeer(cs, VerifyOptions{
 				Roots: clientCAs,
 				Usage: x509.ExtKeyUsageClientAuth,
 			})
@@ -69,10 +86,16 @@ func ServerTLSConfig(server tls.Certificate, clientCAs *x509.CertPool) *tls.Conf
 // posts notifications to the listeners of devices: the server certificate
 // as its client certificate, and the listener's chain verified against
 // deviceCAs. A device may serve its listener with its device certificate,
-// whose extended key usage is clientAuth only, so the usage is not checked;
-// the listener's name is, when its certificate has DNS names or IP
-// addresses. As in ClientTLSConfig, InsecureSkipVerify only turns off the
-// verification of crypto/tls, which rejects HardwareModuleName names.
+// whose extended key usage is clientAuth only, so the usage is not checked.
+// The listener's name is checked when its certificate has DNS names or IP
+// addresses and the notificationURI names the listener by a DNS name:
+// crypto/tls does not report the server name of a listener dialed by IP
+// address, so such a listener, like one whose certificate holds only a
+// HardwareModuleName, is identified by its chain alone. A nil deviceCAs
+// fails every handshake with an error that matches
+// ieee20305.ErrConfiguration. As in ClientTLSConfig, InsecureSkipVerify only
+// turns off the verification of crypto/tls, which rejects
+// HardwareModuleName names.
 func NotificationTLSConfig(server tls.Certificate, deviceCAs *x509.CertPool) *tls.Config {
 	return &tls.Config{
 		MinVersion:         tls.VersionTLS12,
@@ -80,7 +103,7 @@ func NotificationTLSConfig(server tls.Certificate, deviceCAs *x509.CertPool) *tl
 		RootCAs:            deviceCAs,
 		InsecureSkipVerify: true,
 		VerifyConnection: func(cs tls.ConnectionState) error {
-			return Verify(cs.PeerCertificates, VerifyOptions{
+			return verifyPeer(cs, VerifyOptions{
 				Roots:      deviceCAs,
 				ServerName: cs.ServerName,
 				Usage:      x509.ExtKeyUsageAny,
