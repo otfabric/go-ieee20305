@@ -117,15 +117,20 @@ as linked nodes without a value.
 CurrentDERProgram are computed from the events when they are read.
 
 **Events** (`events.go`): one `schedule.Scheduler` holds the server's
-events of every function set, without randomization and with
-`Independent: true`: the server leaves supersession to its clients, so its events are
-never compared with each other. Its transitions write the EventStatus of
+events of every function set, without randomization, with `NoConflicts`
+and no `MaxEvents`: the server leaves supersession to its clients, so its
+events are never compared with each other. Its transitions write the EventStatus of
 each event (Scheduled, Active, Cancelled), under the event's node lock so
 that an operator's PUT and a status change do not lose each other; a
 cancellation is never undone by a transition the scheduler queued before
 it. An ended event keeps the status Active: IEEE 2030.5-2018 has no
 Completed. Ended events are dropped from the scheduler after
 `EventRetention`; their nodes stay in the store.
+
+**Resources of a device** (`device.go`, `store.go`): what clients create
+counts against `MaxDeviceResources` of the device that owns it. The memory
+store counts the nodes of each owner, and indexes the nodes by parent and
+by list, so that a deletion looks only at what it removes.
 
 **Responses and metering** (`metering.go`): a Response is stored once per
 device, event and status (`OnResponse` is told once). A MirrorUsagePoint
@@ -158,10 +163,11 @@ An `agent.Agent` runs on a `client.Client`:
    the server's pollRate (slower when subscribed), with `Backoff` on
    failures. Errors that waiting does not fix (4xx, certificates,
    configuration) end `Run`. A server's pollRate is taken up to 24 hours.
-3. Per function set, an event set (`events.go`) upserts the events it reads
-   into its own `schedule.Scheduler`, with randomization and the function
-   set's conflict rule, and passes each transition to the handler
-   (`OnDERControl`, …).
+3. Per function set, an event set (`events.go`) reads the events of a poll
+   and gives them together to its own `schedule.Scheduler` (at most
+   `MaxEvents` of them), with randomization and the function set's
+   conflict rule. A goroutine per function set passes each transition to
+   the handler (`OnDERControl`, …), from a queue of bounded length.
 4. The Responses the events ask for go through a queue that retries
    failures and drops what the server refuses with a 4xx.
 5. Metering (`metering.go`) creates the mirror once and posts readings at
@@ -170,6 +176,11 @@ An `agent.Agent` runs on a `client.Client`:
    FSAs, programs and controls, and a notification of one of its
    subscriptions wakes the poll loop; a notification does not shorten the
    backoff after a failure, and those of other subscriptions are ignored.
+7. `Close` ends `Run`, the scheduling and the handlers, and waits for
+   them, unless a handler called it: it knows its goroutines by their
+   identifiers (`internal/goid`). Handlers and `Metrics` are called
+   through `internal/callback`, which stops and logs one that does not
+   return normally.
 
 ## Testing
 

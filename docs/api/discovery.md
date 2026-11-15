@@ -83,6 +83,8 @@ func Browse(ctx context.Context, o BrowseOptions) (<-chan Service, error)
 
 Browse finds IEEE 2030.5 servers with multicast DNS: it queries for the PTR records of \_smartenergy.\_tcp.local, or of \<subtype>.\_sub.\_smartenergy.\_tcp.local for each subtype, at growing intervals, resolves the SRV, TXT, A and AAAA records of each instance found, and delivers a Service when an instance is complete or changes. When an instance is withdrawn with a goodbye or its records expire, Browse delivers it again with Removed set. Instances whose TXT record has no dcap key are ignored, as the standard requires.
 
+Each Service delivered is the receiver's: its TXT map and its slices are shared neither with the browser nor with another Service it delivers, so the receiver may keep and change them.
+
 Browsing goes on until ctx is done; then the channel is closed.
 
 ## Types
@@ -136,7 +138,7 @@ s needs an Instance, a Port and a TXT record with a dcap path starting with "/";
 func (a *Advertisement) Close() error
 ```
 
-Close sends goodbyes for the records of the advertisement, stops answering queries and closes the transport. It returns the error of sending the goodbyes or closing the transport, the same on every call.
+Close sends goodbyes for the records of the advertisement, stops answering queries and closes the transport. It returns the error of sending the goodbyes or closing the transport, the same on every call: it may be called more than once, and from several goroutines at once.
 
 #### func (Advertisement) Service
 
@@ -218,7 +220,8 @@ type Service struct {
 	// Addrs are the IPv4 and IPv6 addresses of Host.
 	Addrs []netip.Addr
 	// TXT holds the key/value pairs of the TXT record; keys are in lower
-	// case and a key without "=" has the empty value.
+	// case and a key without "=" has the empty value. In a Service that
+	// Browse delivers, the map and the slices are the receiver's.
 	TXT map[string]string
 	// Subtypes are the function-set subtypes the service is announced
 	// under, such as "_derp" or "_edev".

@@ -67,8 +67,8 @@ finds a `*net.OpError`, an `x509.UnknownAuthorityError`, a
 |---|---|
 | root | `*ValidationError` (`ErrInvalid`) from `Validate` and the codecs; `ErrProtocol` for documents that do not decode |
 | `client` | `*StatusError`, and the transport sentinels above. `ErrProtocol` wrapping the `*ValidationError` (so `ErrInvalid` too) for a document of the server that fails `Validate`. `ErrNotRegistered`: an EndDevice without a RegistrationLink. `ErrPINMismatch`: a Registration whose PIN is not the device's |
-| `agent` | What the client returns. `ErrNotStarted`: a call that needs what `Start` reads. `ErrClosed` after `Close`. `Run` stops on `ErrPINMismatch` and `ErrClosed`, and retries the rest |
-| `server` | `ErrNoNode` (matches `ErrNotFound`) from a `Store`. `ErrConfiguration` from `New`. `ErrClosed` for changes after `Close`. `ErrInvalid` from `Admin` for unknown resources |
+| `agent` | What the client returns. `ErrNotStarted`: a call that needs what `Start` reads. `ErrClosed` after `Close`: from `Start`, and from a `Run` that `Close` ends. `Run` stops on `ErrPINMismatch`, `ErrCertificate`, `ErrConfiguration` and `ErrClosed`, and retries the rest. A function of `Config` that does not return normally fails its poll with an error that names it (`Config.OnFile did not return normally: ...`), which matches no sentinel |
+| `server` | `ErrNoNode` (matches `ErrNotFound`) from a `Store`. `ErrConfiguration` from `New`. `ErrClosed` for changes after `Close`. `ErrInvalid` from `Admin` for unknown resources. A client whose device owns `Config.MaxDeviceResources` resources gets 403 (`ErrForbidden` in the client) for a request that would create one |
 | `security` | `ErrCertificate` from `Verify` and `VerifyPeerCertificate`; `ErrInvalid` from `ParseLFDI` |
 | `schedule` | `ErrInvalid` from `FromEvent` for a value that is not an event |
 | `discovery` | `ErrConfiguration` for a service that cannot be advertised. `ErrProtocol` for a record that names no usable server (`ErrNoDcap`). `ErrClosed` (and `net.ErrClosed`) after Close |

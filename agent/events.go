@@ -5,9 +5,11 @@ package agent
 import (
 	"context"
 	"reflect"
+	"sync/atomic"
 	"time"
 
 	ieee20305 "github.com/otfabric/go-ieee20305"
+	"github.com/otfabric/go-ieee20305/internal/goid"
 	"github.com/otfabric/go-ieee20305/schedule"
 )
 
@@ -68,8 +70,10 @@ type eventSet struct {
 	// response returns a new Response of the function set, or nil for a
 	// function set without them.
 	response func() any
-	// handler returns the handler of the agent's configuration.
+	// handler returns the handler of the agent's configuration, and name
+	// names it, for the log.
 	handler func(cfg *Config) func(ctx context.Context, t schedule.Transition) error
+	name    string
 }
 
 var eventSets = [functionSets]eventSet{
@@ -96,6 +100,7 @@ var eventSets = [functionSets]eventSet{
 		conflicts: schedule.DERConflicts,
 		response:  func() any { return &ieee20305.DERControlResponse{} },
 		handler:   func(c *Config) func(context.Context, schedule.Transition) error { return c.OnDERControl },
+		name:      "Config.OnDERControl",
 	},
 	DRLC: {
 		fs: DRLC,
@@ -115,6 +120,7 @@ var eventSets = [functionSets]eventSet{
 		conflicts: schedule.DRLCConflicts,
 		response:  func() any { return &ieee20305.DrResponse{} },
 		handler:   func(c *Config) func(context.Context, schedule.Transition) error { return c.OnEndDeviceControl },
+		name:      "Config.OnEndDeviceControl",
 	},
 	Messaging: {
 		fs: Messaging,
@@ -135,6 +141,7 @@ var eventSets = [functionSets]eventSet{
 		conflicts: func(a, b schedule.Event) bool { return false },
 		response:  func() any { return &ieee20305.TextResponse{} },
 		handler:   func(c *Config) func(context.Context, schedule.Transition) error { return c.OnTextMessage },
+		name:      "Config.OnTextMessage",
 	},
 	Pricing: {
 		fs: Pricing,
@@ -163,6 +170,7 @@ var eventSets = [functionSets]eventSet{
 		conflicts: func(a, b schedule.Event) bool { return a.Program == b.Program },
 		response:  func() any { return &ieee20305.PriceResponse{} },
 		handler:   func(c *Config) func(context.Context, schedule.Transition) error { return c.OnTimeTariffInterval },
+		name:      "Config.OnTimeTariffInterval",
 	},
 	Prepayment: {
 		fs: Prepayment,
@@ -183,6 +191,7 @@ var eventSets = [functionSets]eventSet{
 		handler: func(c *Config) func(context.Context, schedule.Transition) error {
 			return c.OnSupplyInterruptionOverride
 		},
+		name: "Config.OnSupplyInterruptionOverride",
 	},
 	FlowReservation: {
 		fs:       FlowReservation,
@@ -197,6 +206,7 @@ var eventSets = [functionSets]eventSet{
 		conflicts: func(a, b schedule.Event) bool { return false },
 		response:  func() any { return &ieee20305.FlowReservationResponseResponse{} },
 		handler:   func(c *Config) func(context.Context, schedule.Transition) error { return c.OnFlowReservation },
+		name:      "Config.OnFlowReservation",
 	},
 }
 
@@ -206,33 +216,116 @@ type eventLoop struct {
 	set   *eventSet
 	sched *schedule.Scheduler
 	done  chan struct{}
-	// best is the program of highest precedence, as of the last poll.
+	// gid identifies the goroutine of runLoop, which calls the handler:
+	// Close reads it to know that it was called from a handler.
+	gid atomic.Uint64
+	// best is the program of highest precedence, as of the last poll, and
+	// left counts the events of the polls the agent left out
+	// (Config.MaxEvents). Both are guarded by Agent.mu.
 	best any
+	left uint64
 }
 
 func (a *Agent) newLoops(seed uint64) {
 	for i := range eventSets {
 		set := &eventSets[i]
 		l := &eventLoop{set: set, done: make(chan struct{})}
-		l.sched = schedule.New(schedule.Options{Clock: a.clock, Seed: seed, Randomize: true, Conflicts: set.conflicts})
+		l.sched = schedule.New(schedule.Options{Clock: a.clock, Seed: seed, Randomize: true, Conflicts: set.conflicts,
+			MaxEvents: a.cfg.MaxEvents})
 		ch, _ := l.sched.Subscribe()
 		go a.runLoop(l, ch)
 		a.loops[i] = l
 	}
 }
 
+// closeLoops ends the scheduling of the events and waits for the handlers
+// that are running, unless a handler called it: its goroutine is one of
+// those to wait for, and so may be another handler's that closes the agent
+// too. The loops then end as their handlers return.
 func (a *Agent) closeLoops() {
+	self := goid.ID()
+	inHandler := false
 	for _, l := range a.loops {
 		l.sched.Close()
+		if self != 0 && l.gid.Load() == self {
+			inHandler = true
+		}
+	}
+	if inHandler {
+		return
+	}
+	for _, l := range a.loops {
 		<-l.done
 	}
 }
 
 // pollEvents reads the programs of the function set of l in the
-// assignments, and schedules their events.
+// assignments, and schedules their events: all at once, when it has read
+// them all, so that they are resolved together. The events the server no
+// longer lists go first. After a failure, the events read so far are
+// scheduled and none goes.
 func (a *Agent) pollEvents(ctx context.Context, l *eventLoop, fsas []*ieee20305.FunctionSetAssignments) error {
+	p := &eventPoll{known: map[string]bool{}, listed: map[string]bool{}, max: a.maxEvents}
+	for _, ev := range l.sched.Events() {
+		p.known[ev.MRID] = true
+	}
+	best, err := a.readEvents(ctx, l, fsas, p)
+	if err == nil {
+		var gone []string
+		for mrid := range p.known {
+			if !p.listed[mrid] {
+				gone = append(gone, mrid)
+			}
+		}
+		l.sched.RemoveAll(gone)
+	}
+	left := p.over + uint64(l.sched.UpsertAll(append(p.kept, p.added...)))
+	if left > 0 {
+		a.log.Warnf("%v: the server lists %d events beyond the %d the agent keeps (Config.MaxEvents): left out",
+			l.set.fs, left, a.maxEvents)
+	}
+	a.mu.Lock()
+	l.left += left
+	if err == nil {
+		l.best = best
+	}
+	a.mu.Unlock()
+	return err
+}
+
+// eventPoll is what a poll read of the events of a function set.
+type eventPoll struct {
+	// known are the events the agent had before the poll, and listed
+	// those the server lists, by mRID.
+	known, listed map[string]bool
+	// kept are the listed events the agent had, and added the new ones,
+	// in the order of the lists: at most max of them (no bound when max
+	// is 0), and over counts the others.
+	kept, added []schedule.Event
+	max         int
+	over        uint64
+}
+
+// take records an event the server lists.
+func (p *eventPoll) take(ev schedule.Event) {
+	if ev.MRID == "" || p.listed[ev.MRID] {
+		return
+	}
+	p.listed[ev.MRID] = true
+	switch {
+	case p.known[ev.MRID]:
+		p.kept = append(p.kept, ev)
+	case p.max > 0 && len(p.added) >= p.max:
+		p.over++
+	default:
+		p.added = append(p.added, ev)
+	}
+}
+
+// readEvents reads the events of the function set of l into p, and
+// returns its program of highest precedence.
+func (a *Agent) readEvents(ctx context.Context, l *eventLoop, fsas []*ieee20305.FunctionSetAssignments, p *eventPoll) (any, error) {
 	seen := map[string]bool{}
-	events := map[string]bool{}
 	var best any
 	bestPrimacy := -1
 	collect := func(list string, primacy uint8, program string) error {
@@ -243,18 +336,14 @@ func (a *Agent) pollEvents(ctx context.Context, l *eventLoop, fsas []*ieee20305.
 				a.log.Warnf("%v: skipping an event: %v", l.set.fs, err)
 				return nil
 			}
-			if ev.MRID == "" || events[ev.MRID] {
-				return nil
-			}
-			events[ev.MRID] = true
-			l.sched.Upsert(ev)
+			p.take(ev)
 			return nil
 		})
 	}
 	if ed := a.State().EndDevice; l.set.own != nil && ed != nil {
 		for _, list := range l.set.own(ed) {
 			if err := collect(list, 0, ed.GetHref()); err != nil {
-				return err
+				return nil, err
 			}
 		}
 	}
@@ -270,35 +359,27 @@ func (a *Agent) pollEvents(ctx context.Context, l *eventLoop, fsas []*ieee20305.
 			programs = append(programs, it)
 			return nil
 		}); err != nil {
-			return err
+			return nil, err
 		}
-		for _, p := range programs {
-			lists, primacy, ok, err := l.set.events(ctx, a, p)
+		for _, prog := range programs {
+			lists, primacy, ok, err := l.set.events(ctx, a, prog)
 			if err != nil {
-				return err
+				return nil, err
 			}
 			if !ok {
 				continue
 			}
 			if bestPrimacy < 0 || int(primacy) < bestPrimacy {
-				best, bestPrimacy = p, int(primacy)
+				best, bestPrimacy = prog, int(primacy)
 			}
 			for _, list := range lists {
-				if err := collect(list, primacy, hrefOf(p)); err != nil {
-					return err
+				if err := collect(list, primacy, hrefOf(prog)); err != nil {
+					return nil, err
 				}
 			}
 		}
 	}
-	for _, ev := range l.sched.Events() {
-		if !events[ev.MRID] {
-			l.sched.Remove(ev.MRID)
-		}
-	}
-	a.mu.Lock()
-	l.best = best
-	a.mu.Unlock()
-	return nil
+	return best, nil
 }
 
 func hrefOf(v any) string {
@@ -309,15 +390,18 @@ func hrefOf(v any) string {
 }
 
 // runLoop passes the transitions of the events of l to the handler and
-// posts the Responses they ask for, until the scheduler closes.
+// posts the Responses they ask for, until the scheduler closes. A handler
+// that does not return normally is logged (call), and the Response of its
+// transition is posted as after a handler that fails.
 func (a *Agent) runLoop(l *eventLoop, ch <-chan schedule.Transition) {
 	defer close(l.done)
+	l.gid.Store(goid.ID())
 	handle := l.set.handler(&a.cfg)
 	for t := range ch {
 		ctx := a.ctx
 		a.cfg.Metrics.OnEvent(l.set.fs, t)
 		if handle != nil {
-			if err := handle(ctx, t); err != nil {
+			if err := a.call(l.set.name, func() error { return handle(ctx, t) }); err != nil {
 				a.log.Warnf("%v: the handler of event %s failed: %v", l.set.fs, t.Event.MRID, err)
 			}
 		}
@@ -461,6 +545,24 @@ func (a *Agent) Events(fs FunctionSet) []schedule.Event {
 		return nil
 	}
 	return a.loops[fs].sched.Events()
+}
+
+// EventStats returns the counters of the events of the function set fs,
+// from New on: Refused counts the events of the polls the agent left out
+// because it kept Config.MaxEvents events (an event the server goes on
+// listing is counted at each poll), and Coalesced and Dropped the
+// transitions the handler did not get because it had fallen behind (see
+// schedule.Stats).
+func (a *Agent) EventStats(fs FunctionSet) schedule.Stats {
+	if fs < 0 || fs >= functionSets {
+		return schedule.Stats{}
+	}
+	l := a.loops[fs]
+	st := l.sched.Stats()
+	a.mu.Lock()
+	st.Refused = l.left
+	a.mu.Unlock()
+	return st
 }
 
 // offsetClock is the clock of the server as the agent knows it: the local

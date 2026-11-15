@@ -6,11 +6,12 @@
 // PIN of its Registration, and then polls its FunctionSetAssignments at the
 // server's pollRate, retrying with backoff when the server fails.
 //
-// Run does all of this until its context ends. The function sets an agent
-// takes part in plug into it as handlers: for DER, DRLC, messaging, pricing
-// and prepayment, the agent schedules the events of the device's programs
-// with randomization and primacy, passes their transitions to the handler
-// of the function set and posts the Responses they ask for.
+// Run does all of this until its context ends or the agent is closed. The
+// function sets an agent takes part in plug into it as handlers: for DER,
+// DRLC, messaging, pricing and prepayment, the agent schedules the events
+// of the device's programs with randomization and primacy, passes their
+// transitions to the handler of the function set and posts the Responses
+// they ask for.
 //
 // A device sets the client of its certificate, its identity and the
 // handlers of its function sets, and runs the agent:
@@ -32,9 +33,10 @@
 //	return a.Run(ctx)
 //
 // Run registers the device (retrying until the server has), then polls
-// until ctx ends. Start does only the registration, for a caller that wants
-// to know it succeeded first; Active and Events report the events of a
-// function set while Run polls.
+// until ctx ends or the agent is closed. Start does only the registration,
+// for a caller that wants to know it succeeded first; Active and Events
+// report the events of a function set while Run polls. The agent keeps a
+// bounded number of events of each function set (Config.MaxEvents).
 // With Config.NotificationURI and NotificationHandler, the agent subscribes
 // to its programs and polls less. Config.Backoff, Logger and Metrics are
 // the plug points of the module (see OBSERVABILITY.md).

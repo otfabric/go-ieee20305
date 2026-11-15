@@ -4,6 +4,7 @@ package schedule
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 )
 
@@ -13,42 +14,69 @@ func maskConflicts(a, b Event) bool { return a.Value.(uint8)&b.Value.(uint8) != 
 
 // FuzzResolve runs a sequence of operations decoded from the input and
 // checks after each one that no two conflicting events are active at the
-// same instant, now or in the plan, and that every superseded event lost to
-// a conflicting, overlapping event of higher precedence.
+// same instant, now or in the plan, that every superseded event lost to a
+// conflicting, overlapping event of higher precedence, and that the plan is
+// the one of a Scheduler that compares each event with every window, not
+// only with those that can overlap it.
 func FuzzResolve(f *testing.F) {
 	f.Add([]byte{0, 1, 2, 3, 4, 5, 6, 7, 0, 2, 1, 0, 9, 9, 9, 2, 3, 0, 0, 0, 0, 30, 0, 0})
 	f.Add([]byte{0, 0, 1, 0, 0, 20, 3, 0, 0, 1, 0, 0, 5, 8, 3, 0, 1, 0, 2, 0, 0, 10, 0, 0, 1, 1, 0, 0, 0, 0})
 	f.Add([]byte{0, 0, 3, 1, 0, 50, 1, 0, 0, 1, 2, 2, 10, 50, 1, 0, 0, 2, 1, 3, 20, 40, 2, 0, 2, 0, 0, 0, 0, 0, 3, 1, 0, 0, 0, 0})
 	f.Fuzz(func(t *testing.T, data []byte) {
 		c := newFakeClock(t0)
-		s := New(Options{Clock: c, Seed: 1, Randomize: true, Conflicts: maskConflicts})
+		o := Options{Clock: c, Seed: 1, Randomize: true, Conflicts: maskConflicts}
+		s, ref := New(o), New(o)
+		ref.scanAll = true
 		defer s.Close()
+		defer ref.Close()
 		prev := map[string]Status{}
 		for len(data) >= 6 {
 			b := data[:6]
 			data = data[6:]
 			mrid := fmt.Sprintf("E%d", b[1]%8)
-			switch b[0] % 5 {
-			case 0, 1:
-				s.Upsert(Event{
-					MRID: mrid, Primacy: b[2] % 4, Created: at(int(b[3] % 8)),
-					Start:     c.Now().Add(secs(int(b[4]%64)*10 - 100)),
-					Duration:  secs(int(b[5]%16) * 10),
-					RandStart: int32(int8(b[2])) % 60, RandDuration: int32(int8(b[3])) % 60,
-					Value: b[5]>>4%7 + 1,
-				})
-			case 2:
-				s.Cancel(mrid, b[2]%2 == 0)
-			case 3:
-				s.Remove(mrid)
-			default:
+			for _, s := range []*Scheduler{s, ref} {
+				switch b[0] % 5 {
+				case 0, 1:
+					s.Upsert(Event{
+						MRID: mrid, Primacy: b[2] % 4, Created: at(int(b[3] % 8)),
+						Start:     c.Now().Add(secs(int(b[4]%64)*10 - 100)),
+						Duration:  secs(int(b[5]%16) * 10),
+						RandStart: int32(int8(b[2])) % 60, RandDuration: int32(int8(b[3])) % 60,
+						Value: b[5]>>4%7 + 1,
+					})
+				case 2:
+					s.Cancel(mrid, b[2]%2 == 0)
+				case 3:
+					s.Remove(mrid)
+				}
+			}
+			if b[0]%5 == 4 {
 				c.Advance(secs(int(b[2]) + 1))
 			}
 			check(t, c, s, prev)
+			samePlan(t, s, ref)
 		}
 		c.Advance(secs(10000))
 		check(t, c, s, prev)
+		samePlan(t, s, ref)
 	})
+}
+
+// samePlan fails t unless s and ref hold the same events in the same states
+// with the same windows.
+func samePlan(t *testing.T, s, ref *Scheduler) {
+	t.Helper()
+	plan := func(s *Scheduler) string {
+		var b strings.Builder
+		for _, e := range s.Events() {
+			ws, we, _ := s.Window(e.MRID)
+			fmt.Fprintf(&b, "%s=%s[%d,%d) ", e.MRID, e.Status, ws.Unix(), we.Unix())
+		}
+		return b.String()
+	}
+	if got, want := plan(s), plan(ref); got != want {
+		t.Fatalf("plan %s, comparing with every window %s", got, want)
+	}
 }
 
 func check(t *testing.T, c *fakeClock, s *Scheduler, prev map[string]Status) {

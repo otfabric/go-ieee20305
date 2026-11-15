@@ -35,11 +35,12 @@ present a certificate, and each verifies the other's chain.
 
 - `security.ClientTLSConfig`, `ServerTLSConfig` and `NotificationTLSConfig`
   verify chains with `security.Verify` against the pool you give them, and
-  never against the system's roots. A nil pool is no fallback: the
-  constructors return no error, but every handshake then fails with an
-  error that matches `ErrConfiguration` (and `ErrCertificate`). Give a
-  device the CA of its utility's servers, and a server the CA of its
-  devices, nothing wider.
+  never against the system's roots. A nil pool is not a fallback: the
+  configurations take it, and every handshake then fails with an error
+  that matches `ErrConfiguration` (and `ErrCertificate`). Only
+  `tlsccm.NewListener` refuses a nil pool at once, with `ErrConfiguration`.
+  Give a device the CA of its utility's servers, and a server the CA of
+  its devices, nothing wider.
 - Verification cannot be turned off through this library. The configurations
   set `InsecureSkipVerify` only to replace the verification of crypto/tls,
   which rejects the critical HardwareModuleName subjectAltName of IEEE
@@ -88,14 +89,16 @@ control the device.
   `Config.AssignedDevicesOnly` unless aggregators must register devices
   the operator did not give the server.
 - **Request limits.** `Config.MaxRequestBytes` bounds a request body,
-  `MaxLimit` a page of a list, and `MaxListItems` the lists devices post to
+  `MaxLimit` a page of a list, `MaxListItems` the lists devices post to
   (LogEvents, Responses, MirrorUsagePoints, MeterReadings, ReadingSets,
-  Readings, FlowReservationResponses), so that a device cannot grow the
-  server without bound. In a list of every client the cap counts each
+  Readings, FlowReservationResponses), and `MaxDeviceResources` all that
+  one device owns, so that a device cannot grow the server without bound.
+  In a list of every client the cap of `MaxListItems` counts each
   device's own items, so the posts of one device take nothing of
   another's. Deleting a MirrorUsagePoint deletes its UsagePoint. Ended
   events are pruned from the scheduler after `EventRetention`; their nodes
-  stay in the store.
+  stay in the store. The limits and their defaults are in the table under
+  [Limits](#limits).
 - **Notifications are outbound requests** to a URI the device chooses. The
   default `NotificationURIAllowed` refuses loopback, link-local, multicast
   and unspecified addresses (also with an IPv6 zone, and the IPv4 address
@@ -132,6 +135,8 @@ control the device.
   `Iterate` reads from a list. `client.NewHTTPClient` bounds response
   headers to 64 KiB. A `Retry-After` is honoured up to 24 hours, and the
   agent takes a server's pollRate up to 24 hours.
+- `agent.Config.MaxEvents` bounds the events an agent keeps of a function
+  set, and with them the transitions that wait for a handler.
 - A `client.NotificationHandler` should check the sender: set
   `NotificationConfig.Authorize` (for the agent,
   `agent.Config.NotificationAuthorize`) to accept only the server's
@@ -148,3 +153,41 @@ Notification that violates them 400. The
 codecs, the server's handler, HardwareModuleNames, the scheduler, DNS
 messages and hrefs have fuzz targets (`make fuzz`), run nightly in CI.
 Documents in another XML namespace are refused.
+
+### Limits
+
+What bounds the input of a peer, and the work and memory it can cause. A
+limit of zero in a configuration means the default.
+
+| Limit | Default | What happens beyond it |
+|---|---|---|
+| `server.Config.MaxRequestBytes`: the body of a request | 1 MiB | 413 |
+| `server.Config.MaxLimit`: the items of a list page (`l`) | 255 | the page has `MaxLimit` items |
+| `s`, `l` of a list request | 0 to 2^32-1 | 400 outside; a start beyond the list gives an empty page |
+| `server.Config.MaxListItems`: a list clients post to (in a list of every client, the items of each device) | 1000 | the oldest items are deleted; none when negative |
+| `server.Config.MaxDeviceResources`: the resources one device owns | 100 × `MaxListItems` (100000) | 403, counted in `Server.Stats`; none when negative |
+| `server.Config.NotificationWorkers`: notifications sent at once | 16 | the others wait |
+| `server.Config.NotificationCancelAfter`: a subscription whose notifications fail | 24 h | the subscription is cancelled |
+| One attempt to deliver a notification | 1 min, whatever the `NotificationClient` | the attempt fails |
+| The answer of a notification's receiver | 64 KiB read | the rest is not read |
+| `server.Config.EventRetention`: an ended event in the server's scheduler | 24 h | forgotten (it stays in the store) |
+| `client.Config.MaxResponseBytes`: the body of a response | 1 MiB | `ErrProtocol` |
+| Response headers (`client.NewHTTPClient`) | 64 KiB | the request fails |
+| A `Retry-After`, and a server's pollRate taken by the agent | 24 h | 24 h is used |
+| `client.Config.MaxListItems`: the items `Iterate`, `Walk` and `FindEndDevice` read of a list | 100000 | `ErrProtocol` |
+| `client.WalkOptions.MaxResources`, `MaxDepth`: a `Walk` | 4096 resources, 8 levels | `ErrProtocol` beyond the resources; deeper links are not followed |
+| Redirects of a request, within the server | 10 | `ErrProtocol` |
+| `client.NotificationConfig.MaxBytes`: a notification | 1 MiB | 413 |
+| `client.NotificationConfig.MaxSubscriptions`: subscriptions whose last notification the handler remembers | 1000 | the least recently notified is forgotten |
+| `agent.Config.MaxEvents`: the events of a function set | 1000 (`schedule.DefaultMaxEvents`) | new events are left out, logged and counted in `Agent.EventStats`; none when negative |
+| `schedule.Options.QueueSize`: transitions that wait for a subscriber (an agent's handler) | 4 × `MaxEvents` | the queue keeps the latest transition of each event, then drops the oldest; counted in `Stats` |
+| Responses and readings an agent keeps to send again | 1000 each | the Response is dropped; the oldest readings are dropped |
+| Instances, and hosts, in the cache of `discovery.Browse` | 1024 each | records of new ones are dropped until records expire |
+| Addresses of one host in that cache | 16 | further addresses are dropped |
+| The TTL of a record in that cache | 75 min | 75 min is used |
+| TXT keys of an instance, besides those the standard defines | 16, within 1300 bytes | further keys are dropped |
+| A DNS name, a label, a message | 255 octets, 63 octets, 9000 octets | the message is dropped |
+
+Tests hold these bounds: the hostile-peer tests of each package, and
+allocation budgets for the bodies and for lists that claim 2^32-1 items
+([TESTING.md](TESTING.md)).

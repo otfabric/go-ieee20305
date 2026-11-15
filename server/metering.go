@@ -60,12 +60,16 @@ func (s *Server) createMirror(ctx context.Context, r *Request) (string, error) {
 		}
 	}
 	if node == nil {
-		href, err := s.createItem(ctx, r.Node, mup, lfdi)
+		// The mirror, its UsagePoint and the parts of both.
+		if err := s.fits(ctx, r, lfdi, 2+s.partCount(r.Node.Resource)+s.partCount("UsagePointList")); err != nil {
+			return "", err
+		}
+		href, err := s.createItem(ctx, r.Node, mup, lfdi, counts(r))
 		if err != nil {
 			return "", err
 		}
 		b.touch(r.Node)
-		up, err := s.mirroredUsagePoint(ctx, mup, lfdi)
+		up, err := s.mirroredUsagePoint(ctx, mup, lfdi, counts(r))
 		if err != nil {
 			return "", err
 		}
@@ -130,8 +134,10 @@ func (s *Server) removeMirror(ctx context.Context, n *Node) error {
 // items it found or created by mRID, and the lists it added to, which are
 // trimmed once the request is done.
 type mirrorBatch struct {
-	owner  string
-	capped bool // a client's request: its lists are trimmed
+	owner string
+	// capped is a client's request: its lists are trimmed, and what it
+	// creates counts against the resources of the device (counts).
+	capped bool
 	mrids  map[string]map[string]string
 	lists  map[string]bool
 	trims  []*Node
@@ -172,8 +178,9 @@ func (s *Server) deviceOf(p Principal, raw []byte) (string, error) {
 
 // mirroredUsagePoint creates the UsagePoint a MirrorUsagePoint mirrors to,
 // in the UsagePointList (created if there is none), and returns its href.
-// Deleting the mirror deletes it (removeMirror).
-func (s *Server) mirroredUsagePoint(ctx context.Context, mup *ieee20305.MirrorUsagePoint, lfdi string) (string, error) {
+// Deleting the mirror deletes it (removeMirror). When capped, it counts
+// against the resources of the device.
+func (s *Server) mirroredUsagePoint(ctx context.Context, mup *ieee20305.MirrorUsagePoint, lfdi string, capped bool) (string, error) {
 	list, err := s.store.Get(ctx, UsagePointListHref)
 	if errors.Is(err, ErrNoNode) {
 		if err := s.Admin().Root(ctx, "UsagePointList", UsagePointListHref, &ieee20305.UsagePointList{}); err != nil {
@@ -188,7 +195,7 @@ func (s *Server) mirroredUsagePoint(ctx context.Context, mup *ieee20305.MirrorUs
 	up.Href = nil
 	device := mup.DeviceLFDI
 	up.DeviceLFDI = &device
-	return s.createItem(ctx, list, up, lfdi)
+	return s.createItem(ctx, list, up, lfdi, capped)
 }
 
 // postMirrorReadings is the POST of a MirrorMeterReading or a
@@ -219,8 +226,10 @@ func (s *Server) postMirrorReadings(ctx context.Context, r *Request) (string, er
 // ReadingType, its latest Reading, and its MirrorReadingSets as
 // ReadingSets with their Readings. It returns the href of the
 // MeterReading. The caller holds the mirror lock of the device, and
-// finishes the batch b.
+// finishes the batch b. When b is capped, what it creates counts against
+// the resources of the device.
 func (s *Server) mirrorReading(ctx context.Context, b *mirrorBatch, mup *Node, mmr *ieee20305.MirrorMeterReading) (string, error) {
+	capped := b.capped
 	m, ok := mup.Value.(*ieee20305.MirrorUsagePoint)
 	if !ok {
 		return "", fmt.Errorf("%w: %s is no MirrorUsagePoint", ieee20305.ErrInvalid, mup.Href)
@@ -232,7 +241,7 @@ func (s *Server) mirrorReading(ctx context.Context, b *mirrorBatch, mup *Node, m
 	}
 	if m.UsagePointLink == nil || errors.Is(err, ErrNoNode) {
 		// A mirror without a UsagePoint, as the operator may make one.
-		up, err := s.mirroredUsagePoint(ctx, m, mup.Owner)
+		up, err := s.mirroredUsagePoint(ctx, m, mup.Owner, capped)
 		if err != nil {
 			return "", err
 		}
@@ -254,13 +263,13 @@ func (s *Server) mirrorReading(ctx context.Context, b *mirrorBatch, mup *Node, m
 	}
 	if mmr.ReadingType != nil {
 		rt := path.Join(mr, s.partPath("ReadingType"))
-		if err := s.Admin().Put(ctx, &Node{Href: rt, Resource: "ReadingType", Value: mmr.ReadingType, Owner: mup.Owner, Parent: mr}); err != nil {
+		if err := s.putPart(ctx, &Node{Href: rt, Resource: "ReadingType", Value: mmr.ReadingType, Owner: mup.Owner, Parent: mr}, capped); err != nil {
 			return "", err
 		}
 	}
 	if mmr.Reading != nil {
 		href := path.Join(mr, "r")
-		if err := s.Admin().Put(ctx, &Node{Href: href, Resource: "Reading", Value: mmr.Reading, Owner: mup.Owner, Parent: mr}); err != nil {
+		if err := s.putPart(ctx, &Node{Href: href, Resource: "Reading", Value: mmr.Reading, Owner: mup.Owner, Parent: mr}, capped); err != nil {
 			return "", err
 		}
 		if err := s.linkFrom(ctx, mr, "ReadingLink", href); err != nil {
@@ -286,7 +295,7 @@ func (s *Server) mirrorReading(ctx context.Context, b *mirrorBatch, mup *Node, m
 		for j := range set.Reading {
 			reading := set.Reading[j]
 			reading.Href = nil
-			if _, err := s.createItem(ctx, rList, &reading, mup.Owner); err != nil {
+			if _, err := s.createItem(ctx, rList, &reading, mup.Owner, capped); err != nil {
 				return "", err
 			}
 		}
@@ -299,7 +308,8 @@ func (s *Server) mirrorReading(ctx context.Context, b *mirrorBatch, mup *Node, m
 
 // findOrCreate returns the href of the item of list with the mRID mrid,
 // or creates one from create. The items of the list are read once per
-// batch, which then keeps the mRIDs of the items it creates.
+// batch, which then keeps the mRIDs of the items it creates. When the batch
+// is capped, a new item counts against the resources of owner.
 func (s *Server) findOrCreate(ctx context.Context, b *mirrorBatch, list *Node, mrid ieee20305.MRIDType, create func() any, owner string) (string, error) {
 	idx, ok := b.mrids[list.Href]
 	if !ok {
@@ -322,13 +332,28 @@ func (s *Server) findOrCreate(ctx context.Context, b *mirrorBatch, list *Node, m
 	}
 	v := create()
 	setHref(v, "")
-	href, err := s.createItem(ctx, list, v, owner)
+	href, err := s.createItem(ctx, list, v, owner, b.capped)
 	if err != nil {
 		return "", err
 	}
 	idx[string(mrid)] = href
 	b.touch(list)
 	return href, nil
+}
+
+// putPart stores n, a resource at a fixed place in one of its owner's,
+// which the request creates or replaces. When capped, a new one counts
+// against the resources of the owner (room).
+func (s *Server) putPart(ctx context.Context, n *Node, capped bool) error {
+	if capped && n.Owner != "" {
+		defer s.lockOwner(n.Owner)()
+		if _, err := s.store.Get(ctx, n.Href); errors.Is(err, ErrNoNode) {
+			if err := s.room(ctx, n.Owner, 1); err != nil {
+				return err
+			}
+		}
+	}
+	return s.Admin().Put(ctx, n)
 }
 
 // mridOf returns the mRID of a document.
@@ -376,6 +401,13 @@ func (s *Server) createFlowReservation(ctx context.Context, r *Request) (string,
 	if !ok {
 		return s.createDefault(ctx, r)
 	}
+	if !s.canPost(r.Principal, r.Node) {
+		return "", httpError(http.StatusForbidden, "%s is not the client's", r.Node.Href)
+	}
+	// The request and its answer.
+	if err := s.fits(ctx, r, r.Node.Owner, 2); err != nil {
+		return "", err
+	}
 	href, err := s.createDefault(ctx, r)
 	if err != nil {
 		return "", err
@@ -397,7 +429,7 @@ func (s *Server) createFlowReservation(ctx context.Context, r *Request) (string,
 	resp.Subject = req.MRID
 	resp.CreationTime = ieee20305.TimeType(s.clock().Unix())
 	resp.EventStatus = ieee20305.EventStatus{DateTime: resp.CreationTime}
-	if _, err := s.createItem(ctx, responses, resp, responses.Owner); err != nil {
+	if _, err := s.createItem(ctx, responses, resp, responses.Owner, counts(r)); err != nil {
 		return "", err
 	}
 	// Each response is an event of the server's scheduler: a device keeps

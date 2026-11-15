@@ -12,6 +12,8 @@ A Scheduler holds the events of one function set (DER controls, DRLC controls, t
 
 A client applies the randomization bounds of the events (Options.Randomize) with offsets drawn deterministically from a seed, and answers the transitions it subscribes to as ResponseRequired says. A server runs the same Scheduler without randomization to keep the EventStatus of its events.
 
+A Scheduler keeps a bounded number of events (Options.MaxEvents) and of transitions that wait for a subscriber (Options.QueueSize), and counts what the bounds leave out (Stats). UpsertAll takes the events of a poll and resolves them once.
+
 ## Constants
 
 ```go
@@ -52,6 +54,12 @@ const (
 ```
 
 The status codes of a Response.
+
+```go
+const DefaultMaxEvents = 1000
+```
+
+DefaultMaxEvents is the number of events a Scheduler keeps when Options.MaxEvents is zero.
 
 ## Functions
 
@@ -197,12 +205,26 @@ type Options struct {
 	// so that one can supersede the other. When nil, all events
 	// conflict. See DERConflicts and DRLCConflicts.
 	Conflicts func(a, b Event) bool
-	// Independent declares that no two events conflict, as on a server
-	// that leaves supersession to its clients: Conflicts is not called,
-	// and the Scheduler does not compare events with each other, so that
-	// its work per change grows with the number of events rather than
-	// with its square.
-	Independent bool
+	// NoConflicts says that no two events conflict, so that none
+	// supersedes another, as on a server: Conflicts is not called. Events
+	// that all overlap are then resolved without comparing them with each
+	// other.
+	NoConflicts bool
+	// MaxEvents bounds the events the Scheduler keeps: DefaultMaxEvents
+	// when zero, none when negative. A new event beyond it is refused:
+	// Upsert and UpsertAll leave it out, and Stats counts it. An update
+	// of an event the Scheduler keeps is never refused, and an event
+	// removed makes room.
+	MaxEvents int
+	// QueueSize bounds the transitions queued for a subscriber that has
+	// not read them yet: four times MaxEvents when zero (none when
+	// MaxEvents is negative), none when negative. A call queues at most
+	// two transitions per event, so a subscriber that reads what one call
+	// queues before the next sees every transition. When the queue is
+	// full, it keeps only the latest transition of each event, and when
+	// that leaves more than three quarters of QueueSize it drops the
+	// oldest down to that; Stats counts both.
+	QueueSize int
 }
 ```
 
@@ -212,7 +234,17 @@ Options configure a Scheduler.
 
 ```go
 type Scheduler struct {
-	// contains filtered or unexported fields
+
+	// independent is Options.NoConflicts.
+
+	// 0: none
+	// 0: none
+
+	// evaluations counts the calls of evaluate, and checks the windows it
+	// compared an event with: the cost the tests bound. scanAll makes
+	// evaluate compare each event with every window, for the tests to
+	// compare the plans.
+
 }
 ```
 
@@ -252,7 +284,7 @@ Cancel cancels the event mrid, as the server does with the status Cancelled, or 
 func (s *Scheduler) Close()
 ```
 
-Close stops the Scheduler: it ends every subscription, dropping the transitions not yet read, and waits for their goroutines to finish. Afterwards Upsert, Cancel and Remove do nothing.
+Close stops the Scheduler: it ends every subscription, dropping the transitions not yet read, and waits for their goroutines to finish. Afterwards Upsert, Cancel and Remove do nothing. Close may be called more than once, and from several goroutines at once.
 
 #### func (Scheduler) Events
 
@@ -278,13 +310,29 @@ func (s *Scheduler) Remove(mrid string) bool
 
 Remove forgets the event mrid without a transition, and reports whether there was one. The events it superseded stay superseded.
 
+#### func (Scheduler) RemoveAll
+
+```go
+func (s *Scheduler) RemoveAll(mrids []string) (removed int)
+```
+
+RemoveAll forgets the events of mrids as Remove does, and then resolves the others once. It returns the number of events it forgot.
+
+#### func (Scheduler) Stats
+
+```go
+func (s *Scheduler) Stats() Stats
+```
+
+Stats returns the counters of s.
+
 #### func (Scheduler) Subscribe
 
 ```go
 func (s *Scheduler) Subscribe() (<-chan Transition, func())
 ```
 
-Subscribe returns a channel of every transition from now on, in order, and a function that ends the subscription and closes the channel. The Scheduler never waits for a subscriber: transitions queue until it reads them. Close ends every subscription.
+Subscribe returns a channel of every transition from now on, in order, and a function that ends the subscription and closes the channel. The Scheduler never waits for a subscriber: transitions queue until it reads them, up to Options.QueueSize, beyond which the queue keeps the latest transition of each event. Close ends every subscription.
 
 #### func (Scheduler) Timeline
 
@@ -302,7 +350,15 @@ func (s *Scheduler) Upsert(e Event)
 
 Upsert adds the event e, or updates the event with its MRID.
 
-A new event is reported as received, then resolved against the others. An e with Status Cancelled or CancelledRandom cancels the event as Cancel does, and one with Status Superseded or Completed moves it to that state; Scheduled and Active are ignored, since the Scheduler works out when the event is active itself. An update of an event in a terminal state changes its fields but not its state.
+A new event is reported as received, then resolved against the others. An e with Status Cancelled or CancelledRandom cancels the event as Cancel does, and one with Status Superseded or Completed moves it to that state; Scheduled and Active are ignored, since the Scheduler works out when the event is active itself. An update of an event in a terminal state changes its fields but not its state. A new event is refused when the Scheduler keeps MaxEvents events (see Stats).
+
+#### func (Scheduler) UpsertAll
+
+```go
+func (s *Scheduler) UpsertAll(evs []Event) (refused int)
+```
+
+UpsertAll upserts the events of evs as Upsert does, in order, and then resolves them together, once: as a client takes the events of a poll. The outcome does not depend on the order of evs, but it can differ from that of upserting them one by one, each resolved as it comes: an event is resolved against the events of higher precedence that are planned to be active with all of evs known, not against one that a later event of evs supersedes. It returns the number of new events it refused because the Scheduler kept MaxEvents events.
 
 #### func (Scheduler) Window
 
@@ -324,6 +380,22 @@ type Segment struct {
 ```
 
 Segment is a span of time in which the same events are active.
+
+### type Stats
+
+```go
+type Stats struct {
+	// Refused counts the new events Upsert and UpsertAll refused because
+	// the Scheduler kept MaxEvents events.
+	Refused uint64
+	// Coalesced counts the transitions a full subscriber queue left out
+	// because a later transition of the same event followed them, and
+	// Dropped those it left out to make room otherwise (the oldest).
+	Coalesced, Dropped uint64
+}
+```
+
+Stats are counters of a Scheduler, from New on.
 
 ### type Status
 

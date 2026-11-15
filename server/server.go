@@ -9,12 +9,16 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"math"
 	"net/http"
 	"net/url"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	ieee20305 "github.com/otfabric/go-ieee20305"
+	"github.com/otfabric/go-ieee20305/internal/callback"
+	"github.com/otfabric/go-ieee20305/internal/goid"
 	"github.com/otfabric/go-ieee20305/schedule"
 )
 
@@ -135,6 +139,17 @@ type Config struct {
 	// deleted. 1000 when zero; no cap when negative. An operator's posts
 	// are not capped.
 	MaxListItems int
+	// MaxDeviceResources caps the resources one device owns: its EndDevice
+	// with what the server creates in it, and what clients create for it
+	// (the DERs, LogEvents, Responses and subscriptions it posts, its
+	// mirrors with their readings, the answers to its flow reservation
+	// requests). A request of a client that would create a resource
+	// beyond it is refused with 403 and counted (Stats); what the device
+	// owns stays. 100 times MaxListItems when zero (100000 by default); no
+	// cap when negative, or when zero with a negative MaxListItems. An
+	// operator's requests and Admin are not capped. The server counts
+	// with the Store when it is an OwnerCounter.
+	MaxDeviceResources int
 	// EventRetention is how long after its end the server keeps an event in
 	// its scheduler (not in its store): 24 hours when zero.
 	EventRetention time.Duration
@@ -181,6 +196,23 @@ type Server struct {
 	// regMu serializes the creation of EndDevices, so that a device that
 	// posts its EndDevice twice at once gets one.
 	regMu sync.Mutex
+
+	// maxOwned is the cap of Config.MaxDeviceResources (0: none), and
+	// refused counts the resources refused for it.
+	maxOwned int
+	refused  atomic.Uint64
+}
+
+// Stats are counters of a Server, from New on.
+type Stats struct {
+	// RefusedResources counts the resources clients were refused because
+	// their device owned Config.MaxDeviceResources already.
+	RefusedResources uint64
+}
+
+// Stats returns the counters of s.
+func (s *Server) Stats() Stats {
+	return Stats{RefusedResources: s.refused.Load()}
 }
 
 // deviceInfo is what the server knows of a device by its LFDI.
@@ -196,7 +228,7 @@ type deviceInfo struct {
 
 // New returns a Server for cfg.
 func New(cfg Config) (*Server, error) {
-	s := &Server{cfg: cfg, profile: cfg.Profile, store: cfg.Store, clock: cfg.Clock, log: cfg.Logger,
+	s := &Server{cfg: cfg, profile: cfg.Profile, store: cfg.Store, clock: cfg.Clock,
 		resources: map[string]ieee20305.ResourceSpec{}, hooks: map[string]Hooks{},
 		counters: map[string]int{}, counted: newHrefIndex(), devices: map[string]deviceInfo{}}
 	if s.profile == nil {
@@ -211,7 +243,7 @@ func New(cfg Config) (*Server, error) {
 	if s.clock == nil {
 		s.clock = time.Now
 	}
-	s.log = ieee20305.ComponentLogger(cfg.Logger, "server")
+	s.log = callback.Guard(ieee20305.ComponentLogger(cfg.Logger, "server"))
 	s.metrics = cfg.Metrics
 	if s.metrics == nil {
 		s.metrics = NopMetrics{}
@@ -227,6 +259,14 @@ func New(cfg Config) (*Server, error) {
 	}
 	if s.cfg.PollRate == 0 {
 		s.cfg.PollRate = 900
+	}
+	switch {
+	case cfg.MaxDeviceResources > 0:
+		s.maxOwned = cfg.MaxDeviceResources
+	case cfg.MaxDeviceResources == 0 && cfg.MaxListItems == 0:
+		s.maxOwned = 100 * defaultMaxListItems
+	case cfg.MaxDeviceResources == 0 && cfg.MaxListItems > 0:
+		s.maxOwned = 100 * min(cfg.MaxListItems, math.MaxInt/100)
 	}
 	for _, r := range ieee20305.Resources {
 		s.resources[r.ID] = r
@@ -250,8 +290,8 @@ func New(cfg Config) (*Server, error) {
 	s.events = newEvents(s)
 	s.store = &watchStore{Store: s.store, s: s}
 	if err := s.bootstrap(context.Background()); err != nil {
-		s.events.close()
-		s.notifier.close()
+		s.events.close(true)
+		s.notifier.close(true)
 		return nil, err
 	}
 	return s, nil
@@ -301,13 +341,25 @@ func (s *Server) bootstrap(ctx context.Context) error {
 }
 
 // Close stops what the server runs in the background, such as the
-// delivery of notifications. The handler answers 503 after Close.
+// delivery of notifications, and waits for it. The handler answers 503
+// after Close, which returns nil.
+//
+// Close may be called more than once, and from several goroutines at once.
+// Code of the application that the server calls on a goroutine of its own
+// (a Metrics method for a notification or for the transition of an event,
+// a hook that reads a resource for a notification) may call it too: that
+// Close does not wait for the server's goroutines, which end as their work
+// returns, while a Close on another goroutine waits for them.
 func (s *Server) Close() error {
 	s.mu.Lock()
 	s.closed = true
 	s.mu.Unlock()
-	s.events.close()
-	s.notifier.close()
+	// A goroutine Close would wait for does not wait: neither for itself,
+	// nor for another that may be closing the server too.
+	self := goid.ID()
+	wait := !s.events.runsOn(self) && !s.notifier.runsOn(self)
+	s.events.close(wait)
+	s.notifier.close(wait)
 	return nil
 }
 

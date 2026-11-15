@@ -13,7 +13,7 @@ implementations are in [INTEROPERABILITY.md](INTEROPERABILITY.md).
 | Shuffled, twice | `make stress` | Go | every pull request (job Race and shuffle) |
 | Coverage | `make coverage-gate` | Go | every pull request (job Coverage gate) |
 | Fuzz | `make fuzz` | Go | 10 s per target in CI; 5 min per target nightly (Fuzz workflow) |
-| Benchmarks | `make bench` | Go | not run |
+| Benchmarks | `make bench` (codecs, the scheduler, a list GET of the server) | Go | not run |
 | Cross-compilation | `make cross` | Go | not run by this repository's workflows |
 | Schema tests | `make download`, then `make test` | network for the download, `xmllint` | job Generated code |
 | Generated code | `make generate-verify`, `make generate-check` | network for `generate-check` | job Generated code |
@@ -45,6 +45,68 @@ that redirect, stall or never end their answer. `discovery/hostile_test.go`
 floods the browser's cache and feeds it malformed packets, and
 `internal/dnsmsg/boundary_test.go` checks the limits of names, labels,
 pointers, sections and record data.
+
+`server/hostile_test.go` also has one device post into the lists of the
+resources it creates until the server refuses, and checks the number of
+resources it owns. `agent/limits_test.go` has a server list more events
+than an agent keeps, and `schedule/limits_test.go` bounds the events, the
+comparisons a resolution makes and the transitions that wait for a
+subscriber.
+
+### Allocation budgets
+
+A limit on a length is tested with the bytes the code allocates, not only
+with the error it returns: `server/budget_internal_test.go` and
+`client/budget_test.go` send bodies of up to 2^62 declared bytes, and
+bodies without end, at a limit of 64 KiB, and lists that claim 2^32-1
+items, and compare what `runtime.MemStats` counts with a budget derived
+from the limit. `internal/dnsmsg/boundary_test.go` does the same for DNS
+section counts.
+
+## Lifecycle contract
+
+The rows are those of the organisation's contract matrix for types that
+own goroutines: the Agent, the Server (with its notifier and its event
+scheduling), the Scheduler and the advertisement and browser of
+`discovery`. Lifecycle tests wait for events (a channel, a request the
+other side has received, a goroutine seen blocked at the wait a test means
+to interrupt), not for time.
+
+| Row | Covered by | Notes |
+|---|---|---|
+| L1 Close twice | `agent` `TestCloseTwice`; `server` `TestServerCloseTwice`; `schedule` `TestCloseTwice`; `discovery` `TestBrowseAdvertise` (second `Close` of an advertisement) | Each `Close` returns; the server's returns nil |
+| L2 Concurrent Close | the same tests, from 8 goroutines | |
+| L3 Close during a blocked read | `agent` `TestCloseEndsRun` (a request the server does not answer); `server` `TestHostileReceiverAtClose` (a receiver that does not answer a notification) | |
+| L4 Close during a write | n/a | `net/http` owns the streams |
+| L5 Close during a handshake | n/a in this module | `net/http` and `crypto/tls` own it; `tlsccm` tests its listener (`TestListenerClose`) |
+| L6 Cancel a pending request | `client` `ErrCanceled` tests (`errors_test.go`); `agent` `TestRunEndsWithContext` | |
+| L7 Late response | n/a | one request per HTTP exchange, no correlation of the library's own |
+| L8 Response after reconnect | n/a | no session state |
+| L9 Callback calls a public method | `agent` `TestHandlerCallsAgent`; `server` `TestHooksAndConfig` | |
+| L10 Callback calls Close | `agent` `TestCloseFromHandler` (a handler, a `Metrics` method, two handlers at once); `server` `TestServerCloseFromMetrics` (an event, a notification, both at once) | `TestCloseWaitsForHandler` and `TestServerCloseWaitsForMetrics`: a `Close` on another goroutine still waits |
+| L11 Slow callback | `agent` `TestSlowHandler`; `server` `TestHostileReceiverAtClose` and the notification retry tests | A handler that does not return holds back its function set only |
+| L12 Queue at capacity | `schedule` `TestQueueBound`, `TestQueueCompaction`, `TestQueueKeepsUp`; `agent` `TestSlowHandler`, `TestRespond` (Responses kept to send again) | |
+| L13 Concurrent sessions | `server` `TestAccess`, `TestConcurrentRegistration`; `e2e` with several devices | |
+| L14 Failure during startup | `server` `TestBootstrapGetError`, the store fault sweeps of `faults_internal_test.go`; `discovery` `TestBrowseErrors`, `TestAdvertiseErrors` | Each package's `TestMain` then finds a goroutine a failed start left |
+| L15 Shutdown(ctx) | n/a | no `Shutdown` method |
+| L16 Close racing a retry | `agent` `TestCloseEndsRun` (`Run` waiting to start again, and waiting for its next poll) | |
+
+Code of the application that does not return normally (a handler, a
+`Metrics` method, a `Logger`) is covered by `TestHandlerDoesNotReturnNormally`,
+`TestMetricsDoNotReturnNormally`, `TestPollCallbacksDoNotReturnNormally`,
+`TestReadingsDoNotReturnNormally` and `TestLoggerDoesNotReturnNormally` in
+`agent`, and `TestServerMetricsDoNotReturnNormally` and
+`TestServerLoggerDoesNotReturnNormally` in `server`.
+
+### Goroutine leaks
+
+`internal/leakcheck` compares the goroutines of two stack dumps by their
+identifiers: one that was started since the first dump and still exists is
+reported with its stack. There is no tolerance in numbers. The `TestMain`
+of `agent`, `client`, `csipaus/csipserver`, `discovery`, `e2e`, `schedule`,
+`security` and `server` runs the package's tests and then fails the run
+if a goroutine they started is left; `leakcheck.Check(t)` does the same
+around one test.
 
 ## Interop
 
@@ -96,9 +158,11 @@ workflow is a separate gate, with its own `coverage-min` in
 
 ## Fuzzing
 
-`FUZZ_TARGETS` in the [Makefile](Makefile) lists the targets as
-`<package>:<target>`. A new `Fuzz` function must be added there, as `make fuzz`
-does not discover them. `make fuzz FUZZTIME=5m` sets the time per target.
+`make fuzz` runs every `Fuzz` function of the library packages: it finds
+them with `go test -list`, so a new target needs no registration.
+`make fuzz-targets` lists them as `<package>:<target>`, and
+`make fuzz FUZZ_TARGETS=<package>:<target>` runs only those given.
+`make fuzz FUZZTIME=5m` sets the time per target.
 
 A failing input lands in the target's `testdata/fuzz/<target>/` directory. The
 Fuzz workflow keeps such inputs as the artifact `fuzz-failures`. To make one a

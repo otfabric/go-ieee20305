@@ -43,6 +43,32 @@ func (s *Server) partPath(resource string) string {
 	return path.Base(s.resources[resource].SamplePath)
 }
 
+// hasParts reports whether the items of the list resource get parts: not
+// those of an AssociatedDERProgramList, which are the DERPrograms a DER
+// follows, not programs with lists of their own.
+func hasParts(list string) bool { return list != "AssociatedDERProgramList" }
+
+// partCount returns the number of parts newParts makes for an item of the
+// list resource.
+func (s *Server) partCount(list string) int {
+	if !hasParts(list) {
+		return 0
+	}
+	resource := itemResource(list)
+	n := 0
+	for _, p := range itemParts[resource] {
+		if _, ok := s.resources[p]; ok {
+			n++
+		}
+	}
+	for _, p := range s.profile.Parts[resource] {
+		if _, ok := s.resources[p]; ok {
+			n++
+		}
+	}
+	return n
+}
+
 // newParts sets the links of the document v of a new resource at href to
 // its parts, and returns the parts to store, owned by owner.
 func (s *Server) newParts(resource, href string, v any, owner string) ([]*Node, error) {
@@ -67,13 +93,24 @@ func (s *Server) newParts(resource, href string, v any, owner string) ([]*Node, 
 }
 
 // createItem stores v as a new item of the list node, owned by owner, with
-// its parts, and returns its href.
-func (s *Server) createItem(ctx context.Context, list *Node, v any, owner string) (string, error) {
-	href := s.newHref(list.Href)
+// its parts, and returns its href. When capped, the item and its parts
+// count against the resources of the owner, and the item is refused when
+// they do not fit (room).
+func (s *Server) createItem(ctx context.Context, list *Node, v any, owner string, capped bool) (string, error) {
 	resource := itemResource(list.Resource)
-	parts, err := s.newParts(resource, href, v, owner)
-	if err != nil {
-		return "", err
+	if capped && owner != "" {
+		defer s.lockOwner(owner)()
+		if err := s.room(ctx, owner, 1+s.partCount(list.Resource)); err != nil {
+			return "", err
+		}
+	}
+	href := s.newHref(list.Href)
+	var parts []*Node
+	if hasParts(list.Resource) {
+		var err error
+		if parts, err = s.newParts(resource, href, v, owner); err != nil {
+			return "", err
+		}
 	}
 	setHref(v, href)
 	n := &Node{Href: href, Resource: resource, Value: v, Owner: owner, Parent: list.Href, Modified: s.clock()}

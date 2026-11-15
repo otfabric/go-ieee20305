@@ -12,8 +12,10 @@ import "time"
 // (by WADL resource, say) before using it as a label.
 //
 // The methods are called synchronously from the goroutines of the calls:
-// they must be safe for concurrent use, quick, and must not block. Embed
-// NopMetrics to implement only some.
+// they must be safe for concurrent use, quick, and must not block. A
+// method that does not return normally is stopped there: the client logs
+// that at Error level with the stack, and the call goes on as if the
+// method had returned. Embed NopMetrics to implement only some.
 type Metrics interface {
 	OnRequest(method, path string)
 	OnResponse(method, path string, status int, d time.Duration)

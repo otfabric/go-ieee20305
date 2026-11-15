@@ -12,9 +12,12 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	ieee20305 "github.com/otfabric/go-ieee20305"
+	"github.com/otfabric/go-ieee20305/internal/callback"
+	"github.com/otfabric/go-ieee20305/internal/goid"
 	"github.com/otfabric/go-ieee20305/schedule"
 	"github.com/otfabric/go-ieee20305/security"
 )
@@ -29,15 +32,11 @@ type events struct {
 	s     *Server
 	sched *schedule.Scheduler
 	done  chan struct{}
+	// gid identifies the goroutine of run, which calls EventMetrics.
+	gid atomic.Uint64
 
 	mu        sync.Mutex
 	lastPrune time.Time
-
-	// idx holds the hrefs of the events of sched, so that a deletion finds
-	// the events it deletes without going through all of them. idxMu
-	// serializes its changes with those of sched.
-	idxMu sync.Mutex
-	idx   hrefIndex
 }
 
 // clockFunc is the schedule.Clock of a server: its Clock for the time, and
@@ -55,33 +54,50 @@ func newEvents(s *Server) *events {
 	if clock == nil {
 		clock = clockFunc(func() time.Time { return s.clock() })
 	}
-	e := &events{s: s, done: make(chan struct{}), idx: newHrefIndex()}
-	e.sched = schedule.New(schedule.Options{Clock: clock, Independent: true})
+	e := &events{s: s, done: make(chan struct{})}
+	// The server keeps the events its store holds, however many, and
+	// supersedes none: they are resolved without comparing them, and each
+	// transition is written.
+	e.sched = schedule.New(schedule.Options{Clock: clock, NoConflicts: true, MaxEvents: -1})
 	ch, _ := e.sched.Subscribe()
 	go e.run(ch)
 	return e
 }
 
-func (e *events) close() {
+// close stops the scheduling of the events, and waits for run to end when
+// wait is set.
+func (e *events) close(wait bool) {
 	e.sched.Close()
-	<-e.done
+	if wait {
+		<-e.done
+	}
 }
+
+// runsOn reports whether run is the goroutine id.
+func (e *events) runsOn(id uint64) bool { return id != 0 && e.gid.Load() == id }
 
 // run writes the status of the events as they change.
 func (e *events) run(ch <-chan schedule.Transition) {
 	defer close(e.done)
+	e.gid.Store(goid.ID())
 	for t := range ch {
 		if t.Received() || t.To == schedule.Completed {
 			continue
 		}
 		if em, ok := e.s.metrics.(EventMetrics); ok {
 			name, _ := e.s.profile.ElementName(t.Event.Value)
-			em.OnEventTransition(name.Local, t.From, t.To)
+			e.transition(em, name.Local, t)
 		}
 		if err := e.setStatus(context.Background(), t.Event.MRID, t.To, t.At); err != nil && !errors.Is(err, ErrNoNode) && !errors.Is(err, ieee20305.ErrClosed) {
 			e.s.log.Errorf("updating the status of event %s: %v", t.Event.MRID, err)
 		}
 	}
+}
+
+// transition tells em of the transition t of an event of the element name.
+func (e *events) transition(em EventMetrics, name string, t schedule.Transition) {
+	defer callback.Rescue(e.s.log, "EventMetrics.OnEventTransition")
+	em.OnEventTransition(name, t.From, t.To)
 }
 
 // setStatus sets the currentStatus of the event at href, if it differs. A
@@ -142,12 +158,13 @@ func eventStatus(v any) *ieee20305.EventStatus {
 // changed is told of a change of the node at href, or of its deletion.
 func (e *events) changed(href string, node *Node, deleted bool) {
 	if deleted {
-		e.idxMu.Lock()
-		defer e.idxMu.Unlock()
-		for _, h := range e.idx.within(href) {
-			e.idx.remove(h)
-			e.sched.Remove(h)
+		var gone []string
+		for _, ev := range e.sched.Events() {
+			if within(ev.MRID, href) {
+				gone = append(gone, ev.MRID)
+			}
 		}
+		e.sched.RemoveAll(gone)
 		return
 	}
 	if node == nil || node.Value == nil {
@@ -158,10 +175,7 @@ func (e *events) changed(href string, node *Node, deleted bool) {
 		return
 	}
 	ev.MRID = href // unique on the server, unlike mRIDs
-	e.idxMu.Lock()
-	e.idx.add(href)
 	e.sched.Upsert(ev)
-	e.idxMu.Unlock()
 	e.prune()
 }
 
@@ -181,14 +195,13 @@ func (e *events) prune() {
 	if retention <= 0 {
 		retention = 24 * time.Hour
 	}
+	var ended []string
 	for _, ev := range e.sched.Events() {
 		if ev.End().Add(retention).Before(now) {
-			e.idxMu.Lock()
-			e.idx.remove(ev.MRID)
-			e.sched.Remove(ev.MRID)
-			e.idxMu.Unlock()
+			ended = append(ended, ev.MRID)
 		}
 	}
+	e.sched.RemoveAll(ended)
 }
 
 // changed is told of every change of the store.
@@ -331,7 +344,7 @@ func (s *Server) storeResponse(ctx context.Context, r *Request, resp *ieee20305.
 			return m.Href, false, nil
 		}
 	}
-	href, err := s.createItem(ctx, r.Node, r.Doc, owner)
+	href, err := s.createItem(ctx, r.Node, r.Doc, owner, counts(r))
 	if err == nil {
 		s.trim(ctx, r.Node, owner)
 	}

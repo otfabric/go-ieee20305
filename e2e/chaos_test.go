@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -18,6 +17,7 @@ import (
 	"github.com/otfabric/go-ieee20305/client"
 	"github.com/otfabric/go-ieee20305/internal/chaos"
 	examples "github.com/otfabric/go-ieee20305/internal/examples/ieee20305"
+	"github.com/otfabric/go-ieee20305/internal/leakcheck"
 	"github.com/otfabric/go-ieee20305/schedule"
 	"github.com/otfabric/go-ieee20305/security"
 	"github.com/otfabric/go-ieee20305/server"
@@ -312,9 +312,11 @@ func truncate(b []byte) string {
 	return string(b)
 }
 
-// Nothing of a server and its agents outlives them.
+// Nothing of a server and its agents outlives them: no goroutine started
+// in the test is left when it ends (leakcheck compares their stacks, not
+// their number).
 func TestNoGoroutineLeak(t *testing.T) {
-	base := runtime.NumGoroutine()
+	leakcheck.Check(t)
 	func() {
 		s := newChaosSite(t, server.Config{}, nil)
 		s.control(t, s.prog, 1, time.Now(), 3600)
@@ -335,5 +337,4 @@ func TestNoGoroutineLeak(t *testing.T) {
 		}
 		s.env.close()
 	}()
-	eventually(t, "the goroutines to end", func() bool { return runtime.NumGoroutine() <= base+3 })
 }

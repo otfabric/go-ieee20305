@@ -438,6 +438,7 @@ func TestHrefsAfterRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { _ = srv.Close() })
 	if err := srv.Admin().Root(ctx, "EndDeviceList", "/edev", &ieee20305.EndDeviceList{}); err != nil {
 		t.Fatal(err)
 	}
@@ -450,6 +451,7 @@ func TestHrefsAfterRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { _ = again.Close() })
 	href, err := again.Admin().Create(ctx, "/edev", examples.EndDevice(0), "")
 	if err != nil || href != "/edev/8" {
 		t.Errorf("Create after a restart = %q, %v", href, err)
@@ -468,6 +470,7 @@ func TestPeerCertificateErrorsAndLogging(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { _ = srv.Close() })
 	w := httptest.NewRecorder()
 	srv.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/tm", nil))
 	if w.Code != http.StatusForbidden {
@@ -488,6 +491,7 @@ func TestPeerCertificateErrorsAndLogging(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { _ = srv2.Close() })
 	w = httptest.NewRecorder()
 	srv2.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/tm", nil))
 	if w.Code != http.StatusBadGateway || !strings.Contains(log.String(), "upstream") {

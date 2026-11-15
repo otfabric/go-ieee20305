@@ -19,4 +19,9 @@
 // with offsets drawn deterministically from a seed, and answers the
 // transitions it subscribes to as ResponseRequired says. A server runs the
 // same Scheduler without randomization to keep the EventStatus of its events.
+//
+// A Scheduler keeps a bounded number of events (Options.MaxEvents) and of
+// transitions that wait for a subscriber (Options.QueueSize), and counts
+// what the bounds leave out (Stats). UpsertAll takes the events of a poll
+// and resolves them once.
 package schedule

@@ -21,6 +21,8 @@ import (
 	"time"
 
 	ieee20305 "github.com/otfabric/go-ieee20305"
+	"github.com/otfabric/go-ieee20305/internal/callback"
+	"github.com/otfabric/go-ieee20305/internal/goid"
 	"github.com/otfabric/go-ieee20305/security"
 )
 
@@ -107,6 +109,9 @@ type notifier struct {
 
 	mu   sync.Mutex
 	subs map[string]*subscription // by href
+	// workers identifies the goroutines of work, which call the
+	// application (NotificationMetrics, a hook that reads the resource).
+	workers map[uint64]struct{}
 }
 
 // notificationAttemptTimeout bounds one attempt to deliver a notification,
@@ -135,7 +140,7 @@ type subscription struct {
 }
 
 func newNotifier(s *Server) *notifier {
-	n := &notifier{s: s, subs: map[string]*subscription{}}
+	n := &notifier{s: s, subs: map[string]*subscription{}, workers: map[uint64]struct{}{}}
 	if c := s.cfg.NotificationClient; c != nil {
 		// A copy that follows no redirect: a listener's 307 or 308 would
 		// otherwise send the POST, with the server's certificate, to a
@@ -154,13 +159,24 @@ func newNotifier(s *Server) *notifier {
 	return n
 }
 
-// close stops the workers and waits for them. It stops under n.mu, so that
-// schedule, which checks n.ctx under n.mu, starts no worker after it.
-func (n *notifier) close() {
+// close stops the workers, and waits for them when wait is set. It stops
+// under n.mu, so that schedule, which checks n.ctx under n.mu, starts no
+// worker after it.
+func (n *notifier) close(wait bool) {
 	n.mu.Lock()
 	n.stop()
 	n.mu.Unlock()
-	n.wg.Wait()
+	if wait {
+		n.wg.Wait()
+	}
+}
+
+// runsOn reports whether a worker is the goroutine id.
+func (n *notifier) runsOn(id uint64) bool {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	_, ok := n.workers[id]
+	return ok
 }
 
 // changed is told of a change of the node at href (n, when it is put), or
@@ -297,6 +313,16 @@ func (n *notifier) schedule(sub *subscription) {
 // work sends the notifications of sub until it has none to send.
 func (n *notifier) work(sub *subscription) {
 	defer n.wg.Done()
+	if id := goid.ID(); id != 0 {
+		n.mu.Lock()
+		n.workers[id] = struct{}{}
+		n.mu.Unlock()
+		defer func() {
+			n.mu.Lock()
+			delete(n.workers, id)
+			n.mu.Unlock()
+		}()
+	}
 	for {
 		n.mu.Lock()
 		status, kind := sub.status, sub.kind
@@ -321,13 +347,13 @@ func (n *notifier) work(sub *subscription) {
 			if errors.Is(err, errCancelled) {
 				delivered = nil
 			}
-			nm.OnNotification(kind, time.Since(start), delivered)
+			n.notified(nm, kind, time.Since(start), delivered)
 			if status != NotificationDefault || err != nil {
 				cancelled := status
 				if cancelled == NotificationDefault {
 					cancelled = NotificationCancelled
 				}
-				nm.OnSubscriptionCancelled(kind, uint8(cancelled))
+				n.cancelled(nm, kind, uint8(cancelled))
 			}
 		}
 		if status != NotificationDefault || err != nil {
@@ -338,6 +364,19 @@ func (n *notifier) work(sub *subscription) {
 			return
 		}
 	}
+}
+
+// notified and cancelled call the NotificationMetrics of the application:
+// a method that does not return normally is stopped here and logged, and
+// the worker goes on. It holds no lock of the notifier.
+func (n *notifier) notified(nm NotificationMetrics, resource string, d time.Duration, err error) {
+	defer callback.Rescue(n.s.log, "NotificationMetrics.OnNotification")
+	nm.OnNotification(resource, d, err)
+}
+
+func (n *notifier) cancelled(nm NotificationMetrics, resource string, status uint8) {
+	defer callback.Rescue(n.s.log, "NotificationMetrics.OnSubscriptionCancelled")
+	nm.OnSubscriptionCancelled(resource, status)
 }
 
 // cancel drops sub, and deletes its resource unless sub was dropped

@@ -16,6 +16,7 @@ import (
 	"time"
 
 	ieee20305 "github.com/otfabric/go-ieee20305"
+	"github.com/otfabric/go-ieee20305/internal/callback"
 	"github.com/otfabric/go-ieee20305/internal/clamp"
 	"github.com/otfabric/go-ieee20305/internal/dnsmsg"
 )
@@ -95,7 +96,7 @@ func Advertise(ctx context.Context, s Service, o AdvertiseOptions) (*Advertiseme
 	}
 	a := &Advertisement{
 		t:       t,
-		log:     ieee20305.ComponentLogger(o.Logger, "discovery"),
+		log:     callback.Guard(ieee20305.ComponentLogger(o.Logger, "discovery")),
 		svc:     s,
 		records: records(s),
 		closing: make(chan struct{}),
@@ -130,7 +131,8 @@ func (a *Advertisement) Service() Service { return a.svc }
 
 // Close sends goodbyes for the records of the advertisement, stops
 // answering queries and closes the transport. It returns the error of
-// sending the goodbyes or closing the transport, the same on every call.
+// sending the goodbyes or closing the transport, the same on every call:
+// it may be called more than once, and from several goroutines at once.
 func (a *Advertisement) Close() error {
 	a.closeOnce.Do(func() {
 		close(a.closing)

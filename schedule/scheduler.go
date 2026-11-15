@@ -5,6 +5,7 @@ package schedule
 import (
 	"cmp"
 	"hash/fnv"
+	"math"
 	"math/rand/v2"
 	"slices"
 	"strconv"
@@ -155,12 +156,41 @@ type Options struct {
 	// so that one can supersede the other. When nil, all events
 	// conflict. See DERConflicts and DRLCConflicts.
 	Conflicts func(a, b Event) bool
-	// Independent declares that no two events conflict, as on a server
-	// that leaves supersession to its clients: Conflicts is not called,
-	// and the Scheduler does not compare events with each other, so that
-	// its work per change grows with the number of events rather than
-	// with its square.
-	Independent bool
+	// NoConflicts says that no two events conflict, so that none
+	// supersedes another, as on a server: Conflicts is not called. Events
+	// that all overlap are then resolved without comparing them with each
+	// other.
+	NoConflicts bool
+	// MaxEvents bounds the events the Scheduler keeps: DefaultMaxEvents
+	// when zero, none when negative. A new event beyond it is refused:
+	// Upsert and UpsertAll leave it out, and Stats counts it. An update
+	// of an event the Scheduler keeps is never refused, and an event
+	// removed makes room.
+	MaxEvents int
+	// QueueSize bounds the transitions queued for a subscriber that has
+	// not read them yet: four times MaxEvents when zero (none when
+	// MaxEvents is negative), none when negative. A call queues at most
+	// two transitions per event, so a subscriber that reads what one call
+	// queues before the next sees every transition. When the queue is
+	// full, it keeps only the latest transition of each event, and when
+	// that leaves more than three quarters of QueueSize it drops the
+	// oldest down to that; Stats counts both.
+	QueueSize int
+}
+
+// DefaultMaxEvents is the number of events a Scheduler keeps when
+// Options.MaxEvents is zero.
+const DefaultMaxEvents = 1000
+
+// Stats are counters of a Scheduler, from New on.
+type Stats struct {
+	// Refused counts the new events Upsert and UpsertAll refused because
+	// the Scheduler kept MaxEvents events.
+	Refused uint64
+	// Coalesced counts the transitions a full subscriber queue left out
+	// because a later transition of the same event followed them, and
+	// Dropped those it left out to make room otherwise (the oldest).
+	Coalesced, Dropped uint64
 }
 
 // Scheduler tracks the events of one function set and resolves them into
@@ -177,11 +207,14 @@ type Options struct {
 // The Scheduler moves events through their states on its Clock and reports
 // each change to its subscribers. It is safe for concurrent use.
 type Scheduler struct {
-	clock       Clock
-	seed        uint64
-	randomize   bool
-	conflicts   func(a, b Event) bool
+	clock     Clock
+	seed      uint64
+	randomize bool
+	conflicts func(a, b Event) bool
+	// independent is Options.NoConflicts.
 	independent bool
+	maxEvents   int // 0: none
+	queueSize   int // 0: none
 
 	mu      sync.Mutex
 	events  map[string]*entry
@@ -191,6 +224,13 @@ type Scheduler struct {
 	gen     uint64
 	closed  bool
 	wg      sync.WaitGroup
+	stats   Stats
+	// evaluations counts the calls of evaluate, and checks the windows it
+	// compared an event with: the cost the tests bound. scanAll makes
+	// evaluate compare each event with every window, for the tests to
+	// compare the plans.
+	evaluations, checks uint64
+	scanAll             bool
 }
 
 // entry is the state of one event.
@@ -213,7 +253,7 @@ func New(o Options) *Scheduler {
 		seed:        o.Seed,
 		randomize:   o.Randomize,
 		conflicts:   o.Conflicts,
-		independent: o.Independent,
+		independent: o.NoConflicts,
 		events:      make(map[string]*entry),
 		subs:        make(map[*subscriber]struct{}),
 	}
@@ -222,6 +262,18 @@ func New(o Options) *Scheduler {
 	}
 	if s.conflicts == nil {
 		s.conflicts = AllConflict
+	}
+	switch {
+	case o.MaxEvents == 0:
+		s.maxEvents = DefaultMaxEvents
+	case o.MaxEvents > 0:
+		s.maxEvents = o.MaxEvents
+	}
+	switch {
+	case o.QueueSize > 0:
+		s.queueSize = o.QueueSize
+	case o.QueueSize == 0 && s.maxEvents > 0:
+		s.queueSize = 4 * min(s.maxEvents, math.MaxInt/4)
 	}
 	return s
 }
@@ -247,16 +299,20 @@ func draw(r *rand.Rand, bound int32) time.Duration {
 	}
 }
 
-// place sets the randomized interval of en from its event.
+// place sets the randomized interval of en from its event. The interval is
+// in wall-clock time, without the monotonic reading a time.Now carries:
+// the planned windows are ordered by their start, and that order must not
+// depend on how the times of the events were made.
 func (s *Scheduler) place(en *entry) {
-	en.start, en.end = en.ev.Start, en.ev.End()
+	start := en.ev.Start.Round(0)
+	en.start, en.end = start, start.Add(en.ev.Duration)
 	if !s.randomize {
 		return
 	}
 	r := s.rng(en.ev.MRID)
 	rs := draw(r, en.ev.RandStart)
 	d := en.ev.Duration + draw(r, en.ev.RandDuration)
-	en.start = en.ev.Start.Add(rs)
+	en.start = start.Add(rs)
 	en.end = en.start.Add(max(d, 0))
 }
 
@@ -285,7 +341,8 @@ func abs(n int32) int32 {
 // Scheduled and Active are ignored, since the Scheduler works out when the
 // event is active itself. An
 // update of an event in a terminal state changes its fields but not its
-// state.
+// state. A new event is refused when the Scheduler keeps MaxEvents events
+// (see Stats).
 func (s *Scheduler) Upsert(e Event) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -294,6 +351,48 @@ func (s *Scheduler) Upsert(e Event) {
 	}
 	now := s.clock.Now()
 	var out []Transition
+	if r := s.upsert(e, now, &out); r != upserted {
+		return
+	}
+	s.evaluate(now, &out)
+	s.publish(out)
+}
+
+// UpsertAll upserts the events of evs as Upsert does, in order, and then
+// resolves them together, once: as a client takes the events of a poll. The
+// outcome does not depend on the order of evs, but it can differ from that
+// of upserting them one by one, each resolved as it comes: an event is
+// resolved against the events of higher precedence that are planned to be
+// active with all of evs known, not against one that a later event of evs
+// supersedes. It returns the number of new events it refused because the
+// Scheduler kept MaxEvents events.
+func (s *Scheduler) UpsertAll(evs []Event) (refused int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return 0
+	}
+	now := s.clock.Now()
+	var out []Transition
+	for _, e := range evs {
+		if s.upsert(e, now, &out) == rejected {
+			refused++
+		}
+	}
+	s.evaluate(now, &out)
+	s.publish(out)
+	return refused
+}
+
+// The outcomes of upsert.
+const (
+	upserted  = iota // added or updated; to resolve
+	unchanged        // an update of an event in a terminal state
+	rejected         // a new event beyond MaxEvents
+)
+
+// upsert adds or updates the entry of e, without resolving it.
+func (s *Scheduler) upsert(e Event, now time.Time, out *[]Transition) int {
 	in := e.Status
 	en, ok := s.events[e.MRID]
 	if ok {
@@ -301,35 +400,38 @@ func (s *Scheduler) Upsert(e Event) {
 		en.ev = e
 		s.place(en)
 		if e.Status.Terminal() {
-			return
+			return unchanged
 		}
 		switch in {
 		case Cancelled:
-			s.cancel(en, false, now, &out)
+			s.cancel(en, false, now, out)
 		case CancelledRandom:
-			s.cancel(en, true, now, &out)
+			s.cancel(en, true, now, out)
 		case Superseded, Completed:
-			s.set(en, in, now, &out)
+			s.set(en, in, now, out)
 		default:
 		}
-	} else {
-		en = &entry{ev: e}
-		s.place(en)
-		init := Scheduled
-		switch in {
-		case Cancelled, CancelledRandom, Superseded, Completed:
-			init = in
-		default:
-			if !en.end.After(now) {
-				init = Completed
-			}
-		}
-		en.ev.Status = init
-		s.events[e.MRID] = en
-		out = append(out, Transition{Event: en.ev, From: init, To: init, At: now})
+		return upserted
 	}
-	s.evaluate(now, &out)
-	s.publish(out)
+	if s.maxEvents > 0 && len(s.events) >= s.maxEvents {
+		s.stats.Refused++
+		return rejected
+	}
+	en = &entry{ev: e}
+	s.place(en)
+	init := Scheduled
+	switch in {
+	case Cancelled, CancelledRandom, Superseded, Completed:
+		init = in
+	default:
+		if !en.end.After(now) {
+			init = Completed
+		}
+	}
+	en.ev.Status = init
+	s.events[e.MRID] = en
+	*out = append(*out, Transition{Event: en.ev, From: init, To: init, At: now})
+	return upserted
 }
 
 // Cancel cancels the event mrid, as the server does with the status
@@ -377,16 +479,30 @@ func (s *Scheduler) cancel(en *entry, randomized bool, now time.Time, out *[]Tra
 // Remove forgets the event mrid without a transition, and reports whether
 // there was one. The events it superseded stay superseded.
 func (s *Scheduler) Remove(mrid string) bool {
+	return s.RemoveAll([]string{mrid}) == 1
+}
+
+// RemoveAll forgets the events of mrids as Remove does, and then resolves
+// the others once. It returns the number of events it forgot.
+func (s *Scheduler) RemoveAll(mrids []string) (removed int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, ok := s.events[mrid]; s.closed || !ok {
-		return false
+	if s.closed {
+		return 0
 	}
-	delete(s.events, mrid)
+	for _, mrid := range mrids {
+		if _, ok := s.events[mrid]; ok {
+			delete(s.events, mrid)
+			removed++
+		}
+	}
+	if removed == 0 {
+		return 0
+	}
 	var out []Transition
 	s.evaluate(s.clock.Now(), &out)
 	s.publish(out)
-	return true
+	return removed
 }
 
 // set moves the event of en to state to.
@@ -404,7 +520,14 @@ func (s *Scheduler) set(en *entry, to Status, now time.Time, out *[]Transition) 
 
 // evaluate brings every event to its state at now, plans the active
 // windows, and arms the timer for the next change.
+//
+// The events are planned in order of precedence. The windows accepted so
+// far are kept ordered by their start, so an event is compared only with
+// the windows that can overlap its own: those that start before it ends
+// and no longer than the longest window before it starts. For events that
+// do not overlap, that makes an evaluation O(n log n), not O(n²).
 func (s *Scheduler) evaluate(now time.Time, out *[]Transition) {
+	s.evaluations++
 	live := make([]*entry, 0, len(s.events))
 	for _, en := range s.events {
 		if !en.cancelAt.IsZero() && !now.Before(en.cancelAt) {
@@ -417,7 +540,13 @@ func (s *Scheduler) evaluate(now time.Time, out *[]Transition) {
 	}
 	slices.SortFunc(live, func(a, b *entry) int { return compare(a.ev, b.ev) })
 
-	accepted := make([]*entry, 0, len(live))
+	// accepted are the windows planned so far, by start; longest is the
+	// longest of them.
+	var accepted []*entry
+	if !s.independent {
+		accepted = make([]*entry, 0, len(live))
+	}
+	var longest time.Duration
 	for _, en := range live {
 		start, end := en.start, en.end
 		if !en.cancelAt.IsZero() {
@@ -427,7 +556,26 @@ func (s *Scheduler) evaluate(now time.Time, out *[]Transition) {
 		running := !now.Before(start) && now.Before(end)
 		lost := false
 		var cutoff time.Time
-		for _, w := range accepted { // empty when independent
+		// The windows that can overlap [start, end) start before end, and
+		// after start - longest. Of those that overlap and conflict, the
+		// first by start gives the earliest cutoff. Events that never
+		// conflict are compared with none.
+		lo, hi := 0, 0
+		if !s.independent {
+			hi, _ = slices.BinarySearchFunc(accepted, end, func(w *entry, t time.Time) int { return w.ws.Compare(t) })
+			from := start.Add(-longest)
+			lo, _ = slices.BinarySearchFunc(accepted[:hi], from, func(w *entry, t time.Time) int {
+				if w.ws.After(t) {
+					return 1
+				}
+				return -1
+			})
+			if s.scanAll {
+				lo, hi = 0, len(accepted)
+			}
+		}
+		for _, w := range accepted[lo:hi] {
+			s.checks++
 			if !overlap(start, end, w.ws, w.we) || !s.conflicts(w.ev, en.ev) {
 				continue
 			}
@@ -435,9 +583,8 @@ func (s *Scheduler) evaluate(now time.Time, out *[]Transition) {
 				lost = true
 				break
 			}
-			if c := later(w.ws, now); cutoff.IsZero() || c.Before(cutoff) {
-				cutoff = c
-			}
+			cutoff = later(w.ws, now)
+			break
 		}
 		if running && !cutoff.IsZero() {
 			if !cutoff.After(now) {
@@ -457,9 +604,17 @@ func (s *Scheduler) evaluate(now time.Time, out *[]Transition) {
 				s.set(en, Scheduled, now, out) // its start moved later
 			}
 			en.ws, en.we = start, end
-			if !s.independent {
-				accepted = append(accepted, en)
+			if s.independent {
+				continue
 			}
+			i, _ := slices.BinarySearchFunc(accepted, start, func(w *entry, t time.Time) int {
+				if w.ws.After(t) {
+					return 1
+				}
+				return -1
+			})
+			accepted = slices.Insert(accepted, i, en)
+			longest = max(longest, end.Sub(start))
 		}
 	}
 	s.arm(now, live)
@@ -513,13 +668,19 @@ func (s *Scheduler) fire(g uint64) {
 }
 
 // refresh brings the events up to the current time, in case the timer is
-// late.
+// late. Until the instant the timer is set for, no event changes state, so
+// the events are not resolved again before it: a query costs no
+// resolution.
 func (s *Scheduler) refresh() {
-	if s.closed {
+	if s.closed || s.timerAt.IsZero() {
+		return
+	}
+	now := s.clock.Now()
+	if now.Before(s.timerAt) {
 		return
 	}
 	var out []Transition
-	s.evaluate(s.clock.Now(), &out)
+	s.evaluate(now, &out)
 	s.publish(out)
 }
 
@@ -643,26 +804,33 @@ func sameEvents(a, b []Event) bool {
 // Subscribe returns a channel of every transition from now on, in order,
 // and a function that ends the subscription and closes the channel. The
 // Scheduler never waits for a subscriber: transitions queue until it reads
-// them. Close ends every subscription.
+// them, up to Options.QueueSize, beyond which the queue keeps the latest
+// transition of each event. Close ends every subscription.
 func (s *Scheduler) Subscribe() (<-chan Transition, func()) {
+	sub, stop := s.subscribe()
+	return sub.ch, stop
+}
+
+func (s *Scheduler) subscribe() (*subscriber, func()) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.closed {
-		ch := make(chan Transition)
-		close(ch)
-		return ch, func() {}
-	}
 	sub := &subscriber{
 		ch:     make(chan Transition),
 		wake:   make(chan struct{}, 1),
 		done:   make(chan struct{}),
 		exited: make(chan struct{}),
+		size:   s.queueSize,
+	}
+	if s.closed {
+		close(sub.ch)
+		close(sub.exited)
+		return sub, func() {}
 	}
 	s.subs[sub] = struct{}{}
 	s.wg.Go(func() {
 		sub.run()
 	})
-	return sub.ch, func() {
+	return sub, func() {
 		s.mu.Lock()
 		delete(s.subs, sub)
 		s.mu.Unlock()
@@ -670,22 +838,32 @@ func (s *Scheduler) Subscribe() (<-chan Transition, func()) {
 	}
 }
 
+// publish queues out for every subscriber. The caller holds s.mu.
 func (s *Scheduler) publish(out []Transition) {
 	if len(out) == 0 {
 		return
 	}
 	for sub := range s.subs {
-		sub.push(out)
+		sub.push(out, &s.stats)
 	}
+}
+
+// Stats returns the counters of s.
+func (s *Scheduler) Stats() Stats {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.stats
 }
 
 // Close stops the Scheduler: it ends every subscription, dropping the
 // transitions not yet read, and waits for their goroutines to finish.
-// Afterwards Upsert, Cancel and Remove do nothing.
+// Afterwards Upsert, Cancel and Remove do nothing. Close may be called more
+// than once, and from several goroutines at once.
 func (s *Scheduler) Close() {
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
+		s.wg.Wait()
 		return
 	}
 	s.closed = true
@@ -702,20 +880,35 @@ func (s *Scheduler) Close() {
 	s.wg.Wait()
 }
 
-// subscriber delivers transitions to one channel from an unbounded queue.
+// subscriber delivers transitions to one channel from a queue of at most
+// size transitions (no bound when size is 0).
 type subscriber struct {
-	ch     chan Transition
-	mu     sync.Mutex
-	queue  []Transition
+	ch   chan Transition
+	size int
+
+	mu    sync.Mutex
+	queue []Transition
+	// sending is whether run holds a transition it has taken from the
+	// queue and not yet delivered; sent counts those it delivered.
+	sending bool
+	sent    int
+
 	wake   chan struct{}
 	done   chan struct{}
 	once   sync.Once
 	exited chan struct{}
 }
 
-func (sub *subscriber) push(ts []Transition) {
+// push queues ts, making room as Options.QueueSize says, and counts in st
+// what it leaves out. The caller holds the Scheduler's lock.
+func (sub *subscriber) push(ts []Transition, st *Stats) {
 	sub.mu.Lock()
-	sub.queue = append(sub.queue, ts...)
+	for _, t := range ts {
+		if sub.size > 0 && len(sub.queue) >= sub.size {
+			sub.compact(st)
+		}
+		sub.queue = append(sub.queue, t)
+	}
 	sub.mu.Unlock()
 	select {
 	case sub.wake <- struct{}{}:
@@ -723,23 +916,56 @@ func (sub *subscriber) push(ts []Transition) {
 	}
 }
 
+// compact makes room in a full queue: it keeps the latest transition of
+// each event and, when more than three quarters of the queue's size are
+// left, the newest of them. The caller holds sub.mu.
+func (sub *subscriber) compact(st *Stats) {
+	latest := make(map[string]int, len(sub.queue))
+	for i, t := range sub.queue {
+		latest[t.Event.MRID] = i
+	}
+	kept := sub.queue[:0]
+	for i, t := range sub.queue {
+		if latest[t.Event.MRID] == i {
+			kept = append(kept, t)
+		} else {
+			st.Coalesced++
+		}
+	}
+	if over := len(kept) - sub.size*3/4; over > 0 {
+		st.Dropped += uint64(over)
+		kept = kept[:copy(kept, kept[over:])]
+	}
+	clear(sub.queue[len(kept):])
+	sub.queue = kept
+}
+
 func (sub *subscriber) run() {
 	defer close(sub.exited)
 	defer close(sub.ch)
 	for {
 		sub.mu.Lock()
-		q := sub.queue
-		sub.queue = nil
-		sub.mu.Unlock()
-		for _, t := range q {
+		if len(sub.queue) == 0 {
+			sub.queue = nil
+			sub.mu.Unlock()
 			select {
-			case sub.ch <- t:
+			case <-sub.wake:
+				continue
 			case <-sub.done:
 				return
 			}
 		}
+		t := sub.queue[0]
+		sub.queue[0] = Transition{}
+		sub.queue = sub.queue[1:]
+		sub.sending = true
+		sub.mu.Unlock()
 		select {
-		case <-sub.wake:
+		case sub.ch <- t:
+			sub.mu.Lock()
+			sub.sending = false
+			sub.sent++
+			sub.mu.Unlock()
 		case <-sub.done:
 			return
 		}

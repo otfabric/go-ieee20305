@@ -204,9 +204,9 @@ The behaviour of a device on a client.
 
 ```go
 func New(cfg Config) (*Agent, error)
-func (a *Agent) Run(ctx context.Context) error   // register, then poll until ctx ends or a permanent error
+func (a *Agent) Run(ctx context.Context) error   // register, then poll until ctx ends, Close or a permanent error
 func (a *Agent) Start(ctx context.Context) error // only register: DeviceCapability, time, EndDevice, PIN, FSAs
-func (a *Agent) Close()
+func (a *Agent) Close()                          // ends Run (ErrClosed); may be called twice, at once, and from a handler
 ```
 
 ### Config
@@ -225,11 +225,15 @@ func (a *Agent) Close()
 | `OnFile` | Files offered for download |
 | `MirrorUsagePoint`, `Readings`, `PostRate` | Metering: the mirror, and the readings posted at `PostRate` |
 | `Clock`, `Seed` | The clock of scheduling, and the seed of randomization |
+| `MaxEvents` | The events kept of a function set: 1000 when zero, no bound when negative |
 | `NotificationAuthorize` | Decides whether the `NotificationHandler` takes a request (`client.NotificationConfig.Authorize`): accept only the server's certificate, say |
 | `Metrics`, `Logger` | Plug points |
 
 The agent posts the Responses events ask for (received, started,
-completed, superseded, cancelled), and retries those that fail.
+completed, superseded, cancelled), and retries those that fail. The
+functions of `Config` and the `Metrics` may call the agent, `Close`
+included; one that does not return normally is logged and treated as
+failed ([OBSERVABILITY.md](OBSERVABILITY.md#callbacks)).
 
 ### Methods
 
@@ -237,6 +241,7 @@ completed, superseded, cancelled), and retries those that fail.
 |--------|-----|
 | `State()` | A copy of what the agent knows: DeviceCapability, time offset, EndDevice, Registration, FSAs, counts of polls, Responses and posts |
 | `Active(fs)`, `ActiveDERControls()`, `Events(fs)` | The events of a function set (`DER`, `DRLC`, `Messaging`, `Pricing`, `Prepayment`, `FlowReservation`) |
+| `EventStats(fs)` | Counters of a function set: events left out beyond `MaxEvents`, transitions a handler that fell behind did not get |
 | `Log(ctx, ev)` | Post a LogEvent |
 | `PutDeviceStatus`, `PutPowerStatus`, `PutFileStatus` | Report the device |
 | `Mirror(ctx, mup)`, `PostReadings(ctx, mup, readings...)` | Metering outside `Readings` |
@@ -256,14 +261,15 @@ func New(cfg Config) (*Server, error)
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request)
 func (s *Server) Admin() *Admin
 func (s *Server) Store() Store
-func (s *Server) Close() error
+func (s *Server) Stats() Stats  // RefusedResources: creations refused beyond MaxDeviceResources
+func (s *Server) Close() error  // nil; may be called twice, at once, and from a Metrics method
 ```
 
 ### Config
 
 | Field | Use |
 |-------|-----|
-| `Store` | Where resources live; `NewMemStore` when nil |
+| `Store` | Where resources live; `NewMemStore` when nil. A store that is an `OwnerCounter` counts the resources of a device for `MaxDeviceResources` |
 | `Profile`, `DefaultEdition` | The documents served (`StandardProfile`, `csipserver.Profile`) and the default edition of devices |
 | `PeerCertificates` | How a request's client certificates are found (`tlsccm.PeerCertificates` behind the CCM_8 listener) |
 | `InBandRegistration` | Unknown devices may post their EndDevice |
@@ -274,7 +280,8 @@ func (s *Server) Close() error
 | `EventClock`, `EventRetention` | The clock of the event lifecycle, and how long ended events stay |
 | `OnResponse` | Each Response, once |
 | `FlowPolicy` | Answers FlowReservationRequests (`GrantAll`) |
-| `MaxListItems` | The cap of the lists devices post to, per device in lists of every client |
+| `MaxListItems` | The cap of the lists devices post to, per device in lists of every client: 1000 when zero |
+| `MaxDeviceResources` | The cap of the resources one device owns: 100 times `MaxListItems` when zero, none when negative; beyond it a client's request that creates one is answered 403 |
 | `Hooks` | Per WADL resource: `Get`, `Create`, `Update`, `Delete` of your own |
 | `Clock`, `Metrics`, `Logger` | Plug points |
 
@@ -325,20 +332,27 @@ func New(o Options) *Scheduler
 func FromEvent(v any, primacy uint8, program string) (Event, error) // from a DERControl, EndDeviceControl, …
 
 func (s *Scheduler) Upsert(e Event)
+func (s *Scheduler) UpsertAll(evs []Event) (refused int) // the events of a poll, resolved together
 func (s *Scheduler) Cancel(mrid string, randomized bool)
 func (s *Scheduler) Remove(mrid string) bool
+func (s *Scheduler) RemoveAll(mrids []string) (removed int)
 func (s *Scheduler) Get(mrid string) (Event, bool)
 func (s *Scheduler) Events() []Event
 func (s *Scheduler) Active(at time.Time) []Event
 func (s *Scheduler) Window(mrid string) (start, end time.Time, ok bool)
 func (s *Scheduler) Timeline(from, to time.Time) []Segment
 func (s *Scheduler) Subscribe() (<-chan Transition, func())
+func (s *Scheduler) Stats() Stats // Refused, Coalesced, Dropped
 func (s *Scheduler) Close()
 ```
 
 `Options` sets the clock, the seed, randomization and the conflict rule (`DERConflicts`,
-`DRLCConflicts`, `AllConflict`); `Independent` declares that no two events
-conflict, so that the scheduler never compares them. `Status` is `Scheduled`,
+`DRLCConflicts`, `AllConflict`, or `NoConflicts` for events that never
+supersede each other). `MaxEvents` bounds the events kept
+(`DefaultMaxEvents`, 1000, when zero; none when negative): a new event
+beyond it is refused and counted. `QueueSize` bounds the transitions that
+wait for a subscriber (4 times `MaxEvents` when zero): a full queue keeps
+the latest transition of each event. `Status` is `Scheduled`,
 `Active`, `Completed`, `Cancelled`, `Superseded`, …; `ResponseRequired(flags,
 t)` says whether, and with which status, a transition is answered.
 
@@ -347,7 +361,7 @@ t)` says whether, and with which status, a transition is answered.
 `import "github.com/otfabric/go-ieee20305/discovery"`
 
 ```go
-func Browse(ctx context.Context, o BrowseOptions) (<-chan Service, error)
+func Browse(ctx context.Context, o BrowseOptions) (<-chan Service, error) // each Service is the receiver's
 func Advertise(ctx context.Context, s Service, o AdvertiseOptions) (*Advertisement, error)
 func NewMulticastTransport(ifi *net.Interface) (PacketTransport, error)
 ```

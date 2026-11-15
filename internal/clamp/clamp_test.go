@@ -17,9 +17,10 @@ func TestUint32(t *testing.T) {
 		}
 	}
 	if math.MaxInt > math.MaxUint32 {
-		// From a variable: the constant does not fit int on 32-bit targets.
-		over := int64(math.MaxUint32)
-		over++
+		// One beyond the largest uint32, converted at run time: as a
+		// constant it does not fit the int of a 32-bit platform, where
+		// this branch is not taken.
+		over := int64(math.MaxUint32) + 1
 		big := int(over)
 		if got := Uint32(big); got != math.MaxUint32 {
 			t.Errorf("Uint32(%d) = %d, want %d", big, got, uint32(math.MaxUint32))

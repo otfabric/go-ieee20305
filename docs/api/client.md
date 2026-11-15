@@ -361,7 +361,7 @@ type Metrics interface {
 
 Metrics receives the requests of a client, to count and time them: set it as Config.Metrics. Each method is called once per call of the client (a Get, a Post, ...), whatever its retries: OnRequest when it starts, and OnResponse or OnError when it ends, with its duration including retries. path is the path of the request, an href of the server; aggregate it (by WADL resource, say) before using it as a label.
 
-The methods are called synchronously from the goroutines of the calls: they must be safe for concurrent use, quick, and must not block. Embed NopMetrics to implement only some.
+The methods are called synchronously from the goroutines of the calls: they must be safe for concurrent use, quick, and must not block. A method that does not return normally is stopped there: the client logs that at Error level with the stack, and the call goes on as if the method had returned. Embed NopMetrics to implement only some.
 
 ### type NopMetrics
 
