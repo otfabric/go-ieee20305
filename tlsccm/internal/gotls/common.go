@@ -209,8 +209,7 @@ var defaultSupportedSignatureAlgorithms = []SignatureScheme{
 	PKCS1WithSHA512,
 	ECDSAWithP384AndSHA384,
 	ECDSAWithP521AndSHA512,
-	PKCS1WithSHA1,
-	ECDSAWithSHA1,
+	// SHA-1 schemes are not offered (RFC 9155, as Go 1.25).
 }
 
 // helloRetryRequestRandom is set as the Random value of a ServerHello

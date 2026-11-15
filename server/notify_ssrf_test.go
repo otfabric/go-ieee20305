@@ -108,8 +108,10 @@ func TestNotificationURIRecheckedAfterRestart(t *testing.T) {
 	}
 }
 
-// Names whose last label is a number are refused; ordinary names, and
-// routable literals with or without a zone, are not.
+// Names whose last label is a number, names with an empty label, names of
+// loopback, and IPv6 literals that embed a refused IPv4 address are
+// refused; ordinary names, and routable literals with or without a zone,
+// are not.
 func TestDefaultNotificationURIAllowedSpellings(t *testing.T) {
 	for host, want := range map[string]bool{
 		"listener.example":     true,
@@ -123,6 +125,29 @@ func TestDefaultNotificationURIAllowedSpellings(t *testing.T) {
 		"[ff02::1%25eth0]":     false,
 		"[::ffff:127.0.0.1]":   false,
 		"[::ffff:169.254.1.1]": false,
+		// IPv6 forms that embed an IPv4 address.
+		"[::7f00:1]":           false,
+		"[::ffff:0:7f00:1]":    false,
+		"[64:ff9b::7f00:1]":    false,
+		"[64:ff9b::a9fe:a9fe]": false,
+		"[2002:7f00:1::]":      false,
+		"[2002:a9fe:a9fe::1]":  false,
+		"[64:ff9b::a00:7]":     true,
+		"[2002:a00:7::1]":      true,
+		"[::a00:7]":            true,
+		"[::ffff:0:a00:7]":     true,
+		// Empty labels and trailing dots.
+		"localhost..":        false,
+		"127.0.0.1..":        false,
+		"listener.example..": true,
+		"listener..example":  false,
+		".listener.example":  false,
+		// Names of loopback in hosts files.
+		"ip6-localhost":           false,
+		"ip6-loopback":            false,
+		"localhost.localdomain":   false,
+		"localhost6":              false,
+		"localhost6.localdomain6": false,
 	} {
 		u, err := url.Parse("https://" + host + "/n")
 		if err != nil {

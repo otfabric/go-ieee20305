@@ -52,7 +52,10 @@ scalar types named types (`UInt32`, `String32`, `HexBinary160`, `MRIDType`,
 | `MediaType` | `application/sep+xml` |
 
 Elements a schema admits without declaring (`xs:any`) are kept as
-`ExtensionElements`.
+`ExtensionElements`. An `ExtensionElement`'s content is re-encoded with
+every namespace its element and attribute names use declared, so it means
+the same wherever it is written; an element with a duplicate attribute is
+refused.
 
 ### Errors
 
@@ -223,6 +226,7 @@ func (a *Agent) Close()                          // ends Run (ErrClosed); may be
 | `MirrorUsagePoint`, `Readings`, `PostRate` | Metering: the mirror, and the readings posted at `PostRate` |
 | `Clock`, `Seed` | The clock of scheduling, and the seed of randomization |
 | `MaxEvents` | The events kept of a function set: 1000 when zero, no bound when negative |
+| `NotificationAuthorize` | Decides whether the `NotificationHandler` takes a request (`client.NotificationConfig.Authorize`): accept only the server's certificate, say |
 | `Metrics`, `Logger` | Plug points |
 
 The agent posts the Responses events ask for (received, started,
@@ -242,7 +246,7 @@ failed ([OBSERVABILITY.md](OBSERVABILITY.md#callbacks)).
 | `PutDeviceStatus`, `PutPowerStatus`, `PutFileStatus` | Report the device |
 | `Mirror(ctx, mup)`, `PostReadings(ctx, mup, readings...)` | Metering outside `Readings` |
 | `RequestFlowReservation(ctx, req)` | Ask for a flow reservation |
-| `NotificationHandler()` | The `http.Handler` to serve at `NotificationURI` |
+| `NotificationHandler()` | The `http.Handler` to serve at `NotificationURI` (the same on every call); it ignores notifications of subscriptions that are not the agent's |
 
 `ErrNotStarted` is returned by calls that need what `Start` reads.
 
@@ -269,13 +273,14 @@ func (s *Server) Close() error  // nil; may be called twice, at once, and from a
 | `Profile`, `DefaultEdition` | The documents served (`StandardProfile`, `csipserver.Profile`) and the default edition of devices |
 | `PeerCertificates` | How a request's client certificates are found (`tlsccm.PeerCertificates` behind the CCM_8 listener) |
 | `InBandRegistration` | Unknown devices may post their EndDevice |
+| `AssignedDevicesOnly` | Aggregators register only the devices assigned to them (`DeviceSpec.ManagedBy`), not devices the server was not given |
 | `PollRate`, `DefaultLimit`, `MaxLimit`, `MaxRequestBytes` | What the server tells and takes |
 | `EnableDiscouraged`, `Disable`, `ClientLists` | Methods beyond, or short of, the WADL's conformance |
 | `NotificationClient`, `NotificationURIAllowed`, `NotificationWorkers`, `NotificationRetry`, `NotificationCancelAfter` | Subscriptions: the client of the notifier (`NewNotificationClient`), the guard of the URIs devices choose (`DefaultNotificationURIAllowed`), and delivery |
 | `EventClock`, `EventRetention` | The clock of the event lifecycle, and how long ended events stay |
 | `OnResponse` | Each Response, once |
 | `FlowPolicy` | Answers FlowReservationRequests (`GrantAll`) |
-| `MaxListItems` | The cap of the lists devices post to: 1000 when zero |
+| `MaxListItems` | The cap of the lists devices post to, per device in lists of every client: 1000 when zero |
 | `MaxDeviceResources` | The cap of the resources one device owns: 100 times `MaxListItems` when zero, none when negative; beyond it a client's request that creates one is answered 403 |
 | `Hooks` | Per WADL resource: `Get`, `Create`, `Update`, `Delete` of your own |
 | `Clock`, `Metrics`, `Logger` | Plug points |

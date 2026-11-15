@@ -25,8 +25,9 @@ var (
 	maxRequery   = time.Hour
 	// sweepInterval is how often expired records are removed.
 	sweepInterval = time.Second
-	// resolveInterval is the shortest interval between two queries for
-	// the missing records of one instance.
+	// resolveInterval is the interval between the first and second query
+	// for a missing record of an instance; it doubles after each query up
+	// to maxRequery (RFC 6762, section 5.2).
 	resolveInterval = time.Second
 )
 
@@ -38,6 +39,12 @@ const (
 	maxCacheEntries = 1024
 	// maxHostAddrs bounds the addresses cached of one host.
 	maxHostAddrs = 16
+	// maxCacheTTL bounds the TTL of a cached record to the 75 minutes
+	// RFC 6762, section 10, recommends for records without a host name,
+	// so that records of a peer with longer TTLs leave the cache in time;
+	// the browser's periodic queries refresh records that are still
+	// announced.
+	maxCacheTTL = 4500
 )
 
 // BrowseOptions configures Browse.
@@ -97,7 +104,7 @@ func Browse(ctx context.Context, o BrowseOptions) (<-chan Service, error) {
 		addrs:    map[string]map[netip.Addr]time.Time{},
 		names:    map[string]string{},
 		emitted:  map[string]Service{},
-		resolved: map[dnsmsg.Question]time.Time{},
+		resolved: map[dnsmsg.Question]resolveState{},
 	}
 	if len(o.Subtypes) == 0 {
 		b.queries[strings.ToLower(typeName)] = ""
@@ -145,18 +152,43 @@ type browser struct {
 	txt   map[string]txtEntry
 	addrs map[string]map[netip.Addr]time.Time
 	// emitted holds the last Service delivered for each instance;
-	// resolved the time of the last query for each missing record.
+	// resolved the queries sent for each missing record.
 	emitted  map[string]Service
-	resolved map[dnsmsg.Question]time.Time
+	resolved map[dnsmsg.Question]resolveState
 }
 
-func (b *browser) send(qs []dnsmsg.Question) error {
-	data, err := (&dnsmsg.Message{Questions: qs}).Encode()
-	if err != nil {
-		return err
-	}
-	return b.t.WritePacket(data, netip.AddrPort{})
+// resolveState is the time of the last query for a missing record and the
+// interval until the next.
+type resolveState struct {
+	last     time.Time
+	interval time.Duration
 }
+
+// send sends the questions qs, in as many messages as it takes to keep
+// each within maxPacket bytes.
+func (b *browser) send(qs []dnsmsg.Question) error {
+	for len(qs) > 0 {
+		// The presentation form of a name plus two bytes bounds its
+		// uncompressed wire form; each question adds type and class.
+		n, size := 0, headerLen
+		for n < len(qs) && (n == 0 || size+len(qs[n].Name)+6 <= maxPacket) {
+			size += len(qs[n].Name) + 6
+			n++
+		}
+		data, err := (&dnsmsg.Message{Questions: qs[:n]}).Encode()
+		if err != nil {
+			return err
+		}
+		if err := b.t.WritePacket(data, netip.AddrPort{}); err != nil {
+			return err
+		}
+		qs = qs[n:]
+	}
+	return nil
+}
+
+// headerLen is the size of a DNS message header.
+const headerLen = 12
 
 func (b *browser) query(unicast bool) error {
 	qs := make([]dnsmsg.Question, 0, len(b.order))
@@ -247,12 +279,13 @@ func (b *browser) handle(p packet, now time.Time) []Service {
 		return nil
 	}
 	flushed := map[string]bool{}
+	changed := false
 	for _, r := range append(m.Answers, m.Additionals...) {
 		if r.Class != dnsmsg.ClassINET {
 			continue
 		}
 		key := strings.ToLower(r.Name)
-		expiry := now.Add(time.Duration(r.TTL) * time.Second)
+		expiry := now.Add(time.Duration(min(r.TTL, maxCacheTTL)) * time.Second)
 		switch d := r.Data.(type) {
 		case *dnsmsg.PTR:
 			if _, ok := b.queries[key]; !ok {
@@ -264,11 +297,13 @@ func (b *browser) handle(p packet, now time.Time) []Service {
 			inst := strings.ToLower(d.Target)
 			if r.TTL == 0 {
 				delete(b.ptr[inst], key)
+				changed = true
 				continue
 			}
 			if b.ptr[inst] == nil && len(b.ptr) >= maxCacheEntries {
 				continue
 			}
+			changed = true
 			if b.ptr[inst] == nil {
 				b.ptr[inst] = map[string]time.Time{}
 			}
@@ -277,26 +312,37 @@ func (b *browser) handle(p packet, now time.Time) []Service {
 		case *dnsmsg.SRV:
 			if r.TTL == 0 {
 				delete(b.srv, key)
+				changed = true
 				continue
 			}
 			if !cacheable(key, b.srv) {
 				continue
 			}
+			changed = true
 			b.srv[key] = srvEntry{target: d.Target, port: d.Port, expiry: expiry}
 		case *dnsmsg.TXT:
 			if r.TTL == 0 {
 				delete(b.txt, key)
+				changed = true
 				continue
 			}
 			if !cacheable(key, b.txt) {
 				continue
 			}
+			changed = true
 			b.txt[key] = txtEntry{txt: parseTXT(d.Strings), expiry: expiry}
 		case *dnsmsg.A:
 			b.addAddr(key, d.Addr, r, expiry, flushed)
+			changed = true
 		case *dnsmsg.AAAA:
 			b.addAddr(key, d.Addr, r, expiry, flushed)
+			changed = true
 		}
+	}
+	if !changed {
+		// Nothing of the packet was cached: the services are as they
+		// were, and the sweep sends the queries that are due.
+		return nil
 	}
 	return b.reconcile(now)
 }
@@ -370,6 +416,7 @@ func (b *browser) reconcile(now time.Time) []Service {
 	keys := slices.Sorted(maps.Keys(insts))
 	var out []Service
 	var missing []dnsmsg.Question
+	needed := map[dnsmsg.Question]bool{}
 	for _, inst := range keys {
 		s, complete, need := b.service(inst)
 		last, wasEmitted := b.emitted[inst]
@@ -387,13 +434,24 @@ func (b *browser) reconcile(now time.Time) []Service {
 		for _, q := range need {
 			key := q
 			key.Name = strings.ToLower(q.Name)
-			if now.Sub(b.resolved[key]) >= resolveInterval {
-				b.resolved[key] = now
-				missing = append(missing, q)
+			needed[key] = true
+			st, ok := b.resolved[key]
+			if ok && now.Sub(st.last) < st.interval {
+				continue
 			}
+			if ok {
+				st.interval = min(2*st.interval, maxRequery)
+			} else {
+				st.interval = resolveInterval
+			}
+			st.last = now
+			b.resolved[key] = st
+			missing = append(missing, q)
 		}
 	}
-	maps.DeleteFunc(b.resolved, func(_ dnsmsg.Question, t time.Time) bool { return now.Sub(t) >= resolveInterval })
+	// A record that is no longer missing starts again from the first
+	// interval when it goes missing again.
+	maps.DeleteFunc(b.resolved, func(q dnsmsg.Question, _ resolveState) bool { return !needed[q] })
 	if len(missing) > 0 {
 		if err := b.send(missing); err != nil {
 			b.log.Warnf("sending a query: %v", err)

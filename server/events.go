@@ -100,7 +100,9 @@ func (e *events) transition(em EventMetrics, name string, t schedule.Transition)
 	em.OnEventTransition(name, t.From, t.To)
 }
 
-// setStatus sets the currentStatus of the event at href, if it differs.
+// setStatus sets the currentStatus of the event at href, if it differs. A
+// cancelled event stays cancelled: a transition the scheduler queued before
+// it learnt of the cancellation does not undo it.
 func (e *events) setStatus(ctx context.Context, href string, to schedule.Status, at time.Time) error {
 	defer e.s.listLocks.lock("node:" + href)()
 	n, err := e.s.store.Get(ctx, href)
@@ -109,6 +111,9 @@ func (e *events) setStatus(ctx context.Context, href string, to schedule.Status,
 	}
 	st := eventStatus(n.Value)
 	if st == nil || st.CurrentStatus == ieee20305.UInt8(to) {
+		return nil
+	}
+	if cancelled(st.CurrentStatus) && !cancelled(ieee20305.UInt8(to)) {
 		return nil
 	}
 	st.CurrentStatus, st.DateTime = ieee20305.UInt8(to), ieee20305.TimeType(at.Unix())
@@ -122,7 +127,7 @@ func (e *events) setStatus(ctx context.Context, href string, to schedule.Status,
 func (s *Server) putNode(ctx context.Context, n *Node) error {
 	defer s.listLocks.lock("node:" + n.Href)()
 	if st := eventStatus(n.Value); st != nil {
-		cancel := st.CurrentStatus == ieee20305.UInt8(schedule.Cancelled) || st.CurrentStatus == ieee20305.UInt8(schedule.CancelledRandom)
+		cancel := cancelled(st.CurrentStatus)
 		if old, err := s.store.Get(ctx, n.Href); err == nil && !cancel {
 			if ost := eventStatus(old.Value); ost != nil {
 				*st = *ost
@@ -130,6 +135,11 @@ func (s *Server) putNode(ctx context.Context, n *Node) error {
 		}
 	}
 	return s.store.Put(ctx, n)
+}
+
+// cancelled reports whether the currentStatus of an event cancels it.
+func cancelled(status ieee20305.UInt8) bool {
+	return status == ieee20305.UInt8(schedule.Cancelled) || status == ieee20305.UInt8(schedule.CancelledRandom)
 }
 
 // eventStatus returns the EventStatus of an event, or nil.
@@ -196,6 +206,9 @@ func (e *events) prune() {
 
 // changed is told of every change of the store.
 func (s *Server) changed(ctx context.Context, href string, node *Node, deleted bool) {
+	if deleted {
+		s.forgetCounters(href)
+	}
 	s.events.changed(href, node, deleted)
 	s.notifier.changed(ctx, href, node, deleted)
 }
@@ -333,7 +346,7 @@ func (s *Server) storeResponse(ctx context.Context, r *Request, resp *ieee20305.
 	}
 	href, err := s.createItem(ctx, r.Node, r.Doc, owner, counts(r))
 	if err == nil {
-		s.trim(ctx, r.Node.Href)
+		s.trim(ctx, r.Node, owner)
 	}
 	return href, err == nil, err
 }

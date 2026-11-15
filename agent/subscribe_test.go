@@ -4,6 +4,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -26,15 +27,24 @@ func subscribingFake(t *testing.T) *fakeServer {
 // notify posts a Notification to the NotificationHandler of a.
 func notify(t *testing.T, a *Agent, resource, sub string, status int) {
 	t.Helper()
+	if code := post(a, resource, sub, status); code != http.StatusCreated {
+		t.Fatalf("notification answered %d", code)
+	}
+}
+
+// post posts a Notification to the NotificationHandler of a and returns
+// the status of the answer.
+func post(a *Agent, resource, sub string, status int, header ...string) int {
 	body := `<Notification ` + ns + `><subscribedResource>` + resource + `</subscribedResource><status>` +
 		string(rune('0'+status)) + `</status><subscriptionURI>` + sub + `</subscriptionURI></Notification>`
 	r := httptest.NewRequest(http.MethodPost, "/notify", strings.NewReader(body))
 	r.Header.Set("Content-Type", client.MediaType)
+	for i := 0; i+1 < len(header); i += 2 {
+		r.Header.Set(header[i], header[i+1])
+	}
 	w := httptest.NewRecorder()
 	a.NotificationHandler().ServeHTTP(w, r)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("notification answered %d", w.Code)
-	}
+	return w.Code
 }
 
 // woken reports whether a was woken, and takes the wake-up.
@@ -169,5 +179,85 @@ func TestRunWokenByNotification(t *testing.T) {
 	}
 	if n := f.count("DELETE /edev/1/sub/1"); n != 3 {
 		t.Errorf("%d unsubscriptions, want 3", n)
+	}
+}
+
+// Only the agent's own subscriptions wake it or cancel, and
+// NotificationAuthorize decides who may notify.
+func TestNotificationsOfOtherSubscriptions(t *testing.T) {
+	ctx := context.Background()
+	f := subscribingFake(t)
+	f.location("POST /edev/1/sub", "/edev/1/sub/1")
+	a := newTestAgent(t, f, Config{
+		NotificationURI: "https://device.test/notify",
+		NotificationAuthorize: func(r *http.Request) error {
+			if r.Header.Get("X-Peer") != "server" {
+				return errors.New("another peer")
+			}
+			return nil
+		},
+	})
+	if a.NotificationHandler() != a.NotificationHandler() {
+		t.Error("a new handler at each call")
+	}
+	if err := a.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	woken(a)
+	if code := post(a, "/derp", "/edev/1/sub/1", 0); code != http.StatusForbidden || woken(a) {
+		t.Errorf("unauthorized: %d", code)
+	}
+	for _, sub := range []string{"/edev/1/sub/9", "", "https://other.example/edev/1/sub/1", "%zz"} {
+		if code := post(a, "/derp", sub, 0, "X-Peer", "server"); code != http.StatusCreated || woken(a) {
+			t.Errorf("subscription %q: %d, woken", sub, code)
+		}
+	}
+	// A cancellation of a subscription that is not the agent's keeps the
+	// agent's subscription of the resource.
+	if code := post(a, "/derp", "/edev/1/sub/9", 1, "X-Peer", "server"); code != http.StatusCreated || a.subs["/derp"] != "/edev/1/sub/1" {
+		t.Errorf("%d, subscriptions %v", code, a.subs)
+	}
+	// The agent's own, by path or by URL of the server.
+	if code := post(a, "/derp", f.ts.URL+"/edev/1/sub/1", 1, "X-Peer", "server"); code != http.StatusCreated || !woken(a) {
+		t.Errorf("own subscription: %d", code)
+	}
+	if _, ok := a.subs["/derp"]; ok {
+		t.Errorf("the cancelled subscription is kept: %v", a.subs)
+	}
+}
+
+// A notification does not end the wait after a failed poll.
+func TestRunBackoffNotEndedByNotification(t *testing.T) {
+	f := subscribingFake(t)
+	f.location("POST /edev/1/sub", "/edev/1/sub/1")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	polls := make(chan struct{}, 10)
+	calls := 0
+	a := newTestAgent(t, f, Config{
+		PollRate: time.Hour, NotificationURI: "https://device.test/notify",
+		Backoff: ieee20305.ExponentialBackoff{Initial: time.Hour, Max: time.Hour},
+		OnAssignments: func(context.Context, []*ieee20305.FunctionSetAssignments) error {
+			calls++
+			polls <- struct{}{}
+			if calls == 2 {
+				return errors.New("transient")
+			}
+			return nil
+		},
+	})
+	done := make(chan error, 1)
+	go func() { done <- a.Run(ctx) }()
+	<-polls // Start
+	<-polls // at once after subscribing: fails
+	notify(t, a, "/derp", "/edev/1/sub/1", 0)
+	select {
+	case <-polls:
+		t.Error("a notification ended the backoff")
+	case <-time.After(50 * time.Millisecond):
+	}
+	cancel()
+	if err := <-done; err != context.Canceled {
+		t.Fatalf("Run: %v", err)
 	}
 }

@@ -312,11 +312,17 @@ func TestResolveSameServer(t *testing.T) {
 	}, {
 		server: "https://sk.example",
 		same:   []string{"//SK.example/x"},
-		other:  []string{"//sk.example:443/x", "//sk.example:/x", "//sk.example./x", "//user@sk.example/x"},
+		other: []string{"//sk.example:443/x", "//sk.example:/x", "//sk.example./x", "//user@sk.example/x",
+			// A % outside an IPv6 literal is no zone.
+			"https://sk.example%25/x", "//SK.example%25/x"},
 	}, {
 		server: "https://[fe80::a%25en0]:8443",
 		same:   []string{"//[fe80::a%25en0]:8443/x", "//[FE80::A%25en0]:8443/x"},
 		other:  []string{"//[fe80::a%25EN0]:8443/x", "//[fe80::a%25eth1]:8443/x", "//[fe80::a]:8443/x", "//[fe80:0::a%25en0]:8443/x"},
+	}, {
+		server: "https://[fe80::a]:8443",
+		same:   []string{"//[FE80::a]:8443/x"},
+		other:  []string{"//[fe80::a%25]:8443/x", "//[fe80::a%25en0]:8443/x"},
 	}} {
 		c, err := client.New(client.Config{Server: tc.server, HTTPClient: &http.Client{}})
 		if err != nil {

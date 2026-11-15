@@ -5,6 +5,7 @@ package agent
 import (
 	"context"
 	"errors"
+	"math"
 	"net/http"
 	"time"
 
@@ -14,27 +15,58 @@ import (
 
 // NotificationHandler returns the http.Handler of the notifications of the
 // agent's subscriptions, to serve at Config.NotificationURI (over TLS that
-// verifies the server's certificate). A notification makes the agent poll
-// at once; a cancellation, subscribe again at its next poll.
+// verifies the server's certificate; Config.NotificationAuthorize checks
+// the sender). A notification of one of the agent's subscriptions makes
+// the agent poll at once, unless it is waiting after a failure; a
+// cancellation, subscribe again at its next poll. A notification of
+// another subscription is answered and ignored. Every call returns the
+// same handler.
 func (a *Agent) NotificationHandler() http.Handler {
-	h, err := client.NewNotificationHandler(func(_ context.Context, n *ieee20305.Notification) error {
-		if n.Status != 0 {
-			a.mu.Lock()
-			if a.subs[n.SubscribedResource] == n.SubscriptionURI {
-				delete(a.subs, n.SubscribedResource)
-			}
-			a.mu.Unlock()
+	a.notifyOnce.Do(func() {
+		h, err := client.NewNotificationHandler(a.notified, client.NotificationConfig{
+			Codec: a.c.Codec(), Authorize: a.cfg.NotificationAuthorize,
+		})
+		if err != nil {
+			panic(err) // the handle function is never nil
 		}
-		select {
-		case a.wake <- struct{}{}:
-		default:
-		}
+		a.notifyHandler = h
+	})
+	return a.notifyHandler
+}
+
+// notified takes a notification the NotificationHandler passes on.
+func (a *Agent) notified(_ context.Context, n *ieee20305.Notification) error {
+	if n.SubscriptionURI == "" {
+		a.log.Debugf("ignoring a notification without a subscription")
 		return nil
-	}, client.NotificationConfig{Codec: a.c.Codec()})
-	if err != nil {
-		panic(err) // the handle function is never nil
 	}
-	return h
+	u, err := a.c.Resolve(n.SubscriptionURI)
+	if err != nil {
+		a.log.Debugf("ignoring a notification of subscription %q: %v", n.SubscriptionURI, err)
+		return nil
+	}
+	sub := u.RequestURI()
+	a.mu.Lock()
+	ours := false
+	for _, s := range a.subs {
+		if s == sub {
+			ours = true
+			break
+		}
+	}
+	if ours && n.Status != 0 && a.subs[n.SubscribedResource] == sub {
+		delete(a.subs, n.SubscribedResource)
+	}
+	a.mu.Unlock()
+	if !ours {
+		a.log.Debugf("ignoring a notification of subscription %q, not the agent's", n.SubscriptionURI)
+		return nil
+	}
+	select {
+	case a.wake <- struct{}{}:
+	default:
+	}
+	return nil
 }
 
 // watch records a list the poll read, to subscribe to.
@@ -107,7 +139,11 @@ func (a *Agent) subscribedPollRate() time.Duration {
 	if a.cfg.SubscribedPollRate > 0 {
 		return a.cfg.SubscribedPollRate
 	}
-	return 4 * a.pollRate()
+	d := a.pollRate()
+	if d > math.MaxInt64/4 {
+		return math.MaxInt64 // saturated
+	}
+	return 4 * d
 }
 
 // unsubscribe deletes the agent's subscriptions, as it stops.

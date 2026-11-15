@@ -82,7 +82,7 @@ ErrNoNode is returned by a Store for an href it does not hold. It matches ieee20
 func DefaultNotificationURIAllowed(u *url.URL) bool
 ```
 
-DefaultNotificationURIAllowed is the NotificationURIAllowed of a server without one: it refuses the hosts a device must not make the server connect to with its certificate: localhost, and literal loopback, unspecified, link-local and multicast addresses (cloud metadata services are link-local), with or without an IPv6 zone. It also refuses hosts whose last label is a number, such as 127.1, 2130706433 or 0x7f000001: they are no DNS names (RFC 1123, section 2.1), and the system resolver of some platforms reads them as IPv4 addresses (inet\_aton). A host name is not resolved: what the names of a network reach is for the operator's own NotificationURIAllowed, or its network, to decide.
+DefaultNotificationURIAllowed is the NotificationURIAllowed of a server without one: it refuses the hosts a device must not make the server connect to with its certificate: localhost and the other names of loopback in common hosts files (ip6-localhost, ip6-loopback, localhost.localdomain, localhost6), and literal loopback, unspecified, link-local and multicast addresses (cloud metadata services are link-local), with or without an IPv6 zone. It applies the same checks to the IPv4 address an IPv6 literal embeds: IPv4-mapped (::ffff:0:0/96), IPv4-compatible (::/96), IPv4-translated (::ffff:0:0:0/96, RFC 2765), NAT64 (64:ff9b::/96, RFC 6052) and 6to4 (2002::/16, RFC 3056). It also refuses names with an empty label, after any trailing dots, and hosts whose last label is a number, such as 127.1, 2130706433 or 0x7f000001: they are no DNS names (RFC 1123, section 2.1), and the system resolver of some platforms reads them as IPv4 addresses (inet\_aton). A host name is not resolved: what the names of a network reach is for the operator's own NotificationURIAllowed, or its network, to decide.
 
 ### func GrantAll
 
@@ -98,7 +98,7 @@ GrantAll is the FlowPolicy that grants every request in full.
 func NewNotificationClient(server tls.Certificate, deviceCAs *x509.CertPool) *http.Client
 ```
 
-NewNotificationClient returns an http.Client for Config.NotificationClient: it presents the server's certificate, and verifies the listeners of the devices against deviceCAs (security.NotificationTLSConfig). It sets no timeout of its own: the notifier bounds each delivery with its context.
+NewNotificationClient returns an http.Client for Config.NotificationClient: it presents the server's certificate, and verifies the listeners of the devices against deviceCAs (security.NotificationTLSConfig). It sets a Timeout of one minute; the notifier bounds each attempt to deliver a notification to one minute as well, whatever its NotificationClient.
 
 ## Types
 
@@ -276,6 +276,13 @@ type Config struct {
 	// EndDeviceList. The server creates its resources, without a
 	// Registration until Admin.Register.
 	InBandRegistration bool
+	// AssignedDevicesOnly lets an aggregator register (post the EndDevice
+	// of) only the devices the operator assigned it with
+	// DeviceSpec.ManagedBy. By default an aggregator also registers devices
+	// the server was not given, which it then manages, as aggregators of
+	// CSIP-AUS do for their sites; it never registers a device the
+	// operator gave the server without assigning it to that aggregator.
+	AssignedDevicesOnly bool
 	// ClientLists names, by WADL resource ID, lists of every client that
 	// clients may post to, besides MirrorUsagePointList and ResponseList.
 	ClientLists map[string]bool
@@ -296,9 +303,11 @@ type Config struct {
 	NotificationWorkers int
 	// NotificationRetry decides whether a notification that could not be
 	// delivered is sent again, and when: when nil, it is sent again while
-	// the receiver is unreachable, fails (5xx) or times out, after a delay
-	// that doubles from 1 s to 5 min, with jitter. A notification refused
-	// with a 4xx, or not sent again, cancels its subscription.
+	// the listener answers 5xx (503 and 429 included), after a delay that
+	// doubles from 1 s to 5 min, with jitter. A transport error (a
+	// listener that cannot be reached) or a timeout is not retried by the
+	// default. A notification refused with a 4xx, or not sent again,
+	// cancels its subscription.
 	NotificationRetry ieee20305.RetryPolicy
 	// NotificationCancelAfter cancels a subscription whose notifications
 	// have failed for this long: 24 hours when zero.
@@ -678,6 +687,7 @@ func (r Role) String() string
 type Server struct {
 
 	// per list or parent: the last id allocated
+	// the keys of counters
 	// by LFDI
 
 	// listLocks serialize the deduplicating creations in a list (Responses,

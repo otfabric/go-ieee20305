@@ -144,6 +144,8 @@ func TestFetchArchiveErrors(t *testing.T) {
 		"unknown method":   {rawZip(t, zipEntry{name: "x", content: "<x/>", method: 99}), []manifest.File{{From: "x", To: "x", SHA256: sum}}},
 		"member changed":   {rawZip(t, zipEntry{name: "x", content: "<y/>"}), []manifest.File{{From: "x", To: "x", SHA256: sum}}},
 		"escaping member":  {rawZip(t, zipEntry{name: "d/../../x", content: "<x/>"}), []manifest.File{{From: "d/", To: "d/"}}},
+		"backslash member": {rawZip(t, zipEntry{name: `d/..\..\x`, content: "<x/>"}), []manifest.File{{From: "d/", To: "d/"}}},
+		"absolute target":  {rawZip(t, zipEntry{name: "x", content: "<x/>"}), []manifest.File{{From: "x", To: "/x", SHA256: sum}}},
 	}
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {

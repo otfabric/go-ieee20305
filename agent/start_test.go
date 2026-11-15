@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"testing"
+	"time"
 
 	ieee20305 "github.com/otfabric/go-ieee20305"
 	"github.com/otfabric/go-ieee20305/client"
@@ -179,6 +180,33 @@ func TestRunPermanentPollError(t *testing.T) {
 	}
 	if calls != 3 {
 		t.Errorf("%d polls", calls)
+	}
+}
+
+// A permanent poll error ends Run while it mirrors metering too.
+func TestRunPermanentPollErrorWhileMirroring(t *testing.T) {
+	f := newFake(t)
+	f.location("POST /mup", "/mup/1")
+	calls := 0
+	a := newTestAgent(t, f, Config{
+		PollRate: 1,
+		OnAssignments: func(context.Context, []*ieee20305.FunctionSetAssignments) error {
+			calls++
+			if calls == 2 {
+				return fmt.Errorf("%w: bad", ieee20305.ErrConfiguration)
+			}
+			return nil
+		},
+		MirrorUsagePoint: &ieee20305.MirrorUsagePoint{},
+		Readings: func(context.Context) ([]ieee20305.MirrorMeterReading, error) {
+			return readings(1), nil
+		},
+	})
+	// Run returns long before this context ends.
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	if err := a.Run(ctx); !errors.Is(err, ieee20305.ErrConfiguration) {
+		t.Fatalf("Run: %v", err)
 	}
 }
 

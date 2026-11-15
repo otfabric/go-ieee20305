@@ -144,7 +144,7 @@ func TestInternalEdges(t *testing.T) {
 	if _, err := s.postMirrorReadings(ctx, &Request{Principal: Principal{Role: RoleOperator}, Node: &Node{Href: "/m"}, Doc: &ieee20305.Time{}}); err == nil {
 		t.Error("postMirrorReadings of a Time")
 	}
-	if _, err := s.mirrorReading(ctx, &Node{Href: "/m", Value: &ieee20305.Time{}}, &ieee20305.MirrorMeterReading{}, true); !errors.Is(err, ieee20305.ErrInvalid) {
+	if _, err := s.mirrorReading(ctx, s.newMirrorBatch(Principal{}, ""), &Node{Href: "/m", Value: &ieee20305.Time{}}, &ieee20305.MirrorMeterReading{}); !errors.Is(err, ieee20305.ErrInvalid) {
 		t.Errorf("mirrorReading of no mirror: %v", err)
 	}
 	if err := s.checkSubscription(ctx, &Request{Doc: &ieee20305.Time{}}); err == nil {

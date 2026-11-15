@@ -218,6 +218,7 @@ func (d *decoder) nameAt(off int) (string, int, error) {
 	end := -1
 	limit := off
 	wire := 1
+	hops := 0
 	for {
 		if off >= len(d.b) {
 			return "", 0, errorf("name at offset %d is truncated", off)
@@ -240,7 +241,7 @@ func (d *decoder) nameAt(off int) (string, int, error) {
 			if sb.Len() > 0 {
 				sb.WriteByte('.')
 			}
-			sb.WriteString(JoinLabel(string(d.b[off+1:off+1+c]), ""))
+			writeLabel(&sb, d.b[off+1:off+1+c])
 			off += 1 + c
 		case 0xc0:
 			if off+2 > len(d.b) {
@@ -250,6 +251,9 @@ func (d *decoder) nameAt(off int) (string, int, error) {
 			if target >= limit {
 				return "", 0, errorf("pointer at offset %d points forward to %d", off, target)
 			}
+			if hops++; hops > maxHops {
+				return "", 0, errorf("name at offset %d follows more than %d pointers", off, maxHops)
+			}
 			if end < 0 {
 				end = off + 2
 			}
@@ -257,6 +261,18 @@ func (d *decoder) nameAt(off int) (string, int, error) {
 		default:
 			return "", 0, errorf("label type %#x at offset %d", c&0xc0, off)
 		}
+	}
+}
+
+// writeLabel writes the label l to sb with its dots and backslashes
+// escaped, as JoinLabel does, without allocating for labels that need no
+// escape.
+func writeLabel(sb *strings.Builder, l []byte) {
+	for _, c := range l {
+		if c == '.' || c == '\\' {
+			sb.WriteByte('\\')
+		}
+		sb.WriteByte(c)
 	}
 }
 

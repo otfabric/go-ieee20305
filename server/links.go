@@ -23,6 +23,9 @@ var listLinkType = reflect.TypeFor[ieee20305.ListLink]()
 //     with PUT (the DefaultDERControl of a program without one, say), is
 //     left out: a client would GET it in vain.
 //
+// A link to a resource p may not read is left as it is, as is a link to
+// none.
+//
 // It goes through the document, its lists' items and nested structures.
 func (s *Server) dressLinks(ctx context.Context, p Principal, doc any) {
 	v := reflect.ValueOf(doc)
@@ -86,8 +89,10 @@ func (s *Server) dressLink(ctx context.Context, p Principal, f reflect.Value) {
 	if href == "" || !strings.HasPrefix(href, "/") {
 		return
 	}
+	// A resource p may not read is left as one that does not exist: p
+	// learns nothing of it, as from a GET of it (404).
 	n, err := s.store.Get(ctx, href)
-	if err != nil {
+	if err != nil || !s.canRead(p, n) {
 		return
 	}
 	if n.Value == nil && s.hooks[n.Resource].Get == nil && !s.canChange(p, n) {

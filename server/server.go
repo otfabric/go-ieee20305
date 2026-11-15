@@ -92,6 +92,13 @@ type Config struct {
 	// EndDeviceList. The server creates its resources, without a
 	// Registration until Admin.Register.
 	InBandRegistration bool
+	// AssignedDevicesOnly lets an aggregator register (post the EndDevice
+	// of) only the devices the operator assigned it with
+	// DeviceSpec.ManagedBy. By default an aggregator also registers devices
+	// the server was not given, which it then manages, as aggregators of
+	// CSIP-AUS do for their sites; it never registers a device the
+	// operator gave the server without assigning it to that aggregator.
+	AssignedDevicesOnly bool
 	// ClientLists names, by WADL resource ID, lists of every client that
 	// clients may post to, besides MirrorUsagePointList and ResponseList.
 	ClientLists map[string]bool
@@ -112,9 +119,11 @@ type Config struct {
 	NotificationWorkers int
 	// NotificationRetry decides whether a notification that could not be
 	// delivered is sent again, and when: when nil, it is sent again while
-	// the receiver is unreachable, fails (5xx) or times out, after a delay
-	// that doubles from 1 s to 5 min, with jitter. A notification refused
-	// with a 4xx, or not sent again, cancels its subscription.
+	// the listener answers 5xx (503 and 429 included), after a delay that
+	// doubles from 1 s to 5 min, with jitter. A transport error (a
+	// listener that cannot be reached) or a timeout is not retried by the
+	// default. A notification refused with a 4xx, or not sent again,
+	// cancels its subscription.
 	NotificationRetry ieee20305.RetryPolicy
 	// NotificationCancelAfter cancels a subscription whose notifications
 	// have failed for this long: 24 hours when zero.
@@ -176,6 +185,7 @@ type Server struct {
 
 	mu       sync.Mutex
 	counters map[string]int        // per list or parent: the last id allocated
+	counted  hrefIndex             // the keys of counters
 	devices  map[string]deviceInfo // by LFDI
 	closed   bool
 
@@ -211,13 +221,16 @@ type deviceInfo struct {
 	Edition   ieee20305.Edition
 	Role      Role
 	ManagedBy string // the LFDI of its aggregator
+	// Provisioned is a device the operator gave the server
+	// (Admin.ProvisionDevice).
+	Provisioned bool
 }
 
 // New returns a Server for cfg.
 func New(cfg Config) (*Server, error) {
 	s := &Server{cfg: cfg, profile: cfg.Profile, store: cfg.Store, clock: cfg.Clock,
 		resources: map[string]ieee20305.ResourceSpec{}, hooks: map[string]Hooks{},
-		counters: map[string]int{}, devices: map[string]deviceInfo{}}
+		counters: map[string]int{}, counted: newHrefIndex(), devices: map[string]deviceInfo{}}
 	if s.profile == nil {
 		s.profile = StandardProfile()
 	}

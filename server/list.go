@@ -231,6 +231,7 @@ func setHref(v any, href string) {
 func (s *Server) newHref(parent string) string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.counted.add(parent)
 	s.counters[parent]++
 	return path.Join(parent, strconv.Itoa(s.counters[parent]))
 }
@@ -249,7 +250,78 @@ func (s *Server) noteHref(href string) {
 		}
 		parent := "/" + strings.Join(segs[:i], "/")
 		if n > s.counters[parent] {
+			s.counted.add(parent)
 			s.counters[parent] = n
 		}
 	}
+}
+
+// forgetCounters drops the counters of the deleted node at href and of the
+// nodes below it, so that the counters of a long-running server do not
+// grow with every list it ever had. The counter of its parent stays: the
+// href is not given out again.
+func (s *Server) forgetCounters(href string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, h := range s.counted.within(href) {
+		s.counted.remove(h)
+		delete(s.counters, h)
+	}
+}
+
+// hrefIndex is a set of hrefs that finds those at or below an href without
+// going through all of them, unless there are some.
+type hrefIndex struct {
+	set   map[string]struct{}
+	below map[string]int // per href, the number of hrefs of set strictly below it
+}
+
+func newHrefIndex() hrefIndex {
+	return hrefIndex{set: map[string]struct{}{}, below: map[string]int{}}
+}
+
+// ancestors calls f with each href above h: /a/b for /a/b/c, then /a.
+func ancestors(h string, f func(string)) {
+	for a := path.Dir(h); a != "/" && a != "." && a != h; h, a = a, path.Dir(a) {
+		f(a)
+	}
+}
+
+func (x *hrefIndex) add(h string) {
+	if _, ok := x.set[h]; ok {
+		return
+	}
+	x.set[h] = struct{}{}
+	ancestors(h, func(a string) { x.below[a]++ })
+}
+
+func (x *hrefIndex) remove(h string) {
+	if _, ok := x.set[h]; !ok {
+		return
+	}
+	delete(x.set, h)
+	ancestors(h, func(a string) {
+		if x.below[a]--; x.below[a] <= 0 {
+			delete(x.below, a)
+		}
+	})
+}
+
+// within returns the hrefs of the set at or below base.
+func (x *hrefIndex) within(base string) []string {
+	base = strings.TrimSuffix(base, "/")
+	_, in := x.set[base]
+	if base != "" && x.below[base] == 0 {
+		if in {
+			return []string{base}
+		}
+		return nil
+	}
+	var out []string
+	for h := range x.set {
+		if h == base || strings.HasPrefix(h, base+"/") {
+			out = append(out, h)
+		}
+	}
+	return out
 }

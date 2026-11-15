@@ -85,30 +85,88 @@ func TestCompressedNameTooLong(t *testing.T) {
 	}
 }
 
-// A long chain of pointers, each to the name of the question before, ends
-// and resolves: every pointer must point before the previous one.
+// A chain of pointers, each to the name of the question before, resolves
+// up to maxHops pointers per name; a longer chain is refused, as is a
+// pointer that does not point before the previous one.
 func TestPointerChain(t *testing.T) {
-	const n = 2700
-	b := []byte{0, 0, 0x84, 0, byte(n >> 8), byte(n & 0xff), 0, 0, 0, 0, 0, 0}
-	prev := len(b)
-	b = append(b, 0, 0, 1, 0, 1)
-	for range n - 1 {
-		at := len(b)
-		b = append(b, 0xc0|byte(prev>>8), byte(prev), 0, 1, 0, 1)
-		prev = at
+	chain := func(n int) []byte {
+		b := []byte{0, 0, 0x84, 0, byte(n >> 8), byte(n & 0xff), 0, 0, 0, 0, 0, 0}
+		prev := len(b)
+		b = append(b, 0, 0, 1, 0, 1)
+		for range n - 1 {
+			at := len(b)
+			b = append(b, 0xc0|byte(prev>>8), byte(prev), 0, 1, 0, 1)
+			prev = at
+		}
+		return b
 	}
-	m, err := Parse(b)
+	n := maxHops + 1
+	m, err := Parse(chain(n))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(m.Questions) != n || m.Questions[n-1].Name != "" {
 		t.Errorf("%d questions", len(m.Questions))
 	}
+	if _, err := Parse(chain(n + 1)); !errors.Is(err, ErrFormat) {
+		t.Errorf("Parse of a chain of %d pointers: %v", n, err)
+	}
 	// A pointer to itself, or to the pointer after it, is refused.
 	for _, loop := range [][]byte{{0xc0, 12}, {0xc0, 14, 0xc0, 12}} {
 		b := append([]byte{0, 0, 0x84, 0, 0, 1, 0, 0, 0, 0, 0, 0}, loop...)
 		if _, err := Parse(append(b, 0, 1, 0, 1)); !errors.Is(err, ErrFormat) {
 			t.Errorf("Parse of a pointer loop % x: %v", loop, err)
+		}
+	}
+}
+
+// A message of many questions that each point at one name of 127 labels
+// decodes with a bounded number of allocations per question: decoding a
+// label does not allocate.
+func TestManyPointersToLongName(t *testing.T) {
+	const n = 1454
+	b := []byte{0, 0, 0, 0, byte(n >> 8), byte(n & 0xff), 0, 0, 0, 0, 0, 0}
+	for range 127 {
+		b = append(b, 1, 'a')
+	}
+	b = append(b, 0, 0, 1, 0, 1)
+	for range n - 1 {
+		b = append(b, 0xc0, 12, 0, 1, 0, 1)
+	}
+	if len(b) > 9000 {
+		t.Fatalf("message of %d bytes", len(b))
+	}
+	m, err := Parse(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(m.Questions) != n || len(m.Questions[n-1].Name) != 253 {
+		t.Fatalf("%d questions", len(m.Questions))
+	}
+	allocs := testing.AllocsPerRun(3, func() { _, _ = Parse(b) })
+	if allocs > 8*n {
+		t.Errorf("%v allocations for %d questions", allocs, n)
+	}
+}
+
+// Labels with dots and backslashes are escaped in decoded names, as
+// JoinLabel escapes them.
+func TestDecodeEscapes(t *testing.T) {
+	for _, l := range []string{"plain", "a.b", `a\b`, `.\.`} {
+		b, err := (&Message{Questions: []Question{{Name: JoinLabel(l, "local"), Type: TypePTR, Class: ClassINET}}}).Encode()
+		if err != nil {
+			t.Fatal(err)
+		}
+		m, err := Parse(b)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got, want := m.Questions[0].Name, JoinLabel(l, "local"); got != want {
+			t.Errorf("label %q decoded as %q, want %q", l, got, want)
+		}
+		labels, err := SplitName(m.Questions[0].Name)
+		if err != nil || len(labels) != 2 || labels[0] != l {
+			t.Errorf("labels of %q: %q %v", m.Questions[0].Name, labels, err)
 		}
 	}
 }

@@ -24,20 +24,26 @@ func (l Limits) Apply(b *DERControlBase) {
 }
 
 // LimitsOf returns the site limits of a DERControl, DefaultDERControl or
-// DERControlBase of CSIP-AUS, and whether v is one.
+// DERControlBase of CSIP-AUS, and whether v is one; a nil pointer is not.
 func LimitsOf(v any) (Limits, bool) {
 	var b *DERControlBase
 	switch v := v.(type) {
 	case *DERControl:
+		if v == nil {
+			return Limits{}, false
+		}
 		b = &v.DERControlBase
 	case *DefaultDERControl:
+		if v == nil {
+			return Limits{}, false
+		}
 		b = &v.DERControlBase
 	case *DERControlBase:
+		if v == nil {
+			return Limits{}, false
+		}
 		b = v
 	default:
-		return Limits{}, false
-	}
-	if b == nil {
 		return Limits{}, false
 	}
 	return Limits{Export: b.OpModExpLimW, Import: b.OpModImpLimW, Generation: b.OpModGenLimW,

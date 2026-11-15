@@ -10,7 +10,7 @@ Package security implements the certificate handling of IEEE 2030.5: device iden
 
 IEEE 2030.5 devices and servers authenticate each other with ECDSA P-256 certificates over mutual TLS 1.2. A device is known by identifiers derived from the SHA-256 fingerprint of its certificate: the Long-Form Device Identifier (LFDI) is its leftmost 160 bits (CertificateLFDI), and the Short-Form Device Identifier (SFDI) its leftmost 36 bits as a decimal number followed by a check digit (LFDI.SFDI, SFDI.Valid).
 
-Device certificates of IEEE 2030.5 identify their hardware module in a critical subjectAltName (HardwareModuleName, RFC 4108), which crypto/x509 refuses to verify. Verify verifies such chains, and ClientTLSConfig, ServerTLSConfig and NotificationTLSConfig use it: they never fall back on the system's roots. They take a nil pool of roots, and every handshake then fails with an error that matches ieee20305.ErrCertificate.
+Device certificates of IEEE 2030.5 identify their hardware module in a critical subjectAltName (HardwareModuleName, RFC 4108), which crypto/x509 refuses to verify. Verify verifies such chains, and ClientTLSConfig, ServerTLSConfig and NotificationTLSConfig use it: they never fall back on the system's roots. They take a nil pool of roots, and every handshake then fails with an error that matches ieee20305.ErrConfiguration and ieee20305.ErrCertificate.
 
 	tlsConfig := security.ServerTLSConfig(serverCert, deviceCAs)
 	lfdi := security.CertificateLFDI(r.TLS.PeerCertificates[0])
@@ -29,6 +29,8 @@ ClientTLSConfig returns the TLS configuration of an IEEE 2030.5 client: TLS 1.2 
 
 The server's chain is always verified against roots, for server authentication, by Verify in VerifyConnection. The configuration sets InsecureSkipVerify only to turn off the verification of crypto/tls, which rejects the critical subject alternative name that holds the HardwareModuleName of IEEE 2030.5 server certificates. The server name of the connection is checked when the server certificate has DNS names or IP addresses. crypto/tls does not report the server name of a server dialed by IP address, so such a server is identified by its chain alone.
 
+A nil roots fails every handshake with an error that matches ieee20305.ErrConfiguration: the system's roots are never used.
+
 IEEE 2030.5 requires the cipher suite TLS\_ECDHE\_ECDSA\_WITH\_AES\_128\_CCM\_8, which crypto/tls does not implement. Connections use the ECDHE-ECDSA suites crypto/tls offers, which servers commonly accept as well.
 
 ### func MarshalHMNSAN
@@ -45,7 +47,7 @@ MarshalHMNSAN returns the DER of a subject alternative name extension value that
 func NotificationTLSConfig(server tls.Certificate, deviceCAs *x509.CertPool) *tls.Config
 ```
 
-NotificationTLSConfig returns the TLS configuration with which a server posts notifications to the listeners of devices: the server certificate as its client certificate, and the listener's chain verified against deviceCAs. A device may serve its listener with its device certificate, whose extended key usage is clientAuth only, so the usage is not checked; the listener's name is, when its certificate has DNS names or IP addresses. As in ClientTLSConfig, InsecureSkipVerify only turns off the verification of crypto/tls, which rejects HardwareModuleName names.
+NotificationTLSConfig returns the TLS configuration with which a server posts notifications to the listeners of devices: the server certificate as its client certificate, and the listener's chain verified against deviceCAs. A device may serve its listener with its device certificate, whose extended key usage is clientAuth only, so the usage is not checked. The listener's name is checked when its certificate has DNS names or IP addresses and the notificationURI names the listener by a DNS name: crypto/tls does not report the server name of a listener dialed by IP address, so such a listener, like one whose certificate holds only a HardwareModuleName, is identified by its chain alone. A nil deviceCAs fails every handshake with an error that matches ieee20305.ErrConfiguration. As in ClientTLSConfig, InsecureSkipVerify only turns off the verification of crypto/tls, which rejects HardwareModuleName names.
 
 ### func ServerTLSConfig
 
@@ -53,7 +55,7 @@ NotificationTLSConfig returns the TLS configuration with which a server posts no
 func ServerTLSConfig(server tls.Certificate, clientCAs *x509.CertPool) *tls.Config
 ```
 
-ServerTLSConfig returns the TLS configuration of an IEEE 2030.5 server: TLS 1.2 or later, the server certificate, and a client certificate that one of clientCAs must have issued for client authentication. The client chain is verified by Verify, which accepts the critical subject alternative name that holds the HardwareModuleName of IEEE 2030.5 device certificates; ConnectionState.VerifiedChains is therefore empty. The chain is verified in VerifyConnection, which crypto/tls also calls on a resumed session: a client certificate that expired since the session was issued is refused then too. See ClientTLSConfig about the cipher suite of IEEE 2030.5.
+ServerTLSConfig returns the TLS configuration of an IEEE 2030.5 server: TLS 1.2 or later, the server certificate, and a client certificate that one of clientCAs must have issued for client authentication. The client chain is verified by Verify, which accepts the critical subject alternative name that holds the HardwareModuleName of IEEE 2030.5 device certificates; ConnectionState.VerifiedChains is therefore empty. The chain is verified in VerifyConnection, which crypto/tls also calls on a resumed session: a client certificate that expired since the session was issued is refused then too. A nil clientCAs fails every handshake with an error that matches ieee20305.ErrConfiguration. See ClientTLSConfig about the cipher suite of IEEE 2030.5.
 
 ### func TestCA
 

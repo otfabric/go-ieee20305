@@ -22,20 +22,20 @@ const longDescription = `<DERControl xmlns="urn:ieee:std:2030.5:ns" href="/derp/
 	`<EventStatus><currentStatus>0</currentStatus><dateTime>1</dateTime><potentiallySuperseded>false</potentiallySuperseded></EventStatus>` +
 	`<interval><duration>30</duration><start>2000000000</start></interval><DERControlBase/></DERControl>`
 
-// TestClientDoesNotValidate: the client decodes what the server sends and
-// does not check it against the facets of the schema, as SECURITY.md says:
-// Get, Fetch, Iterate and a NotificationHandler hand over a document that
-// Validate refuses, and the application validates what it acts on.
-func TestClientDoesNotValidate(t *testing.T) {
+// TestClientValidates: the client checks what the server sends against the
+// facets of the schema, as SECURITY.md says: Get, Fetch and Iterate fail
+// with ErrProtocol wrapping the *ValidationError (so ErrInvalid too), and a
+// NotificationHandler answers 400 without calling its function.
+func TestClientValidates(t *testing.T) {
 	ctx := context.Background()
-	refused := func(what string, v any) {
+	refused := func(what string, err error) {
 		t.Helper()
-		c, ok := v.(*ieee20305.DERControl)
-		if !ok || c.Description == nil || len(*c.Description) != 100 {
-			t.Fatalf("%s handed over %T, want the DERControl with its description", what, v)
+		if !errors.Is(err, ieee20305.ErrProtocol) || !errors.Is(err, ieee20305.ErrInvalid) {
+			t.Fatalf("%s: %v, want ErrProtocol and ErrInvalid", what, err)
 		}
-		if err := c.Validate(); !errors.Is(err, ieee20305.ErrInvalid) {
-			t.Fatalf("%s: Validate = %v, want ErrInvalid", what, err)
+		var ve *ieee20305.ValidationError
+		if !errors.As(err, &ve) {
+			t.Fatalf("%s: %v wraps no *ValidationError", what, err)
 		}
 	}
 	c, err := client.New(client.Config{Server: "https://server.example", HTTPClient: &http.Client{Transport: answers{doc: longDescription}}})
@@ -43,15 +43,9 @@ func TestClientDoesNotValidate(t *testing.T) {
 		t.Fatal(err)
 	}
 	var got ieee20305.DERControl
-	if err := c.Get(ctx, "/derp/1/derc/1", &got); err != nil {
-		t.Fatalf("Get: %v", err)
-	}
-	refused("Get", &got)
-	v, err := c.Fetch(ctx, "/derp/1/derc/1")
-	if err != nil {
-		t.Fatalf("Fetch: %v", err)
-	}
-	refused("Fetch", v)
+	refused("Get", c.Get(ctx, "/derp/1/derc/1", &got))
+	_, err = c.Fetch(ctx, "/derp/1/derc/1")
+	refused("Fetch", err)
 
 	item := strings.Replace(longDescription, ` xmlns="urn:ieee:std:2030.5:ns"`, "", 1)
 	list := `<DERControlList xmlns="urn:ieee:std:2030.5:ns" href="/derp/1/derc" all="1" results="1">` + item + `</DERControlList>`
@@ -60,21 +54,17 @@ func TestClientDoesNotValidate(t *testing.T) {
 		t.Fatal(err)
 	}
 	items := 0
-	if err := c.Iterate(ctx, "/derp/1/derc", 0, func(it any) error {
+	refused("Iterate", c.Iterate(ctx, "/derp/1/derc", 0, func(any) error {
 		items++
-		refused("Iterate", it)
 		return nil
-	}); err != nil || items != 1 {
-		t.Fatalf("Iterate: %d items, %v", items, err)
+	}))
+	if items != 0 {
+		t.Fatalf("Iterate handed over %d items", items)
 	}
 
 	handled := 0
-	h, err := client.NewNotificationHandler(func(_ context.Context, n *ieee20305.Notification) error {
+	h, err := client.NewNotificationHandler(func(context.Context, *ieee20305.Notification) error {
 		handled++
-		if n.Resource == nil {
-			t.Fatal("the notification has no resource")
-		}
-		refused("the NotificationHandler", n.Resource.Value)
 		return nil
 	}, client.NotificationConfig{})
 	if err != nil {
@@ -86,7 +76,7 @@ func TestClientDoesNotValidate(t *testing.T) {
 		`<status>0</status><subscriptionURI>/edev/1/sub/1</subscriptionURI></Notification>`
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/ntfy", strings.NewReader(note)))
-	if w.Code != http.StatusCreated || handled != 1 {
+	if w.Code != http.StatusBadRequest || handled != 0 {
 		t.Fatalf("the notification: status %d, handled %d times", w.Code, handled)
 	}
 }

@@ -81,7 +81,10 @@ embedding the IEEE 2030.5 types they redefine.
 
 A `server.Server` is an `http.Handler` over a `Store` of `Node`s: an href,
 its WADL resource, its document, an owner (the LFDI that may change it) and
-its parent. Lists are nodes with members.
+its parent. Lists are nodes with members. The in-memory store
+(`NewMemStore`) indexes the nodes created in each node and the lists of
+each member, so that a deletion costs what it deletes, not the size of the
+store.
 
 **A request** (`handler.go`) goes through:
 
@@ -98,7 +101,10 @@ its parent. Lists are nodes with members.
    (replace, keeping the server's links), POST (create an item with its
    parts: `parts.go`) and DELETE.
 5. *Dressing* (`links.go`): every document gets its href, every ListLink its
-   `all`, and links to resources the server does not have are dropped.
+   `all`, and links to resources that do not exist yet, which the client
+   may not create with PUT, are dropped. A link to a resource the client
+   may not read is sent as a link to a resource the server does not have:
+   as written, without `all`, so the client learns nothing of it.
 6. *Encoding* in the edition of the device.
 
 **Parts.** Creating a resource creates its parts: an EndDevice its
@@ -110,12 +116,16 @@ as linked nodes without a value.
 **Computed resources** (`virtual.go`): the Active lists and the
 CurrentDERProgram are computed from the events when they are read.
 
-**Events** (`events.go`): a `schedule.Scheduler` per function set holds the
-server's events, without randomization. Its transitions write the
-EventStatus of each event (Scheduled, Active, Completed, Cancelled,
-Superseded), under the event's node lock so that an operator's PUT and a
-status change do not lose each other. Ended events are pruned after
-`EventRetention`.
+**Events** (`events.go`): one `schedule.Scheduler` holds the server's
+events of every function set, without randomization, with `NoConflicts`
+and no `MaxEvents`: the server leaves supersession to its clients, so its
+events are never compared with each other. Its transitions write the EventStatus of
+each event (Scheduled, Active, Cancelled), under the event's node lock so
+that an operator's PUT and a status change do not lose each other; a
+cancellation is never undone by a transition the scheduler queued before
+it. An ended event keeps the status Active: IEEE 2030.5-2018 has no
+Completed. Ended events are dropped from the scheduler after
+`EventRetention`; their nodes stay in the store.
 
 **Resources of a device** (`device.go`, `store.go`): what clients create
 counts against `MaxDeviceResources` of the device that owns it. The memory
@@ -131,9 +141,13 @@ ReadingSets and Readings. `FlowPolicy` answers FlowReservationRequests.
 by a device, by `Admin` or through the Store, marks the subscriptions whose
 resource it touches. Each subscription has a worker that posts the resource
 as it is when the worker runs: bursts coalesce into the latest state, which
-arrives at least once and never before an older one. Delivery retries by
-`NotificationRetry`; a 4xx, or failures for longer than
-`NotificationCancelAfter`, cancel the subscription.
+arrives at least once and never before an older one. Each attempt is
+bounded to one minute. Delivery retries by `NotificationRetry` (by default
+a 5xx, 503 or 429); a 4xx, a transport error or timeout, a failure the
+policy does not retry, or failures for longer than
+`NotificationCancelAfter`, cancel the subscription. Deleting a
+subscription stops its pending and retried notifications; putting it
+again makes the next attempt use its new notificationURI.
 
 **Locking** (`keylock.go`): one lock per list or node, taken for the
 read-modify-write of a list (hrefs, caps) or a node (event status), so that
@@ -148,7 +162,7 @@ An `agent.Agent` runs on a `client.Client`:
 2. A poll loop re-reads the FunctionSetAssignments and their programs at
    the server's pollRate (slower when subscribed), with `Backoff` on
    failures. Errors that waiting does not fix (4xx, certificates,
-   configuration) end `Run`.
+   configuration) end `Run`. A server's pollRate is taken up to 24 hours.
 3. Per function set, an event set (`events.go`) reads the events of a poll
    and gives them together to its own `schedule.Scheduler` (at most
    `MaxEvents` of them), with randomization and the function set's
@@ -159,7 +173,9 @@ An `agent.Agent` runs on a `client.Client`:
 5. Metering (`metering.go`) creates the mirror once and posts readings at
    `PostRate`, buffering a bounded number while the server fails.
 6. With `NotificationURI` (`subscribe.go`), the agent subscribes to its
-   FSAs, programs and controls, and a notification wakes the poll loop.
+   FSAs, programs and controls, and a notification of one of its
+   subscriptions wakes the poll loop; a notification does not shorten the
+   backoff after a failure, and those of other subscriptions are ignored.
 7. `Close` ends `Run`, the scheduling and the handlers, and waits for
    them, unless a handler called it: it knows its goroutines by their
    identifiers (`internal/goid`). Handlers and `Metrics` are called

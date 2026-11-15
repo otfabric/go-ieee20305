@@ -41,6 +41,9 @@ func (c *Client) FetchList(ctx context.Context, href string, opts ListOptions) (
 	if err != nil {
 		return nil, err
 	}
+	if err := validate(href, v); err != nil {
+		return nil, err
+	}
 	l, ok := v.(ieee20305.Lister)
 	if !ok {
 		return nil, fmt.Errorf("%w: %s is a %T, not a list", ieee20305.ErrProtocol, href, v)

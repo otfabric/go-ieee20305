@@ -196,7 +196,7 @@ func readZipFile(zf *zip.File) ([]byte, error) {
 
 func writeFile(dir, rel string, data []byte, wantSHA string) error {
 	clean := path.Clean(rel)
-	if path.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, "../") {
+	if strings.Contains(rel, `\`) || !filepath.IsLocal(filepath.FromSlash(clean)) {
 		return fmt.Errorf("refusing to write %q outside %s", rel, dir)
 	}
 	if wantSHA != "" {

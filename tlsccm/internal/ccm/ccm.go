@@ -111,19 +111,7 @@ func (c *ccm) tag(nonce, plaintext, adata []byte) ([]byte, error) {
 
 	var block [ccmBlockSize]byte
 	if adataLength := uint64(len(adata)); adataLength > 0 {
-		i := 2
-		if adataLength <= 0xfeff {
-			binary.BigEndian.PutUint16(block[:i], uint16(adataLength))
-		} else {
-			binary.BigEndian.PutUint16(block[0:2], 0xfeff)
-			if adataLength < uint64(1<<32) {
-				i = 2 + 4
-				binary.BigEndian.PutUint32(block[2:i], uint32(adataLength))
-			} else {
-				i = 2 + 8
-				binary.BigEndian.PutUint64(block[2:i], adataLength)
-			}
-		}
+		i := putAdataLength(block[:], adataLength)
 		i = copy(block[i:], adata)
 		c.cbcRound(mac[:], block[:])
 		c.cbcData(mac[:], adata[i:])
@@ -134,6 +122,26 @@ func (c *ccm) tag(nonce, plaintext, adata []byte) ([]byte, error) {
 	}
 
 	return mac[:c.M], nil
+}
+
+// putAdataLength writes the length n > 0 of the additional data to block as
+// RFC 3610 section 2.2 encodes it, and returns the number of octets written:
+// two octets below 2^16-2^8, else 0xff 0xfe and four octets below 2^32, else
+// 0xff 0xff and eight octets.
+func putAdataLength(block []byte, n uint64) int {
+	switch {
+	case n < 0xff00:
+		binary.BigEndian.PutUint16(block, uint16(n))
+		return 2
+	case n < 1<<32:
+		binary.BigEndian.PutUint16(block, 0xfffe)
+		binary.BigEndian.PutUint32(block[2:], uint32(n))
+		return 2 + 4
+	default:
+		binary.BigEndian.PutUint16(block, 0xffff)
+		binary.BigEndian.PutUint64(block[2:], n)
+		return 2 + 8
+	}
 }
 
 func sliceForAppend(in []byte, n int) (head, tail []byte) {
@@ -149,7 +157,12 @@ func sliceForAppend(in []byte, n int) (head, tail []byte) {
 
 // Seal encrypts and authenticates plaintext, authenticates the
 // additional data and appends the result to dst, returning the updated slice.
+// It panics if nonce is not NonceSize() bytes long or plaintext is longer
+// than MaxLength(), as cipher.AEAD specifies.
 func (c *ccm) Seal(dst, nonce, plaintext, adata []byte) []byte {
+	if len(nonce) != c.NonceSize() {
+		panic(errInvalidNonceSize)
+	}
 	tag, err := c.tag(nonce, plaintext, adata)
 	if err != nil {
 		panic(err)
@@ -180,6 +193,9 @@ var (
 // Open decrypts and authenticates ciphertext, authenticates the
 // additional data and, if successful, appends the resulting plaintext to dst.
 func (c *ccm) Open(dst, nonce, ciphertext, adata []byte) ([]byte, error) {
+	if len(nonce) != c.NonceSize() {
+		return nil, errInvalidNonceSize
+	}
 	if len(ciphertext) < int(c.M) {
 		return nil, errCiphertextTooShort
 	}

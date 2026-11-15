@@ -57,6 +57,7 @@ var own = map[string]string{
 	"ccm_check_test.go":               "test: CCM_8 is registered",
 	"ccm_raw_test.go":                 "test: a handshake with CCM_8",
 	"cipher_suites_ccm_order_test.go": "test: CCM_8 ranks above GCM",
+	"ports_test.go":                   "test: the changes of later Go releases ported to the copy",
 	"stubs/boring/boring.go":          "stand-in for crypto/internal/boring",
 	"stubs/cpu/cpu.go":                "stand-in for internal/cpu",
 	"stubs/fipstls/fipstls.go":        "stand-in for crypto/internal/boring/fipstls",
@@ -79,6 +80,21 @@ var patches = []patch{
 	{"handshake_server.go",
 		`fmt.Errorf("tls: client requested unsupported application protocols (%q)", clientProtos)`,
 		`fmt.Errorf("tls: client requested unsupported application protocols (%s)", clientProtos)`},
+	// Go 1.25: the client refuses a ServerKeyExchange on a curve it did not offer.
+	{"key_agreement.go", "\t\"io\"\n\t\"slices\"\n)\n", "\t\"io\"\n)\n"},
+	{"key_agreement.go",
+		"\tif !slices.Contains(clientHello.supportedCurves, curveID) {\n\t\treturn errors.New(\"tls: server selected unoffered curve\")\n\t}\n",
+		""},
+	// Go 1.25 (RFC 9155): no SHA-1 signatures in TLS 1.2.
+	{"common.go",
+		"\tECDSAWithP521AndSHA512,\n\t// SHA-1 schemes are not offered (RFC 9155, as Go 1.25).\n}\n",
+		"\tECDSAWithP521AndSHA512,\n\tPKCS1WithSHA1,\n\tECDSAWithSHA1,\n}\n"},
+	{"auth.go",
+		"\t\t// RFC 9155 made signature_algorithms mandatory in TLS 1.2, and SHA-1\n\t\t// signatures are not used (as Go 1.25).\n\t\treturn 0, errors.New(\"tls: missing signature_algorithms from TLS 1.2 peer\")\n",
+		"\t\t// For TLS 1.2, if the client didn't send signature_algorithms then we\n\t\t// can assume that it supports SHA1. See RFC 5246, Section 7.4.1.4.1.\n\t\tpeerAlgs = []SignatureScheme{PKCS1WithSHA1, ECDSAWithSHA1}\n"},
+	{"auth.go",
+		"\t\tif preferredAlg == PKCS1WithSHA1 || preferredAlg == ECDSAWithSHA1 {\n\t\t\tcontinue\n\t\t}\n",
+		""},
 }
 
 // imports are the import paths of the copy and of crypto/tls.
@@ -219,11 +235,20 @@ func vulns() ([]string, error) {
 			if e.Published < baseDate || seen[e.ID] || !tls(e) {
 				continue
 			}
-			findings = append(findings, fmt.Sprintf("%s (%s, published %s): %s", e.ID, strings.Join(e.Aliases, ", "), e.Published[:10], e.Summary))
+			findings = append(findings, fmt.Sprintf("%s (%s, published %s): %s", e.ID, strings.Join(e.Aliases, ", "), day(e.Published), e.Summary))
 		}
 	}
 	sort.Strings(findings)
 	return findings, nil
+}
+
+// day returns the date of an RFC 3339 timestamp, or the timestamp itself
+// when it is shorter than a date.
+func day(published string) string {
+	if len(published) > len("2006-01-02") {
+		return published[:len("2006-01-02")]
+	}
+	return published
 }
 
 func tls(e vuln) bool {

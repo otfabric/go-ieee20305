@@ -23,7 +23,10 @@ every connection the same way:
   client sets no session cache.
 - **No QUIC, no Encrypted Client Hello** (the latter is not in Go 1.22).
 - **P-256 only**, with the suites TLS_ECDHE_ECDSA_WITH_AES_128_CCM_8 and,
-  with `AllowGCM`, TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256.
+  with `AllowGCM`, TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256. The client
+  refuses a server that picks another curve (ported from Go 1.25).
+- **No SHA-1 signatures** (RFC 9155, ported from Go 1.25): handshake
+  signatures use SHA-256 or stronger.
 - Certificates are verified by `security.Verify`, not by the copy.
 
 A vulnerability in code these settings do not reach is reviewed as **not

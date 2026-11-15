@@ -22,7 +22,7 @@ func builtinHooks(s *Server) map[string]Hooks {
 		"CurrentDERProgram":          {Get: s.getCurrentDERProgram},
 		"ResponseList":               {Create: s.createResponse},
 		"MirrorUsagePointList":       {Create: s.createMirror},
-		"MirrorUsagePoint":           {Create: s.postMirrorReadings},
+		"MirrorUsagePoint":           {Create: s.postMirrorReadings, Update: s.updateMirror, Delete: s.deleteMirror},
 		"FlowReservationRequestList": {Create: s.createFlowReservation},
 	}
 	for _, id := range activeLists {

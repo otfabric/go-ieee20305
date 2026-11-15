@@ -260,7 +260,7 @@ type ExtensionElement struct {
 
 ExtensionElement is an element in a place where the schema admits elements it does not declare (xs:any): extensions in other namespaces, such as CSIP-AUS elements read through this package, and elements of later revisions of IEEE 2030.5. Decoding keeps them, so that a document can be encoded again without losing them.
 
-The content is kept as raw XML. Namespace prefixes it uses that are declared outside the element are not carried along.
+The content is kept as XML that declares every namespace its element and attribute names use, so it means the same wherever it is written: names in the content keep their namespaces, including namespaces declared on the element itself or on an enclosing element of the document. Prefixes in the content may differ from the ones the document used. Namespace declarations made inside the content are kept as written; prefixes that appear only in attribute values or text (such as QName values) are bound only when the content declares them itself.
 
 #### func CloneExtensions
 
@@ -284,7 +284,7 @@ Clone returns a deep copy of e.
 func (e *ExtensionElement) UnmarshalXML(d *xml.Decoder, start xml.StartElement) error
 ```
 
-UnmarshalXML decodes the element, dropping namespace declarations from its attributes: the encoder writes the declarations it needs itself.
+UnmarshalXML decodes the element. Namespace declarations are dropped from its attributes: the encoder declares the namespace of the element and its attributes itself, and the content is rewritten to declare the namespaces it uses. An element with two attributes of the same name in the same namespace is refused.
 
 ### type FieldLogger
 

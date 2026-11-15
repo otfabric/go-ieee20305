@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"path"
 	"reflect"
+	"slices"
 
 	ieee20305 "github.com/otfabric/go-ieee20305"
 	"github.com/otfabric/go-ieee20305/security"
@@ -49,7 +50,7 @@ func (a *Admin) ProvisionDevice(ctx context.Context, d DeviceSpec) (string, erro
 	s := a.s
 	s.regMu.Lock()
 	defer s.regMu.Unlock()
-	info := deviceInfo{Edition: d.Edition, Role: d.Role}
+	info := deviceInfo{Edition: d.Edition, Role: d.Role, Provisioned: true}
 	if d.ManagedBy != (security.LFDI{}) {
 		info.ManagedBy = d.ManagedBy.String()
 	}
@@ -221,7 +222,8 @@ func (s *Server) newList(resource string) any {
 //   - a device that posts its own EndDevice gets the one the server has
 //     for it, or a new one with in-band registration (Config);
 //   - an aggregator posts the EndDevice of a device it manages, with its
-//     lFDI;
+//     lFDI: one the operator assigned it (DeviceSpec.ManagedBy), or one
+//     the server was not given, unless Config.AssignedDevicesOnly;
 //   - an operator posts any EndDevice: with an lFDI, of a device the
 //     server then knows.
 //
@@ -271,8 +273,15 @@ func (s *Server) createEndDevice(ctx context.Context, r *Request) (string, error
 	if own && !isKnown && !s.cfg.InBandRegistration {
 		return "", httpError(http.StatusForbidden, "device %s is not known to the server", lfdi)
 	}
+	// Of the devices the operator gave the server (an operator too), an
+	// aggregator registers those the operator assigned it alone; of the
+	// others, none when AssignedDevicesOnly.
+	if info.ManagedBy != "" && ((isKnown && known.ManagedBy != info.ManagedBy) ||
+		(!isKnown && s.cfg.AssignedDevicesOnly)) {
+		return "", httpError(http.StatusForbidden, "device %s is not managed by the client", lfdi)
+	}
 	if isKnown {
-		info.Edition, info.Role = known.Edition, known.Role
+		info.Edition, info.Role, info.Provisioned = known.Edition, known.Role, known.Provisioned
 		if known.ManagedBy != "" {
 			info.ManagedBy = known.ManagedBy
 		}
@@ -301,7 +310,7 @@ func (s *Server) createDefault(ctx context.Context, r *Request) (string, error) 
 		return "", err
 	}
 	if r.Principal.Role != RoleOperator {
-		s.trim(ctx, r.Node.Href)
+		s.trim(ctx, r.Node, owner)
 	}
 	return href, nil
 }
@@ -374,9 +383,11 @@ func (s *Server) owned(ctx context.Context, owner string) (int, error) {
 }
 
 // trim deletes the oldest items of a list clients post to (LogEvents,
-// Responses, Readings) beyond Config.MaxListItems, so that a client cannot
-// grow the store without end.
-func (s *Server) trim(ctx context.Context, list string) {
+// Responses, Readings, mirrors) beyond Config.MaxListItems, so that a
+// client cannot grow the store without end. In a list of every client
+// (owned by no device) it counts and deletes the items of owner alone: the
+// posts of one device take nothing of another's.
+func (s *Server) trim(ctx context.Context, list *Node, owner string) {
 	max := s.cfg.MaxListItems
 	if max < 0 {
 		return
@@ -384,19 +395,35 @@ func (s *Server) trim(ctx context.Context, list string) {
 	if max == 0 {
 		max = defaultMaxListItems
 	}
-	members, err := s.store.Members(ctx, list)
+	keep := func(n *Node) bool { return list.Owner != "" || n.Owner == owner }
+	var members []*Node
+	var err error
+	if f, ok := s.base().(memberFilter); ok {
+		members, err = f.filterMembers(list.Href, keep)
+	} else if members, err = s.store.Members(ctx, list.Href); err == nil {
+		members = slices.DeleteFunc(members, func(n *Node) bool { return !keep(n) })
+	}
 	if err != nil || len(members) <= max {
 		return
 	}
 	for _, m := range members[:len(members)-max] {
-		if err := s.store.Delete(ctx, m.Href); err != nil && !errors.Is(err, ErrNoNode) {
-			s.log.Warnf("trimming %s: deleting %s: %v", list, m.Href, err)
+		var err error
+		if m.Resource == "MirrorUsagePoint" {
+			err = s.removeMirror(ctx, m)
+		} else {
+			err = s.store.Delete(ctx, m.Href)
+		}
+		if err != nil && !errors.Is(err, ErrNoNode) {
+			s.log.Warnf("trimming %s: deleting %s: %v", list.Href, m.Href, err)
 		}
 	}
 }
 
 // deleteEndDevice deletes an EndDevice the client may change, and forgets
-// its device.
+// its device, unless the operator gave the server the device and the
+// client is not an operator: then the server keeps what the operator said
+// of it (its role, its aggregator) for the EndDevice the device posts
+// next.
 func (s *Server) deleteEndDevice(ctx context.Context, r *Request) error {
 	if !s.canChange(r.Principal, r.Node) {
 		return httpError(http.StatusForbidden, "%s is not the client's", r.Node.Href)
@@ -405,9 +432,15 @@ func (s *Server) deleteEndDevice(ctx context.Context, r *Request) error {
 	defer s.regMu.Unlock()
 	s.mu.Lock()
 	for lfdi, d := range s.devices {
-		if d.EndDevice == r.Node.Href {
-			delete(s.devices, lfdi)
+		if d.EndDevice != r.Node.Href {
+			continue
 		}
+		if d.Provisioned && r.Principal.Role != RoleOperator {
+			d.EndDevice = ""
+			s.devices[lfdi] = d
+			continue
+		}
+		delete(s.devices, lfdi)
 	}
 	s.mu.Unlock()
 	return s.store.Delete(ctx, r.Node.Href)

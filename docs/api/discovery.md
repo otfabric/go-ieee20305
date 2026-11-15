@@ -203,6 +203,8 @@ func NewMulticastTransport(ifi *net.Interface) (PacketTransport, error)
 
 NewMulticastTransport returns a PacketTransport that joins the multicast DNS groups on ifi, or on the system's default multicast interface when ifi is nil. It joins the IPv4 group and, where the host supports it, the IPv6 group, and fails only when it can join neither. Multicast loopback is enabled where the platform allows, so that services on this host find each other.
 
+The sockets also receive unicast packets to port 5353. As RFC 6762, sections 5.5 and 11, requires, the transport drops packets whose source address is not on the local link: an address of a prefix of ifi (of an interface that is up when ifi is nil), or an IPv4 or IPv6 link-local address.
+
 ### type Service
 
 ```go

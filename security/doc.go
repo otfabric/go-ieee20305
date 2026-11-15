@@ -17,7 +17,8 @@
 // refuses to verify. Verify verifies such chains, and ClientTLSConfig,
 // ServerTLSConfig and NotificationTLSConfig use it: they never fall back on
 // the system's roots. They take a nil pool of roots, and every handshake
-// then fails with an error that matches ieee20305.ErrCertificate.
+// then fails with an error that matches ieee20305.ErrConfiguration and
+// ieee20305.ErrCertificate.
 //
 //	tlsConfig := security.ServerTLSConfig(serverCert, deviceCAs)
 //	lfdi := security.CertificateLFDI(r.TLS.PeerCertificates[0])

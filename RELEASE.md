@@ -5,6 +5,67 @@ tag, GitHub release). The section of the version below, up to the `---` that
 ends it, is the release's notes. Before v1.0.0 a minor release may change the
 API.
 
+## v0.8.0
+
+**Date:** 2026-11-15
+**Previous release:** v0.7.0
+
+### Summary
+
+Tighter bounds and stricter checks across the server, the client and agent,
+discovery and tlsccm. The client now validates the documents of its server,
+aggregators no longer register devices assigned to others, and the lists a
+device posts to are capped per device. Two new options; several behaviour
+changes, see Changed.
+
+### Added
+
+- server: `Config.AssignedDevicesOnly` lets aggregators register only the devices the operator assigned them (`DeviceSpec.ManagedBy`).
+- agent: `Config.NotificationAuthorize` decides whether the `NotificationHandler` takes a request (see `client.NotificationConfig.Authorize`).
+
+### Changed
+
+- client: notifications and server documents that violate the schema's facets or cardinalities are refused: a `NotificationHandler` answers 400, other calls fail with `ErrProtocol` wrapping the `*ValidationError`. Servers that send over-length strings now fail these calls.
+- server: an aggregator no longer registers a device the operator gave the server without assigning it to that aggregator.
+- server: `DefaultNotificationURIAllowed` also refuses IPv6 literals that embed a refused IPv4 address (IPv4-compatible, IPv4-translated, NAT64, 6to4), names with an empty label, and the hosts-file names of loopback (`ip6-localhost`, `ip6-loopback`, `localhost.localdomain`, `localhost6`).
+- server: each notification attempt is bounded to one minute by the notifier itself, whatever the timeout of the `NotificationClient`.
+- server: `MaxListItems` also caps MirrorUsagePoints, MeterReadings, ReadingSets and FlowReservationResponses, by deleting the oldest, so a device that goes on adding them no longer reaches `MaxDeviceResources` through them. In lists of every client it counts each device's own items. Deleting a MirrorUsagePoint deletes its UsagePoint.
+- server: a PUT of a MirrorUsagePoint takes a MirrorUsagePoint only, and keeps its deviceLFDI for clients that are not operators.
+- server: links a client wrote to resources it cannot read are sent as links to a resource the server does not have.
+- agent: the `NotificationHandler` ignores notifications of subscriptions that are not the agent's, and returns the same handler on every call. A notification no longer ends the wait after a failed poll.
+- agent: the server's pollRate is capped at 24 hours.
+- client: `Retry-After` waits are capped at 24 hours. `NewHTTPClient` bounds response headers to 64 KiB.
+- security: a TLS configuration without a pool of roots fails every handshake with an error that matches `ErrConfiguration` as well as `ErrCertificate`. `NotificationTLSConfig` documents that a listener dialed by IP address is identified by its chain alone.
+- discovery: the multicast transport drops packets from sources not on the local link (RFC 6762, section 11): on a host with /32 or point-to-point addresses only link-local peers are heard.
+- discovery: `Browse` caps cached TTLs at 75 minutes, and keeps the standard's TXT keys and at most 16 others, within 1300 bytes.
+- dnsmsg: a name may follow at most 126 compression pointers; more is `ErrFormat`.
+- tlsccm: SHA-1 handshake signatures are neither offered nor used, and a TLS 1.2 peer must send `signature_algorithms` (RFC 9155, as in Go 1.25).
+- tlsccm: the client refuses a server that picks a curve it did not offer (ported from Go 1.25).
+- Extension elements keep the namespaces of their content when re-encoded, including prefixes and default namespaces declared on the element or enclosing elements; an element with a duplicate attribute is refused.
+
+### Fixed
+
+- server: deleting or trimming a subscription stops its pending and retried notifications.
+- server: putting a subscription again while it is being notified no longer races with the delivery; the next attempt uses the new notificationURI.
+- server: the doc of `Config.NotificationRetry` now says what the default does: a transport error or a timeout is not retried, and cancels the subscription.
+- server: a device that deletes its own EndDevice keeps the role and aggregator the operator gave it.
+- server: a cancelled event is no longer briefly set Active by a queued transition.
+- server: mirrored readings with many mRIDs in one request are handled in linear time.
+- server: the href counters of deleted resources are dropped.
+- agent: `Run` returns a permanent poll error at once while it mirrors metering.
+- agent: the subscribed poll interval no longer overflows.
+- client: a `%` outside a bracketed IPv6 literal is no longer read as a zone when matching the server's host.
+- client: large `Retry-After` values no longer wrap.
+- discovery: `Advertise` answers a query with work linear in its size (known answers checked once per record, repeated questions answered once).
+- discovery: `Browse` queries missing SRV, TXT and address records at doubling intervals, splits queries into messages of at most 9000 bytes, and skips cache reconciliation for packets with nothing to cache.
+- dnsmsg: decoding a name no longer allocates per label; compressed names decode in bounded time.
+- Re-encoded documents no longer get two `xmlns:xsi` attributes, or xsi names moved to the XML Schema instance namespace, when the content binds `xsi` itself.
+- tlsccm: the CCM length encoding of associated data of 65280 bytes or more follows RFC 3610; a nonce of the wrong length is refused before use.
+- csipaus: `LimitsOf` returns false for a nil `*DERControl` or `*DefaultDERControl` instead of panicking.
+- Build and tooling: the fuzz workflow validates its duration input; the schema fetcher refuses archive members with backslashes or non-local paths; the upstream check tolerates short publication dates.
+
+---
+
 ## v0.7.0
 
 **Date:** 2026-11-14

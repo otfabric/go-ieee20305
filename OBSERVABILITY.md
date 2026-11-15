@@ -156,10 +156,10 @@ Retries are configured, not hidden:
 |---|---|---|
 | Client | `Config.RetryPolicy`, `Config.RetryPOST` | `NoRetry()` |
 | Agent | `Config.Backoff` | from 1 s up to 5 min, with jitter, without end, except after errors waiting does not fix |
-| Server notifications | `Config.NotificationRetry`, `Config.NotificationCancelAfter` | from 1 s up to 5 min, with jitter, for up to 24 h; a 4xx cancels at once |
+| Server notifications | `Config.NotificationRetry`, `Config.NotificationCancelAfter` | a 5xx (503, 429 too) from 1 s up to 5 min, with jitter, for up to 24 h; a 4xx, a transport error or a timeout cancels at once |
 
 `ieee20305.ExponentialBackoff` retries what `ieee20305.Retryable` says may
-succeed, and honours a server's `Retry-After`. Write your own
+succeed, and honours a server's `Retry-After`, up to 24 hours. Write your own
 `RetryPolicy` for anything else. Retries show in the Debug log, in
 `client.AttemptMetrics.OnRetry`, and in the Warn lines of the agent and
 the notifier.

@@ -100,7 +100,7 @@ Limits are the site limits of CSIP-AUS, the opMod controls it adds to DERControl
 func LimitsOf(v any) (Limits, bool)
 ```
 
-LimitsOf returns the site limits of a DERControl, DefaultDERControl or DERControlBase of CSIP-AUS, and whether v is one.
+LimitsOf returns the site limits of a DERControl, DefaultDERControl or DERControlBase of CSIP-AUS, and whether v is one; a nil pointer is not.
 
 #### func (Limits) Apply
 
